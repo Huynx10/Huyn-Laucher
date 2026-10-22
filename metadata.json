@@ -1,0 +1,6 @@
+{
+  "name": "Lumia Launcher",
+  "description": "Windows 10 Mobile launcher with live tiles, Lumia 925 aesthetics, Action Center, app drawer, and deep customization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

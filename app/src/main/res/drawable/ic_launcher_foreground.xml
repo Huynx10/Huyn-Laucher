@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Top-Left Tile -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M27,27 h22 v22 h-22 z" />
+    <!-- Top-Right Tile -->
+    <path
+        android:fillColor="#E0FFFFFF"
+        android:pathData="M53,27 h28 v22 h-28 z" />
+    <!-- Bottom-Left Tile -->
+    <path
+        android:fillColor="#E0FFFFFF"
+        android:pathData="M27,53 h22 v28 h-22 z" />
+    <!-- Bottom-Right Tile -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M53,53 h28 v28 h-28 z" />
+    <!-- Subtle accent lines inside tiles reminiscent of Windows Phone 10 Live tiles -->
+    <path
+        android:fillColor="#0078D7"
+        android:pathData="M31,33 h14 v2 h-14 z M31,38 h10 v2 h-10 z" />
+    <path
+        android:fillColor="#0078D7"
+        android:pathData="M57,33 h10 v2 h-10 z M57,38 h18 v2 h-18 z" />
+    <path
+        android:fillColor="#0078D7"
+        android:pathData="M31,59 h8 v8 h-8 z M41,59 h4 v4 h-4 z" />
+    <path
+        android:fillColor="#0078D7"
+        android:pathData="M57,63 h18 v2 h-18 z M57,69 h12 v2 h-12 z" />
+</vector>
