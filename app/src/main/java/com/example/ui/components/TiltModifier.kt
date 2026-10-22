@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -13,6 +14,10 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 
+/**
+ * Windows 10 Mobile 3D Perspective Tilt + Xiaomi HyperOS / One UI 9.0 Spring Physics.
+ * Applies responsive 3D plane depression on press and an under-damped spring rebound on release.
+ */
 fun Modifier.metroTilt(
     enabled: Boolean = true,
     onLongClick: (() -> Unit)? = null,
@@ -31,20 +36,35 @@ fun Modifier.metroTilt(
     var tiltX by remember { mutableFloatStateOf(0f) }
     var tiltY by remember { mutableFloatStateOf(0f) }
 
+    val pressSpring = spring<Float>(
+        dampingRatio = 0.68f,
+        stiffness = 720f
+    )
+    val releaseSpring = spring<Float>(
+        dampingRatio = Spring.DampingRatioLowBouncy,
+        stiffness = Spring.StiffnessMediumLow
+    )
+    val activeSpec = if (isPressed) pressSpring else releaseSpring
+
     val animatedScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 800f),
-        label = "scale"
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = activeSpec,
+        label = "metroSpringScale"
     )
     val animatedTiltX by animateFloatAsState(
         targetValue = if (isPressed) tiltX else 0f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 800f),
-        label = "tiltX"
+        animationSpec = activeSpec,
+        label = "metroSpringTiltX"
     )
     val animatedTiltY by animateFloatAsState(
         targetValue = if (isPressed) tiltY else 0f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 800f),
-        label = "tiltY"
+        animationSpec = activeSpec,
+        label = "metroSpringTiltY"
+    )
+    val animatedDepthOffsetY by animateFloatAsState(
+        targetValue = if (isPressed) 3f else 0f,
+        animationSpec = activeSpec,
+        label = "metroSpringDepthOffsetY"
     )
 
     this
@@ -53,6 +73,7 @@ fun Modifier.metroTilt(
             scaleY = animatedScale
             rotationX = animatedTiltX
             rotationY = animatedTiltY
+            translationY = animatedDepthOffsetY
             cameraDistance = 16f * density
         }
         .pointerInput(Unit) {
@@ -62,8 +83,8 @@ fun Modifier.metroTilt(
                     val centerY = size.height / 2f
                     val normX = ((offset.x - centerX) / (centerX.coerceAtLeast(1f))).coerceIn(-1f, 1f)
                     val normY = ((offset.y - centerY) / (centerY.coerceAtLeast(1f))).coerceIn(-1f, 1f)
-                    tiltX = -normY * 12f
-                    tiltY = normX * 12f
+                    tiltX = -normY * 13f
+                    tiltY = normX * 13f
                     isPressed = true
                     tryAwaitRelease()
                     isPressed = false

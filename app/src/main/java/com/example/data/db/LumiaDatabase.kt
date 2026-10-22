@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.example.data.model.TileEntity
 
-@Database(entities = [TileEntity::class], version = 2, exportSchema = false)
+@Database(entities = [TileEntity::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class LumiaDatabase : RoomDatabase() {
     abstract fun tileDao(): TileDao

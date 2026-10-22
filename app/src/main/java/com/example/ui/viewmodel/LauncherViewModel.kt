@@ -10,6 +10,7 @@ import com.example.data.model.LauncherSettings
 import com.example.data.model.PageType
 import com.example.data.model.SystemTelemetry
 import com.example.data.model.TileEntity
+import com.example.data.model.TileSize
 import com.example.data.repository.LauncherRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -42,6 +43,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val _isEditMode = MutableStateFlow(false)
     val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
 
+    private val _selectedTileId = MutableStateFlow<String?>(null)
+    val selectedTileId: StateFlow<String?> = _selectedTileId.asStateFlow()
+
     private val _isPageManagerOpen = MutableStateFlow(false)
     val isPageManagerOpen: StateFlow<Boolean> = _isPageManagerOpen.asStateFlow()
 
@@ -68,16 +72,40 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * Long-pressing an empty area on the Home screen enters Home Screen Edit Mode (One UI style).
+     */
     fun enterEditMode() {
+        _selectedTileId.value = null
         _isEditMode.value = true
     }
 
     fun toggleEditMode() {
-        _isEditMode.value = !_isEditMode.value
+        val next = !_isEditMode.value
+        _isEditMode.value = next
+        if (next) {
+            _selectedTileId.value = null
+        }
     }
 
     fun closeEditMode() {
         _isEditMode.value = false
+        _selectedTileId.value = null
+    }
+
+    /**
+     * Long-pressing a single Tile selects ONLY that single tile for editing (resize, move freely, customize, unpin)
+     * without entering global Home Screen Edit Mode or showing the bottom edit bar.
+     */
+    fun selectTileForEdit(tileId: String?) {
+        _selectedTileId.value = tileId
+        if (tileId != null) {
+            _isEditMode.value = false
+        }
+    }
+
+    fun clearSelectedTile() {
+        _selectedTileId.value = null
     }
 
     fun openAddTileSheet() {
@@ -170,6 +198,20 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun stepTileSize(tileId: String, increase: Boolean) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch {
+            repository.stepTileSize(tileId, increase)
+        }
+    }
+
+    fun setTileSize(tileId: String, newSize: TileSize) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch {
+            repository.setTileSize(tileId, newSize)
+        }
+    }
+
     fun updateTileCustomization(
         tileId: String,
         colorOverrideHex: String?,
@@ -183,6 +225,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     fun unpinTile(tileId: String) {
         if (_settings.value.lockHomeLayout) return
+        if (_selectedTileId.value == tileId) {
+            _selectedTileId.value = null
+        }
         viewModelScope.launch {
             repository.unpinTile(tileId)
             refreshApps()
@@ -193,6 +238,20 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         if (_settings.value.lockHomeLayout) return
         viewModelScope.launch {
             repository.moveTileInPage(tileId, pageId, moveUp)
+        }
+    }
+
+    fun moveTileToGridPosition(tileId: String, gridX: Int, gridY: Int, totalCols: Int = 4) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch {
+            repository.moveTileToGridPosition(tileId, gridX, gridY, totalCols)
+        }
+    }
+
+    fun nudgeTileByDelta(tileId: String, deltaX: Int, deltaY: Int, totalCols: Int = 4) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch {
+            repository.nudgeTileByDelta(tileId, deltaX, deltaY, totalCols)
         }
     }
 
@@ -262,9 +321,42 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun updateSettings(newSettings: LauncherSettings) {
-        _settings.value = newSettings
+        val prevCustom = _settings.value.customAppCategories
+        val syncedSettings = if (newSettings.autoWallpaperAccentEnabled) {
+            val autoHex = com.example.ui.theme.DynamicAccentEngine.resolveAutoAccent(
+                wallpaperIndex = newSettings.wallpaperGradientIndex,
+                mode = newSettings.dynamicAccentMode,
+                swatchIndex = newSettings.dynamicSwatchIndex
+            ).hex
+            newSettings.copy(accentColorHex = autoHex)
+        } else {
+            newSettings
+        }
+        _settings.value = syncedSettings
+        if (prevCustom != syncedSettings.customAppCategories) {
+            _apps.value = _apps.value.map { app ->
+                val overrideCat = syncedSettings.customAppCategories[app.packageName]
+                if (!overrideCat.isNullOrBlank()) {
+                    val parsed = try {
+                        com.example.data.model.AppCategory.valueOf(overrideCat)
+                    } catch (_: Exception) {
+                        app.category
+                    }
+                    app.copy(category = parsed, isCustomCategory = true)
+                } else {
+                    app.copy(
+                        category = com.example.data.model.AppCategory.classifyApp(
+                            packageName = app.packageName,
+                            label = app.label,
+                            isSystemApp = app.isSystemApp
+                        ),
+                        isCustomCategory = false
+                    )
+                }
+            }
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            repository.saveSettings(newSettings)
+            repository.saveSettings(syncedSettings)
         }
     }
 
