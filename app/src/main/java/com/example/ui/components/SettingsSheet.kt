@@ -129,10 +129,10 @@ enum class SettingsCategoryTab(
     val icon: ImageVector,
     val tag: String
 ) {
-    WALLPAPER_COLOR("Hình nền & Màu", Icons.Default.Palette, "settings_tab_wallpaper"),
-    TILES_LAYOUT("Ô Tile & Bố cục", Icons.Default.GridView, "settings_tab_tiles"),
-    APP_DRAWER("Danh sách App", Icons.Default.Tune, "settings_tab_drawer"),
-    BATTERY_SYSTEM("Pin & Hệ thống", Icons.Default.BatterySaver, "settings_tab_system")
+    WALLPAPER_COLOR("Hình nền", Icons.Default.Palette, "settings_tab_wallpaper"),
+    TILES_LAYOUT("Màn hình chính", Icons.Default.GridView, "settings_tab_tiles"),
+    APP_DRAWER("Ứng dụng", Icons.Default.Tune, "settings_tab_drawer"),
+    BATTERY_SYSTEM("Hệ thống", Icons.Default.BatterySaver, "settings_tab_system")
 }
 
 private val LocalSettingsGlassStyle = compositionLocalOf<AdaptiveGlassStyle?> { null }
@@ -373,7 +373,7 @@ fun SettingsSheet(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Xem trước trực tiếp • Chạm màn hình trên để đóng",
+                    text = "Chạm bên ngoài để đóng",
                     color = Color.White.copy(alpha = 0.92f),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
@@ -424,14 +424,14 @@ fun SettingsSheet(
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "Cài đặt Trực quan",
+                                        text = "Cài đặt",
                                         color = Color.White,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = if (isExpandedHeight) "Mở rộng" else "Live Preview",
+                                        text = if (isExpandedHeight) "Mở rộng" else "Xem trước",
                                         color = Color.White,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -442,7 +442,7 @@ fun SettingsSheet(
                                     )
                                 }
                                 Text(
-                                    text = "Fluent Acrylic • ${glassStyle.sourceLabel}",
+                                    text = "Thay đổi được áp dụng ngay",
                                     color = Color.White.copy(alpha = 0.68f),
                                     fontSize = 10.sp,
                                     modifier = Modifier.testTag("settings_glass_source_label")
@@ -534,7 +534,7 @@ fun SettingsSheet(
                 when (selectedTab) {
                     SettingsCategoryTab.WALLPAPER_COLOR -> {
                         item {
-                            MinimalGroupCard(title = "HÌNH NỀN MÀN HÌNH CHÍNH") {
+                            MinimalGroupCard(title = "HÌNH NỀN") {
                                 // Custom Photo Picker & System Wallpaper Actions
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -560,7 +560,7 @@ fun SettingsSheet(
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "Chọn ảnh từ máy",
+                                            text = "Chọn ảnh",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -609,7 +609,7 @@ fun SettingsSheet(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "Đang dùng ảnh cá nhân từ thư viện",
+                                            text = "Đang dùng ảnh của bạn",
                                             color = Color.White,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium
@@ -631,7 +631,7 @@ fun SettingsSheet(
 
                                 // Live Wallpaper Dim Slider
                                 LiveSliderRow(
-                                    label = "Độ tối lớp phủ nền",
+                                    label = "Làm tối hình nền",
                                     valueText = "${(wallpaperDimAlpha * 100).roundToInt()}%",
                                     value = wallpaperDimAlpha,
                                     valueRange = 0f..0.70f,
@@ -644,7 +644,7 @@ fun SettingsSheet(
 
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Bộ sưu tập nền Gradient tối giản",
+                                    text = "Hình nền Lumia",
                                     color = Color.White.copy(alpha = 0.65f),
                                     fontSize = 11.sp
                                 )
@@ -705,10 +705,10 @@ fun SettingsSheet(
                         }
 
                         item {
-                            MinimalGroupCard(title = "MÀU CHỦ ĐẠO & GIAO DIỆN") {
+                            MinimalGroupCard(title = "MÀU SẮC & GIAO DIỆN") {
                                 MinimalSwitchRow(
-                                    title = "Tự động đồng bộ màu theo hình nền",
-                                    subtitle = "Trích xuất bảng màu thông minh từ hình nền",
+                                    title = "Lấy màu theo hình nền",
+                                    subtitle = "Tự chọn màu phù hợp với hình nền",
                                     checked = autoWallpaperAccent,
                                     accentColor = accent.color,
                                     switchTag = "auto_wallpaper_accent_switch",
@@ -849,8 +849,8 @@ fun SettingsSheet(
 
                                 Spacer(modifier = Modifier.height(10.dp))
                                 MinimalSwitchRow(
-                                    title = "Nền tối AMOLED (Dark Theme)",
-                                    subtitle = "Tiết kiệm pin tối đa trên màn hình OLED",
+                                    title = "Giao diện tối",
+                                    subtitle = "Sử dụng nền tối cho launcher",
                                     checked = isDarkTheme,
                                     accentColor = accent.color,
                                     onCheckedChange = {
@@ -864,7 +864,7 @@ fun SettingsSheet(
 
                     SettingsCategoryTab.TILES_LAYOUT -> {
                         item {
-                            MinimalGroupCard(title = "ĐỘ TRONG SUỐT & KIỂU Ô TILE (XEM TRỰC TIẾP)") {
+                            MinimalGroupCard(title = "GIAO DIỆN Ô") {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -912,7 +912,7 @@ fun SettingsSheet(
                                 Spacer(modifier = Modifier.height(10.dp))
 
                                 LiveSliderRow(
-                                    label = "Độ đặc nền Tile",
+                                    label = "Độ đậm nền ô",
                                     valueText = "${(tileOpacity * 100).roundToInt()}%",
                                     value = tileOpacity,
                                     valueRange = 0f..1f,
@@ -929,7 +929,7 @@ fun SettingsSheet(
                                 )
 
                                 LiveSliderRow(
-                                    label = "Bo góc Ô Tile",
+                                    label = "Bo góc ô",
                                     valueText = "${tileCornerRadius}dp",
                                     value = tileCornerRadius.toFloat(),
                                     valueRange = 0f..24f,
@@ -941,7 +941,7 @@ fun SettingsSheet(
                                 )
 
                                 LiveSliderRow(
-                                    label = "Khoảng cách giữa các Ô",
+                                    label = "Khoảng cách giữa các ô",
                                     valueText = "${tileSpacingDp}dp",
                                     value = tileSpacingDp.toFloat(),
                                     valueRange = 2f..14f,
@@ -955,10 +955,10 @@ fun SettingsSheet(
                         }
 
                         item {
-                            MinimalGroupCard(title = "BỐ CỤC LƯỚI & HIỆU ỨNG") {
+                            MinimalGroupCard(title = "BỐ CỤC & HIỆU ỨNG") {
                                 MinimalSwitchRow(
-                                    title = "Lưới 6 cột mở rộng (Show More Tiles)",
-                                    subtitle = "Tăng mật độ ô trên màn hình chính từ 4 lên 6 cột",
+                                    title = "Hiển thị nhiều ô hơn",
+                                    subtitle = "Dùng lưới 6 cột thay vì 4 cột",
                                     checked = showMoreTiles,
                                     accentColor = accent.color,
                                     onCheckedChange = {
@@ -968,8 +968,8 @@ fun SettingsSheet(
                                 )
                                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
                                 MinimalSwitchRow(
-                                    title = "Viền kính mảnh (Reveal Border)",
-                                    subtitle = "Đường viền ánh sáng tinh tế quanh các ô",
+                                    title = "Viền sáng quanh ô",
+                                    subtitle = "Làm nổi bật đường viền ô",
                                     checked = wp10RevealBorder,
                                     accentColor = accent.color,
                                     onCheckedChange = {
@@ -991,7 +991,7 @@ fun SettingsSheet(
                                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
                                 MinimalSwitchRow(
                                     title = "Khóa bố cục",
-                                    subtitle = "Ngăn vô tình di chuyển hoặc xóa các ô Tile",
+                                    subtitle = "Ngăn di chuyển, thay đổi kích thước và xóa ô",
                                     checked = lockHomeLayout,
                                     accentColor = accent.color,
                                     onCheckedChange = {
@@ -1049,7 +1049,7 @@ fun SettingsSheet(
 
                     SettingsCategoryTab.APP_DRAWER -> {
                         item {
-                            MinimalGroupCard(title = "TRANG TẤT CẢ ỨNG DỤNG (APP DRAWER)") {
+                            MinimalGroupCard(title = "DANH SÁCH ỨNG DỤNG") {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1123,8 +1123,8 @@ fun SettingsSheet(
 
                                 Spacer(modifier = Modifier.height(10.dp))
                                 MinimalSwitchRow(
-                                    title = "Hiển thị chữ cái đầu nhóm A–Z tối giản",
-                                    subtitle = "Chỉ hiện chữ cái thuần túy với khoảng cách thoáng",
+                                    title = "Hiện chữ cái A–Z",
+                                    subtitle = "Chia ứng dụng theo chữ cái",
                                     checked = allAppsShowLetterHeaders,
                                     accentColor = accent.color,
                                     onCheckedChange = {
@@ -1134,8 +1134,8 @@ fun SettingsSheet(
                                 )
                                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
                                 MinimalSwitchRow(
-                                    title = "Thanh lọc danh mục thông minh",
-                                    subtitle = "Phân loại tự động Giao tiếp, Giải trí, Công cụ...",
+                                    title = "Lọc theo nhóm",
+                                    subtitle = "Tìm nhanh ứng dụng theo nhóm",
                                     checked = allAppsCategorizedEnabled,
                                     accentColor = accent.color,
                                     onCheckedChange = {
@@ -1145,8 +1145,8 @@ fun SettingsSheet(
                                 )
                                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
                                 MinimalSwitchRow(
-                                    title = "Thanh tìm kiếm nhanh ở đầu trang",
-                                    subtitle = "Tìm ứng dụng tức thì khi vuốt sang phải",
+                                    title = "Hiện nút tìm kiếm",
+                                    subtitle = "Tìm ứng dụng trong danh sách",
                                     checked = allAppsShowSearchBar,
                                     accentColor = accent.color,
                                     onCheckedChange = {
@@ -1586,7 +1586,7 @@ fun SettingsSheet(
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Sao lưu JSON", color = Color.White, fontSize = 11.sp)
+                                        Text("Sao lưu bố cục", color = Color.White, fontSize = 11.sp)
                                     }
 
                                     OutlinedButton(
@@ -1601,7 +1601,7 @@ fun SettingsSheet(
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Khôi phục / Đặt lại", color = Color.White, fontSize = 11.sp)
+                                        Text("Khôi phục hoặc đặt lại", color = Color.White, fontSize = 11.sp)
                                     }
                                 }
 
@@ -1610,7 +1610,7 @@ fun SettingsSheet(
                                         OutlinedTextField(
                                             value = restoreJsonInput,
                                             onValueChange = { restoreJsonInput = it },
-                                            placeholder = { Text("Dán chuỗi JSON sao lưu vào đây...", fontSize = 11.sp) },
+                                            placeholder = { Text("Dán dữ liệu sao lưu", fontSize = 11.sp) },
                                             colors = OutlinedTextFieldDefaults.colors(
                                                 focusedTextColor = Color.White,
                                                 unfocusedTextColor = Color.White,
@@ -1627,7 +1627,7 @@ fun SettingsSheet(
                                                     coroutineScope.launch {
                                                         val ok = onRestoreBackup(restoreJsonInput)
                                                         if (ok) {
-                                                            Toast.makeText(context, "Đã khôi phục bố cục!", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, "Đã khôi phục bố cục", Toast.LENGTH_SHORT).show()
                                                             onDismiss()
                                                         } else {
                                                             Toast.makeText(context, "JSON không hợp lệ", Toast.LENGTH_SHORT).show()
@@ -1637,17 +1637,17 @@ fun SettingsSheet(
                                                 colors = ButtonDefaults.buttonColors(containerColor = accent.color),
                                                 modifier = Modifier.weight(1f)
                                             ) {
-                                                Text("Nhập JSON", fontSize = 11.sp)
+                                                Text("Khôi phục", fontSize = 11.sp)
                                             }
                                             OutlinedButton(
                                                 onClick = {
                                                     onResetDefaults()
-                                                    Toast.makeText(context, "Đã khôi phục mặc định!", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, "Đã đặt lại bố cục", Toast.LENGTH_SHORT).show()
                                                     onDismiss()
                                                 },
                                                 modifier = Modifier.weight(1f)
                                             ) {
-                                                Text("Về Mặc định", color = Color(0xFFFF8A80), fontSize = 11.sp)
+                                                Text("Đặt lại bố cục", color = Color(0xFFFF8A80), fontSize = 11.sp)
                                             }
                                         }
                                     }
