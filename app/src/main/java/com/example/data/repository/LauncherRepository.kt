@@ -514,6 +514,7 @@ class LauncherRepository(
         val pageOthers = tiles.filter { it.pageId == target.pageId && it.id != target.id }
         val resolvedPageTiles = resolveCollisionsOnly(resizedTarget, pageOthers, totalCols)
         tileDao.insertAll(resolvedPageTiles)
+        autoArrangeIfEnabled(target.pageId)
     }
 
     suspend fun moveTileToGridPosition(
@@ -558,12 +559,14 @@ class LauncherRepository(
                 }
             if (canSwapCleanly) {
                 tileDao.insertAll(listOf(movedTarget, single.copy(gridX = swapX, gridY = swapY)))
+                autoArrangeIfEnabled(target.pageId)
                 return@withContext
             }
         }
 
         val resolved = resolveCollisionsOnly(movedTarget, pageOthers, totalCols)
         tileDao.insertAll(resolved)
+        autoArrangeIfEnabled(target.pageId)
     }
 
     private fun resolveCollisionsOnly(
@@ -629,12 +632,40 @@ class LauncherRepository(
         )
     }
 
+    /**
+     * Compact existing tiles only when requested. The default remains free placement.
+     * No widget IDs are reallocated; only Room tile coordinates are updated.
+     */
+    suspend fun arrangeTilesOnPage(pageId: String) = withContext(Dispatchers.IO) {
+        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+        database.withTransaction {
+            val tiles = tileDao.getAllTiles().filter { it.pageId == pageId }
+                .sortedWith(compareBy<TileEntity>({ it.gridY.coerceAtLeast(0) }, { it.gridX.coerceAtLeast(0) }, { it.orderIndex }))
+            val placed = mutableListOf<TileEntity>()
+            tiles.forEachIndexed { index, tile ->
+                val (x, y) = findFirstFreeGridPosition(
+                    existingPageTiles = placed,
+                    spanX = tile.size.effectiveSpanX(totalCols),
+                    spanY = tile.size.effectiveSpanY(),
+                    totalCols = totalCols
+                )
+                placed.add(tile.copy(gridX = x, gridY = y, orderIndex = index))
+            }
+            if (placed.isNotEmpty()) tileDao.insertAll(placed)
+        }
+    }
+
+    private suspend fun autoArrangeIfEnabled(pageId: String) {
+        if (loadSettings().autoArrangeTiles) arrangeTilesOnPage(pageId)
+    }
+
     suspend fun unpinTile(tileId: String) = withContext(Dispatchers.IO) {
         val target = tileDao.getAllTiles().find { it.id == tileId }
         if (target != null && target.appWidgetId > 0) {
             LumiaWidgetHostManager.getInstance(context).releaseWidgetId(target.appWidgetId)
         }
         tileDao.deleteById(tileId)
+        if (target != null) autoArrangeIfEnabled(target.pageId)
     }
 
     suspend fun pinWidgetTile(
@@ -674,6 +705,7 @@ class LauncherRepository(
             widgetResizeMode = provider.resizeMode
         )
         tileDao.insertOrUpdate(widgetTile)
+        autoArrangeIfEnabled(pageId)
         widgetTile
     }
 
@@ -830,6 +862,7 @@ class LauncherRepository(
             notificationCount = 0
         )
         tileDao.insertOrUpdate(tile)
+        autoArrangeIfEnabled(pageId)
     }
 
     suspend fun pinTile(tile: TileEntity) = withContext(Dispatchers.IO) {
@@ -847,6 +880,7 @@ class LauncherRepository(
             )
         }
         tileDao.insertOrUpdate(tile.copy(orderIndex = pageTiles.size, gridX = gx, gridY = gy))
+        autoArrangeIfEnabled(tile.pageId)
     }
 
     suspend fun resetToDefaultTiles() = withContext(Dispatchers.IO) {
@@ -1939,6 +1973,10 @@ class LauncherRepository(
                 tileDao.insertAll(reflowTiles(tileDao.getAllTiles(), if (settings.showMoreTiles) 6 else 4))
             }
         }
+        val shouldCompact = settings.autoArrangeTiles && !loadSettings().autoArrangeTiles
         saveSettings(settings)
+        if (shouldCompact) {
+            tileDao.getAllTiles().map { it.pageId }.distinct().forEach { arrangeTilesOnPage(it) }
+        }
     }
 }
