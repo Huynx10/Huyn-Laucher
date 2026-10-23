@@ -1,29 +1,75 @@
 package com.example.ui.viewmodel
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.SystemClock
+import android.util.Log
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.R
 import com.example.data.db.LumiaDatabase
+import com.example.data.model.AppCategory
 import com.example.data.model.AppItem
 import com.example.data.model.LauncherPage
 import com.example.data.model.LauncherSettings
 import com.example.data.model.PageType
+import com.example.data.model.SmartFolderConfig
 import com.example.data.model.SystemTelemetry
 import com.example.data.model.TileEntity
 import com.example.data.model.TileSize
+import com.example.data.model.WidgetProviderItem
+import com.example.data.remote.CloudBackup
+import com.example.data.remote.UserProfile
+import com.example.data.repository.CloudSyncRepository
 import com.example.data.repository.LauncherRepository
+import com.example.ui.auth.GoogleSignInHelper
+import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-class LauncherViewModel(application: Application) : AndroidViewModel(application) {
-    private val database = LumiaDatabase.getDatabase(application)
-    private val repository = LauncherRepository(application, database.tileDao())
+sealed interface CloudAuthState {
+    data object Unauthenticated : CloudAuthState
+    data object Authenticating : CloudAuthState
+    data class Authenticated(
+        val uid: String,
+        val displayName: String,
+        val email: String?,
+        val photoUrl: String?
+    ) : CloudAuthState
+    data class Error(val message: String) : CloudAuthState
+}
+
+data class SmartFolderOpenRequest(
+    val tileId: String,
+    val pivotFractionX: Float = 0.5f,
+    val pivotFractionY: Float = 0.5f
+)
+
+class LauncherViewModel(
+    private val repository: LauncherRepository,
+    private val cloudSyncRepository: CloudSyncRepository?
+) : ViewModel() {
 
     val tiles: StateFlow<List<TileEntity>> = repository.tilesFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -33,6 +79,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     private val _apps = MutableStateFlow<List<AppItem>>(emptyList())
     val apps: StateFlow<List<AppItem>> = _apps.asStateFlow()
+
+    private val _installedWidgets = MutableStateFlow<List<WidgetProviderItem>>(emptyList())
+    val installedWidgets: StateFlow<List<WidgetProviderItem>> = _installedWidgets.asStateFlow()
 
     private val _settings = MutableStateFlow(repository.loadSettings())
     val settings: StateFlow<LauncherSettings> = _settings.asStateFlow()
@@ -58,18 +107,258 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val _isAddTileSheetOpen = MutableStateFlow(false)
     val isAddTileSheetOpen: StateFlow<Boolean> = _isAddTileSheetOpen.asStateFlow()
 
+    private val _activeSmartFolderRequest = MutableStateFlow<SmartFolderOpenRequest?>(null)
+    val activeSmartFolderRequest: StateFlow<SmartFolderOpenRequest?> = _activeSmartFolderRequest.asStateFlow()
+
+    // --- Firebase Auth & Firestore Cloud Backup State ---
+    private val _cloudAuthState = MutableStateFlow<CloudAuthState>(CloudAuthState.Unauthenticated)
+    val cloudAuthState: StateFlow<CloudAuthState> = _cloudAuthState.asStateFlow()
+
+    private val _cloudBackups = MutableStateFlow<List<CloudBackup>>(emptyList())
+    val cloudBackups: StateFlow<List<CloudBackup>> = _cloudBackups.asStateFlow()
+
+    private val _cloudUserProfile = MutableStateFlow<UserProfile?>(null)
+    val cloudUserProfile: StateFlow<UserProfile?> = _cloudUserProfile.asStateFlow()
+
+    private val _isCloudSyncing = MutableStateFlow(false)
+    val isCloudSyncing: StateFlow<Boolean> = _isCloudSyncing.asStateFlow()
+
+    private val _cloudSyncMessage = MutableStateFlow<String?>(null)
+    val cloudSyncMessage: StateFlow<String?> = _cloudSyncMessage.asStateFlow()
+
+    private var activeCloudUserId: String? = null
+    private var cloudBackupsJob: Job? = null
+    private var cloudProfileJob: Job? = null
+    private var appRefreshJob: Job? = null
+    private var lastAppRefreshAtMs: Long = -1L
+
+    private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        val user = firebaseAuth.currentUser
+        if (user != null) {
+            val displayName = user.displayName?.takeIf { it.isNotBlank() }
+                ?: user.email?.substringBefore("@")
+                ?: "Người dùng Lumia"
+            _cloudAuthState.value = CloudAuthState.Authenticated(
+                uid = user.uid,
+                displayName = displayName,
+                email = user.email,
+                photoUrl = user.photoUrl?.toString()
+            )
+            startObservingCloudData(user.uid, displayName)
+        } else {
+            stopObservingCloudData()
+            _cloudAuthState.value = CloudAuthState.Unauthenticated
+        }
+    }
+
     init {
         viewModelScope.launch {
             repository.ensureDefaultTiles()
             refreshApps()
         }
 
+
+        if (cloudSyncRepository != null) {
+            try {
+                Firebase.auth.addAuthStateListener(authStateListener)
+            } catch (e: Exception) {
+                Log.w(TAG, "Firebase Auth not available; launcher remains usable offline", e)
+            }
+        } else {
+            Log.i(TAG, "Firebase is not configured; local launcher features remain available")
+        }
+    }
+
+    private fun startObservingCloudData(userId: String, displayName: String) {
+        val cloud = cloudSyncRepository ?: return
+        if (activeCloudUserId == userId && cloudBackupsJob?.isActive == true) return
+        stopObservingCloudData()
+        activeCloudUserId = userId
+
+        cloudProfileJob = viewModelScope.launch {
+            cloud.observeUserProfile(userId)
+                .catch { error ->
+                    Log.w(TAG, "Error observing cloud user profile", error)
+                }
+                .collect { profile ->
+                    _cloudUserProfile.value = profile
+                }
+        }
+
+        cloudBackupsJob = viewModelScope.launch {
+            cloud.observeCloudBackups(userId)
+                .catch { error ->
+                    Log.w(TAG, "Error observing cloud backups", error)
+                    _cloudSyncMessage.value = "Không thể tải danh sách sao lưu đám mây: ${error.localizedMessage ?: "Lỗi quyền truy cập"}"
+                }
+                .collect { backups ->
+                    _cloudBackups.value = backups
+                }
+        }
+
+        // Ensure user profile metadata exists on Firestore
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentTilesCount = repository.tilesFlow.stateIn(viewModelScope).value.size
+            val homePagesCount = _pages.value.count { it.pageType == PageType.HOME }.coerceAtLeast(1)
+            cloud.upsertUserProfile(
+                userId = userId,
+                displayName = displayName,
+                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+                tileCount = currentTilesCount,
+                pageCount = homePagesCount,
+                accentColorHex = _settings.value.accentColorHex
+            )
+        }
+    }
+
+    private fun stopObservingCloudData() {
+        cloudBackupsJob?.cancel()
+        cloudBackupsJob = null
+        cloudProfileJob?.cancel()
+        cloudProfileJob = null
+        activeCloudUserId = null
+        _cloudBackups.value = emptyList()
+        _cloudUserProfile.value = null
+    }
+
+    fun signInWithGoogleIdToken(idToken: String) {
+        if (cloudSyncRepository == null) {
+            onGoogleSignInError("Chưa cấu hình Firebase; các chức năng launcher vẫn hoạt động offline.")
+            return
+        }
+        try {
+            val auth = Firebase.auth
+            if (auth.currentUser == null) {
+                _cloudAuthState.value = CloudAuthState.Authenticating
+            }
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+            auth.signInWithCredential(credential)
+                .addOnSuccessListener {
+                    _cloudSyncMessage.value = "Đã kết nối tài khoản Google với Firebase Cloud!"
+                }
+                .addOnFailureListener { exception ->
+                    Log.e(TAG, "Firebase signInWithCredential failed", exception)
+                    _cloudAuthState.value = CloudAuthState.Error(
+                        exception.localizedMessage ?: "Xác thực Firebase thất bại"
+                    )
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during signInWithGoogleIdToken", e)
+            _cloudAuthState.value = CloudAuthState.Error(
+                e.localizedMessage ?: "Không thể kết nối Firebase Auth"
+            )
+        }
+    }
+
+    fun onGoogleSignInError(message: String) {
+        _cloudAuthState.value = CloudAuthState.Error(message)
+        _cloudSyncMessage.value = message
+    }
+
+    fun signOutFromCloud(context: Context) {
         viewModelScope.launch {
-            while (true) {
-                delay(10000)
-                _telemetry.value = repository.getSystemTelemetry()
+            GoogleSignInHelper.clearCredentialSession(context)
+            try {
+                Firebase.auth.signOut()
+                _cloudSyncMessage.value = "Đã đăng xuất khỏi tài khoản đám mây."
+            } catch (e: Exception) {
+                Log.w(TAG, "Error signing out of Firebase", e)
             }
         }
+    }
+
+    fun syncToCloudNow(customTitle: String = "") {
+        val cloud = cloudSyncRepository ?: run {
+            _cloudSyncMessage.value = "Chưa cấu hình Firebase; hãy sử dụng sao lưu cục bộ."
+            return
+        }
+        val currentState = _cloudAuthState.value
+        if (currentState !is CloudAuthState.Authenticated) {
+            _cloudSyncMessage.value = "Vui lòng đăng nhập Google trước khi đồng bộ lên đám mây."
+            return
+        }
+        if (_isCloudSyncing.value) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _isCloudSyncing.value = true
+            try {
+                val backupJson = repository.exportBackupJson()
+                val timeFmt = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date())
+                val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Android Lumia" }
+                val backupTitle = customTitle.trim().ifBlank { "Sao lưu Lumia ($timeFmt)" }
+                val tileCount = tiles.value.size
+                val pageCount = _pages.value.count { it.pageType == PageType.HOME }.coerceAtLeast(1)
+                val accentHex = _settings.value.accentColorHex
+
+                val createRes = cloud.createCloudBackup(
+                    userId = currentState.uid,
+                    title = backupTitle,
+                    deviceName = deviceName,
+                    backupPayloadJson = backupJson,
+                    tileCount = tileCount,
+                    pageCount = pageCount,
+                    accentColorHex = accentHex
+                )
+
+                createRes.onSuccess { backupId ->
+                    cloud.upsertUserProfile(
+                        userId = currentState.uid,
+                        displayName = currentState.displayName,
+                        deviceModel = deviceName,
+                        activeBackupId = backupId,
+                        tileCount = tileCount,
+                        pageCount = pageCount,
+                        accentColorHex = accentHex
+                    )
+                    val updatedSettings = _settings.value.copy(
+                        cloudSyncState = "Đã đồng bộ Firebase Cloud lúc $timeFmt (${currentState.email ?: currentState.displayName})"
+                    )
+                    _settings.value = updatedSettings
+                    repository.saveSettingsWithReflow(updatedSettings)
+                    _cloudSyncMessage.value = "Đã sao lưu bố cục lên Firebase Cloud thành công!"
+                }.onFailure { err ->
+                    _cloudSyncMessage.value = "Lỗi sao lưu đám mây: ${err.localizedMessage ?: "Không xác định"}"
+                }
+            } finally {
+                _isCloudSyncing.value = false
+            }
+        }
+    }
+
+    fun restoreFromCloudBackup(backup: CloudBackup, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            _isCloudSyncing.value = true
+            try {
+                val ok = restoreBackup(backup.backupPayloadJson)
+                if (ok) {
+                    _cloudSyncMessage.value = "Đã khôi phục bố cục \"${backup.title}\" từ Firebase Cloud!"
+                } else {
+                    _cloudSyncMessage.value = "Bản sao lưu đám mây không hợp lệ hoặc bị hỏng."
+                }
+                onResult(ok)
+            } finally {
+                _isCloudSyncing.value = false
+            }
+        }
+    }
+
+    fun deleteCloudBackup(backupId: String) {
+        val cloud = cloudSyncRepository ?: return
+        val currentState = _cloudAuthState.value
+        if (currentState !is CloudAuthState.Authenticated) return
+        viewModelScope.launch(Dispatchers.IO) {
+            cloud.deleteCloudBackup(currentState.uid, backupId)
+                .onSuccess {
+                    _cloudSyncMessage.value = "Đã xóa bản sao lưu trên đám mây."
+                }
+                .onFailure { err ->
+                    _cloudSyncMessage.value = "Không thể xóa bản sao lưu: ${err.localizedMessage}"
+                }
+        }
+    }
+
+    fun clearCloudSyncMessage() {
+        _cloudSyncMessage.value = null
     }
 
     /**
@@ -132,7 +421,6 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             pageType = PageType.HOME,
             orderIndex = current.size
         )
-        // Insert new Home page right before All Apps if All Apps is at the end, else at the end
         val allAppsIdx = current.indexOfLast { it.pageType == PageType.ALL_APPS }
         if (allAppsIdx != -1 && allAppsIdx == current.size - 1) {
             current.add(allAppsIdx, newPage)
@@ -282,6 +570,132 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun pinWidgetTile(
+        widgetItem: WidgetProviderItem,
+        appWidgetId: Int,
+        pageId: String = _settings.value.defaultHomePageId,
+        preferredSize: TileSize? = null,
+        onPinned: (TileEntity) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val created = repository.pinWidgetTile(
+                provider = widgetItem,
+                appWidgetId = appWidgetId,
+                pageId = pageId,
+                preferredSize = preferredSize
+            )
+            onPinned(created)
+        }
+    }
+
+    fun linkWidgetToExistingTile(
+        tileId: String,
+        widgetItem: WidgetProviderItem,
+        appWidgetId: Int
+    ) {
+        viewModelScope.launch {
+            repository.linkWidgetToExistingTile(
+                tileId = tileId,
+                provider = widgetItem,
+                appWidgetId = appWidgetId
+            )
+        }
+    }
+
+    fun unlinkWidgetFromTile(tileId: String) {
+        viewModelScope.launch {
+            repository.unlinkWidgetFromTile(tileId)
+        }
+    }
+
+    fun openSmartFolder(
+        tileId: String,
+        pivotFractionX: Float = 0.5f,
+        pivotFractionY: Float = 0.5f
+    ) {
+        _selectedTileId.value = null
+        _isEditMode.value = false
+        _activeSmartFolderRequest.value = SmartFolderOpenRequest(
+            tileId = tileId,
+            pivotFractionX = pivotFractionX.coerceIn(0.1f, 0.9f),
+            pivotFractionY = pivotFractionY.coerceIn(0.1f, 0.9f)
+        )
+    }
+
+    fun closeSmartFolder() {
+        _activeSmartFolderRequest.value = null
+    }
+
+    fun createSmartFolderByCategory(
+        category: AppCategory,
+        pageId: String = _settings.value.defaultHomePageId,
+        size: TileSize = TileSize.MEDIUM,
+        absorbMatchingPageTiles: Boolean = false
+    ) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch {
+            repository.createSmartFolderByCategory(
+                category = category,
+                pageId = pageId,
+                size = size,
+                absorbMatchingPageTiles = absorbMatchingPageTiles
+            )
+            refreshApps()
+        }
+    }
+
+    fun groupPageTilesByCategory(pageId: String, onDone: (Int) -> Unit = {}) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch {
+            val count = repository.groupPageTilesByCategoryIntoSmartFolders(pageId)
+            refreshApps()
+            onDone(count)
+        }
+    }
+
+    fun convertTileIntoSmartFolder(
+        tileId: String,
+        absorbSameCategoryOnPage: Boolean = true
+    ) {
+        if (_settings.value.lockHomeLayout) return
+        _selectedTileId.value = null
+        viewModelScope.launch {
+            repository.convertTileIntoSmartFolder(tileId, absorbSameCategoryOnPage)
+            refreshApps()
+        }
+    }
+
+    fun updateSmartFolderConfig(
+        tileId: String,
+        newTitle: String,
+        newConfig: SmartFolderConfig
+    ) {
+        viewModelScope.launch {
+            repository.updateSmartFolderConfig(tileId, newTitle, newConfig)
+        }
+    }
+
+    fun cycleSmartFolderLayoutMode(tileId: String) {
+        val target = tiles.value.find { it.id == tileId } ?: return
+        val currentConfig = SmartFolderConfig.fromTile(target)
+        val nextConfig = currentConfig.copy(layoutMode = currentConfig.layoutMode.next())
+        updateSmartFolderConfig(tileId, target.title, nextConfig)
+    }
+
+    fun ungroupSmartFolderToTiles(folderTileId: String) {
+        if (_settings.value.lockHomeLayout) return
+        if (_activeSmartFolderRequest.value?.tileId == folderTileId) {
+            _activeSmartFolderRequest.value = null
+        }
+        if (_selectedTileId.value == folderTileId) {
+            _selectedTileId.value = null
+        }
+        viewModelScope.launch {
+            repository.ungroupSmartFolderToTiles(folderTileId)
+            refreshApps()
+        }
+    }
+
     fun launchApp(packageName: String) {
         repository.launchApp(packageName)
     }
@@ -296,11 +710,27 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         _telemetry.value = repository.getSystemTelemetry()
     }
 
-    fun refreshApps() {
-        viewModelScope.launch(Dispatchers.IO) {
+    fun refreshApps(fromResume: Boolean = false) {
+        // Avoid repeated package/widget scans from rapid HOME/resume events on One UI.
+        // Explicit data changes still call refreshApps() without throttling.
+        if (fromResume) {
+            val now = SystemClock.elapsedRealtime()
+            if (appRefreshJob?.isActive == true ||
+                (lastAppRefreshAtMs >= 0L && now - lastAppRefreshAtMs in 0L..5_000L)
+            ) return
+        }
+        lastAppRefreshAtMs = SystemClock.elapsedRealtime()
+        appRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             val pinned = tiles.value.map { it.packageName }.filter { it.isNotEmpty() }.toSet()
             _apps.value = repository.getInstalledApps(pinned)
+            _installedWidgets.value = repository.discoverInstalledWidgets()
             _telemetry.value = repository.getSystemTelemetry()
+        }
+    }
+
+    fun refreshWidgets() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _installedWidgets.value = repository.discoverInstalledWidgets()
         }
     }
 
@@ -318,6 +748,27 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     fun closeSettings() {
         _isSettingsOpen.value = false
+    }
+
+    fun setCustomWallpaper(uri: Uri) {
+        viewModelScope.launch {
+            val savedPath = repository.saveCustomWallpaperFromUri(uri)
+            if (!savedPath.isNullOrBlank()) {
+                updateSettings(
+                    _settings.value.copy(
+                        customWallpaperUri = savedPath,
+                        fullWallpaperEnabled = true
+                    )
+                )
+            }
+        }
+    }
+
+    fun clearCustomWallpaper() {
+        viewModelScope.launch {
+            repository.clearCustomWallpaper()
+            updateSettings(_settings.value.copy(customWallpaperUri = ""))
+        }
     }
 
     fun updateSettings(newSettings: LauncherSettings) {
@@ -356,7 +807,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             }
         }
         viewModelScope.launch(Dispatchers.IO) {
-            repository.saveSettings(syncedSettings)
+            repository.saveSettingsWithReflow(syncedSettings)
         }
     }
 
@@ -379,6 +830,42 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             repository.resetToDefaultTiles()
             _pages.value = repository.loadPages()
             refreshApps()
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            Firebase.auth.removeAuthStateListener(authStateListener)
+        } catch (_: Exception) {}
+        stopObservingCloudData()
+    }
+
+    companion object {
+        private const val TAG = "LauncherViewModel"
+
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val app = checkNotNull(this[APPLICATION_KEY]) {
+                    "APPLICATION_KEY missing from CreationExtras"
+                }
+                val database = LumiaDatabase.getDatabase(app)
+                // The CI debug APK may intentionally lack google-services.json.
+                // Firebase must never block the local Home screen from opening.
+                val cloud = if (FirebaseApp.getApps(app).isEmpty()) {
+                    null
+                } else {
+                    runCatching {
+                        CloudSyncRepository(FirebaseFirestore.getInstance(app.getString(R.string.firestore_database_id)))
+                    }.onFailure {
+                        Log.w(TAG, "Cloud sync unavailable; starting local-only launcher", it)
+                    }.getOrNull()
+                }
+                LauncherViewModel(
+                    repository = LauncherRepository(app, database.tileDao()),
+                    cloudSyncRepository = cloud
+                )
+            }
         }
     }
 }

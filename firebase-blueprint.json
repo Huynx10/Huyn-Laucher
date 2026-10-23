@@ -1,0 +1,129 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Stores user-scoped Lumia Launcher cloud sync profile and active layout metadata.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The authenticated Firebase user UID who owns this profile."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the signed-in user (1..100 chars)."
+        },
+        "deviceModel": {
+          "type": "string",
+          "description": "Android device model name that last synced (1..100 chars)."
+        },
+        "activeBackupId": {
+          "type": "string",
+          "description": "Optional ID of the latest cloud backup snapshot."
+        },
+        "tileCount": {
+          "type": "integer",
+          "description": "Number of pinned Live Tiles in the latest synced layout (0..500)."
+        },
+        "pageCount": {
+          "type": "integer",
+          "description": "Number of home pages in the latest synced layout (1..50)."
+        },
+        "accentColorHex": {
+          "type": "string",
+          "description": "Current Windows 10 Mobile / Material You accent color hex (#RRGGBB)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was created. Clients must submit FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was last updated. Clients must submit FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "deviceModel",
+        "tileCount",
+        "pageCount",
+        "accentColorHex",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CloudBackup": {
+      "title": "CloudBackup",
+      "description": "Stores a complete cloud backup snapshot of the user's Lumia Launcher home pages, Live Tiles, folders, and settings.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The authenticated Firebase user UID who owns this backup."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable backup label (1..120 chars)."
+        },
+        "deviceName": {
+          "type": "string",
+          "description": "Device name where the backup was created (1..100 chars)."
+        },
+        "backupPayloadJson": {
+          "type": "string",
+          "description": "Serialized launcher layout & settings snapshot (2..200000 chars)."
+        },
+        "tileCount": {
+          "type": "integer",
+          "description": "Number of pinned Live Tiles stored in this backup (0..500)."
+        },
+        "pageCount": {
+          "type": "integer",
+          "description": "Number of launcher pages stored in this backup (1..50)."
+        },
+        "accentColorHex": {
+          "type": "string",
+          "description": "Accent color hex code active when this backup was captured (4..16 chars)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the backup was created. Clients must submit FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the backup was last updated. Clients must submit FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "deviceName",
+        "backupPayloadJson",
+        "tileCount",
+        "pageCount",
+        "accentColorHex",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "User profile document storing cloud sync metadata for each authenticated user."
+    },
+    "/users/{userId}/backups/{backupId}": {
+      "schema": {
+        "$ref": "#/entities/CloudBackup"
+      },
+      "description": "User-owned cloud backups of Lumia Launcher layouts, Live Tiles, folders, and settings."
+    }
+  }
+}

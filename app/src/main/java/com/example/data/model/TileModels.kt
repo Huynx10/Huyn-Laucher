@@ -1,5 +1,6 @@
 package com.example.data.model
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -48,13 +49,326 @@ enum class TileSize(val spanX: Int, val spanY: Int) {
 
 enum class TileType {
     APP,
+    WIDGET,
     CLOCK_CALENDAR,
     WEATHER,
     BATTERY,
     PERFORMANCE,
     PHOTOS,
     NOTES,
-    NEWS_QUOTE
+    NEWS_QUOTE,
+    SMART_FOLDER
+}
+
+enum class SmartFolderLayoutMode(
+    val label: String,
+    val shortLabel: String,
+    val description: String
+) {
+    HYPEROS_PEEK(
+        label = "HyperOS Peek (3+1)",
+        shortLabel = "HyperOS Peek",
+        description = "Chạm trực tiếp các biểu tượng lớn để mở nhanh, chạm cụm góc Peek 2x2 để bung thư mục"
+    ),
+    CLASSIC_GRID(
+        label = "Lưới 3x3 Cổ điển",
+        shortLabel = "Lưới 3x3",
+        description = "Hiển thị lưới 9 biểu tượng thu nhỏ kèm góc Peek, chạm để mở rộng thư mục"
+    ),
+    CATEGORY_STACK(
+        label = "Thẻ Danh mục Động",
+        shortLabel = "Thẻ Động",
+        description = "Tự động luân chuyển tiêu điểm các Tile trong danh mục kèm cụm góc Peek"
+    );
+
+    fun next(): SmartFolderLayoutMode = when (this) {
+        HYPEROS_PEEK -> CLASSIC_GRID
+        CLASSIC_GRID -> CATEGORY_STACK
+        CATEGORY_STACK -> HYPEROS_PEEK
+    }
+}
+
+@Immutable
+data class SmartFolderItem(
+    val id: String,
+    val title: String,
+    val packageName: String = "",
+    val tileType: TileType = TileType.APP,
+    val customIconName: String = "",
+    val category: AppCategory = AppCategory.TOOLS
+)
+
+@Immutable
+data class SmartFolderConfig(
+    val category: AppCategory = AppCategory.TOOLS,
+    val autoSyncCategory: Boolean = true,
+    val layoutMode: SmartFolderLayoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
+    val items: List<SmartFolderItem> = emptyList(),
+    val excludedKeys: Set<String> = emptySet()
+) {
+    fun toJsonString(): String {
+        val root = org.json.JSONObject()
+        root.put("category", category.name)
+        root.put("autoSyncCategory", autoSyncCategory)
+        root.put("layoutMode", layoutMode.name)
+
+        val itemsArr = org.json.JSONArray()
+        items.forEach { item ->
+            val obj = org.json.JSONObject().apply {
+                put("id", item.id)
+                put("title", item.title)
+                put("packageName", item.packageName)
+                put("tileType", item.tileType.name)
+                put("customIconName", item.customIconName)
+                put("category", item.category.name)
+            }
+            itemsArr.put(obj)
+        }
+        root.put("items", itemsArr)
+
+        val exclArr = org.json.JSONArray()
+        excludedKeys.forEach { exclArr.put(it) }
+        root.put("excludedKeys", exclArr)
+        return root.toString()
+    }
+
+    companion object {
+        fun fromTile(tile: TileEntity): SmartFolderConfig {
+            val raw = tile.packageName.trim()
+            if (raw.startsWith("{")) {
+                try {
+                    val obj = org.json.JSONObject(raw)
+                    val cat = try {
+                        AppCategory.valueOf(obj.optString("category", AppCategory.TOOLS.name))
+                    } catch (_: Exception) {
+                        AppCategory.TOOLS
+                    }
+                    val autoSync = obj.optBoolean("autoSyncCategory", true)
+                    val mode = try {
+                        SmartFolderLayoutMode.valueOf(
+                            obj.optString("layoutMode", SmartFolderLayoutMode.HYPEROS_PEEK.name)
+                        )
+                    } catch (_: Exception) {
+                        SmartFolderLayoutMode.HYPEROS_PEEK
+                    }
+                    val itemsList = mutableListOf<SmartFolderItem>()
+                    val arr = obj.optJSONArray("items")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val itemObj = arr.optJSONObject(i) ?: continue
+                            val itemType = try {
+                                TileType.valueOf(itemObj.optString("tileType", TileType.APP.name))
+                            } catch (_: Exception) {
+                                TileType.APP
+                            }
+                            val itemCat = try {
+                                AppCategory.valueOf(itemObj.optString("category", cat.name))
+                            } catch (_: Exception) {
+                                cat
+                            }
+                            itemsList.add(
+                                SmartFolderItem(
+                                    id = itemObj.optString("id", "sf_item_$i"),
+                                    title = itemObj.optString("title", "Ứng dụng"),
+                                    packageName = itemObj.optString("packageName", ""),
+                                    tileType = itemType,
+                                    customIconName = itemObj.optString("customIconName", ""),
+                                    category = itemCat
+                                )
+                            )
+                        }
+                    }
+                    val excluded = mutableSetOf<String>()
+                    val exclArr = obj.optJSONArray("excludedKeys")
+                    if (exclArr != null) {
+                        for (i in 0 until exclArr.length()) {
+                            val k = exclArr.optString(i, "")
+                            if (k.isNotBlank()) excluded.add(k)
+                        }
+                    }
+                    return SmartFolderConfig(
+                        category = cat,
+                        autoSyncCategory = autoSync,
+                        layoutMode = mode,
+                        items = itemsList,
+                        excludedKeys = excluded
+                    )
+                } catch (_: Exception) {
+                    // Fallback below
+                }
+            }
+            val fallbackCategory = try {
+                AppCategory.valueOf(tile.customIconName.uppercase())
+            } catch (_: Exception) {
+                AppCategory.TOOLS
+            }
+            return SmartFolderConfig(
+                category = fallbackCategory,
+                autoSyncCategory = true,
+                layoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
+                items = defaultSeedItemsForCategory(fallbackCategory)
+            )
+        }
+
+        fun classifyTileCategory(
+            tile: TileEntity,
+            customCategories: Map<String, String> = emptyMap()
+        ): AppCategory {
+            return when (tile.tileType) {
+                TileType.SMART_FOLDER -> fromTile(tile).category
+                TileType.CLOCK_CALENDAR, TileType.WEATHER -> AppCategory.TOOLS
+                TileType.BATTERY, TileType.PERFORMANCE -> AppCategory.SYSTEM
+                TileType.PHOTOS -> AppCategory.MEDIA
+                TileType.NOTES -> AppCategory.PRODUCTIVITY
+                TileType.NEWS_QUOTE -> AppCategory.SOCIAL
+                TileType.WIDGET -> {
+                    val pkg = tile.packageName.ifBlank {
+                        tile.widgetProvider.substringBefore("/")
+                    }
+                    val overrideCat = customCategories[pkg]
+                    if (!overrideCat.isNullOrBlank()) {
+                        try {
+                            return AppCategory.valueOf(overrideCat)
+                        } catch (_: Exception) {}
+                    }
+                    AppCategory.classifyApp(
+                        packageName = pkg,
+                        label = tile.title
+                    )
+                }
+                TileType.APP -> {
+                    val overrideCat = customCategories[tile.packageName]
+                    if (!overrideCat.isNullOrBlank()) {
+                        try {
+                            return AppCategory.valueOf(overrideCat)
+                        } catch (_: Exception) {}
+                    }
+                    AppCategory.classifyApp(
+                        packageName = tile.packageName,
+                        label = tile.title
+                    )
+                }
+            }
+        }
+
+        fun defaultSeedItemsForCategory(category: AppCategory): List<SmartFolderItem> {
+            return when (category) {
+                AppCategory.COMMUNICATION -> listOf(
+                    SmartFolderItem("seed_phone", "Điện thoại", "com.google.android.dialer", TileType.APP, "phone", AppCategory.COMMUNICATION),
+                    SmartFolderItem("seed_msg", "Tin nhắn", "com.google.android.apps.messaging", TileType.APP, "message", AppCategory.COMMUNICATION),
+                    SmartFolderItem("seed_contacts", "Danh bạ", "com.google.android.contacts", TileType.APP, "phone", AppCategory.COMMUNICATION),
+                    SmartFolderItem("seed_mail", "Thư điện tử", "com.google.android.gm", TileType.APP, "message", AppCategory.COMMUNICATION),
+                    SmartFolderItem("seed_chat", "Trò chuyện nhóm", "", TileType.APP, "message", AppCategory.COMMUNICATION)
+                )
+                AppCategory.TOOLS -> listOf(
+                    SmartFolderItem("seed_browser", "Trình duyệt", "com.android.chrome", TileType.APP, "web", AppCategory.TOOLS),
+                    SmartFolderItem("seed_clock", "Lịch & Giờ", "", TileType.CLOCK_CALENDAR, "clock", AppCategory.TOOLS),
+                    SmartFolderItem("seed_weather", "Thời tiết", "", TileType.WEATHER, "weather", AppCategory.TOOLS),
+                    SmartFolderItem("seed_maps", "Bản đồ", "com.google.android.apps.maps", TileType.APP, "map", AppCategory.TOOLS),
+                    SmartFolderItem("seed_files", "Quản lý tệp", "com.google.android.documentsui", TileType.APP, "file", AppCategory.TOOLS),
+                    SmartFolderItem("seed_calc", "Máy tính", "com.google.android.calculator", TileType.APP, "settings", AppCategory.TOOLS)
+                )
+                AppCategory.MEDIA -> listOf(
+                    SmartFolderItem("seed_camera", "Máy ảnh", "SYSTEM_CAMERA", TileType.APP, "camera", AppCategory.MEDIA),
+                    SmartFolderItem("seed_photos", "Ảnh Lumia", "", TileType.PHOTOS, "photo", AppCategory.MEDIA),
+                    SmartFolderItem("seed_music", "Âm nhạc", "", TileType.APP, "music", AppCategory.MEDIA),
+                    SmartFolderItem("seed_recorder", "Ghi âm", "", TileType.APP, "record", AppCategory.MEDIA),
+                    SmartFolderItem("seed_video", "Trình phát Video", "", TileType.APP, "photo", AppCategory.MEDIA)
+                )
+                AppCategory.PRODUCTIVITY -> listOf(
+                    SmartFolderItem("seed_notes", "Ghi chú nhanh", "", TileType.NOTES, "note", AppCategory.PRODUCTIVITY),
+                    SmartFolderItem("seed_store", "Cửa hàng", "com.android.vending", TileType.APP, "store", AppCategory.PRODUCTIVITY),
+                    SmartFolderItem("seed_docs", "Tài liệu Office", "", TileType.APP, "note", AppCategory.PRODUCTIVITY),
+                    SmartFolderItem("seed_calendar", "Lịch biểu", "", TileType.CLOCK_CALENDAR, "clock", AppCategory.PRODUCTIVITY),
+                    SmartFolderItem("seed_files_prod", "Lưu trữ Cloud", "", TileType.APP, "file", AppCategory.PRODUCTIVITY)
+                )
+                AppCategory.SOCIAL -> listOf(
+                    SmartFolderItem("seed_quote", "Cảm hứng mỗi ngày", "", TileType.NEWS_QUOTE, "note", AppCategory.SOCIAL),
+                    SmartFolderItem("seed_video_social", "Video giải trí", "com.google.android.youtube", TileType.APP, "music", AppCategory.SOCIAL),
+                    SmartFolderItem("seed_community", "Cộng đồng Lumia", "", TileType.APP, "message", AppCategory.SOCIAL),
+                    SmartFolderItem("seed_news", "Tin tức 24h", "", TileType.NEWS_QUOTE, "web", AppCategory.SOCIAL),
+                    SmartFolderItem("seed_moments", "Khoảnh khắc", "", TileType.PHOTOS, "photo", AppCategory.SOCIAL)
+                )
+                AppCategory.GAMES -> listOf(
+                    SmartFolderItem("seed_game_hub", "Xbox / Game Hub", "", TileType.APP, "store", AppCategory.GAMES),
+                    SmartFolderItem("seed_puzzle", "Giải đố Logic", "", TileType.APP, "store", AppCategory.GAMES),
+                    SmartFolderItem("seed_chess", "Cờ vua cổ điển", "", TileType.APP, "store", AppCategory.GAMES),
+                    SmartFolderItem("seed_perf_boost", "Tăng tốc Game", "", TileType.PERFORMANCE, "settings", AppCategory.GAMES),
+                    SmartFolderItem("seed_arcade", "Đua xe Arcade", "", TileType.APP, "store", AppCategory.GAMES)
+                )
+                AppCategory.SYSTEM -> listOf(
+                    SmartFolderItem("seed_settings", "Cài đặt hệ thống", "SYSTEM_SETTINGS", TileType.APP, "settings", AppCategory.SYSTEM),
+                    SmartFolderItem("seed_battery", "Pin & Nguồn", "", TileType.BATTERY, "settings", AppCategory.SYSTEM),
+                    SmartFolderItem("seed_perf", "Hiệu năng máy", "", TileType.PERFORMANCE, "settings", AppCategory.SYSTEM),
+                    SmartFolderItem("seed_storage", "Bộ nhớ thiết bị", "SYSTEM_SETTINGS", TileType.APP, "file", AppCategory.SYSTEM),
+                    SmartFolderItem("seed_network", "Kết nối mạng", "SYSTEM_SETTINGS", TileType.APP, "web", AppCategory.SYSTEM)
+                )
+                AppCategory.ALL -> listOf(
+                    SmartFolderItem("seed_phone", "Điện thoại", "com.google.android.dialer", TileType.APP, "phone", AppCategory.COMMUNICATION),
+                    SmartFolderItem("seed_browser", "Trình duyệt", "com.android.chrome", TileType.APP, "web", AppCategory.TOOLS),
+                    SmartFolderItem("seed_camera", "Máy ảnh", "SYSTEM_CAMERA", TileType.APP, "camera", AppCategory.MEDIA),
+                    SmartFolderItem("seed_notes", "Ghi chú nhanh", "", TileType.NOTES, "note", AppCategory.PRODUCTIVITY),
+                    SmartFolderItem("seed_settings", "Cài đặt hệ thống", "SYSTEM_SETTINGS", TileType.APP, "settings", AppCategory.SYSTEM),
+                    SmartFolderItem("seed_weather", "Thời tiết", "", TileType.WEATHER, "weather", AppCategory.TOOLS)
+                )
+            }
+        }
+
+        fun resolveEffectiveItems(
+            config: SmartFolderConfig,
+            installedApps: List<AppItem>,
+            customCategories: Map<String, String> = emptyMap()
+        ): List<SmartFolderItem> {
+            val result = mutableListOf<SmartFolderItem>()
+            val seenKeys = mutableSetOf<String>()
+
+            fun keyFor(pkg: String, type: TileType, title: String): String {
+                return if (pkg.isNotBlank()) "pkg:$pkg" else "type:${type.name}:${title.lowercase()}"
+            }
+
+            // 1. Explicit items in config
+            for (item in config.items) {
+                val k = keyFor(item.packageName, item.tileType, item.title)
+                if (k !in config.excludedKeys && item.id !in config.excludedKeys && seenKeys.add(k)) {
+                    result.add(item)
+                }
+            }
+
+            // 2. Auto-synced installed apps matching category
+            if (config.autoSyncCategory && config.category != AppCategory.ALL) {
+                for (app in installedApps) {
+                    val effCat = app.effectiveCategory(customCategories)
+                    if (effCat == config.category) {
+                        val k = keyFor(app.packageName, TileType.APP, app.label)
+                        if (k !in config.excludedKeys && app.packageName !in config.excludedKeys && seenKeys.add(k)) {
+                            result.add(
+                                SmartFolderItem(
+                                    id = "auto_app_${app.packageName}",
+                                    title = app.label,
+                                    packageName = app.packageName,
+                                    tileType = TileType.APP,
+                                    customIconName = "",
+                                    category = effCat
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. Ensure rich folder-peek preview by topping up with category defaults if fewer than 4 items
+            if (config.autoSyncCategory && result.size < 4) {
+                for (seed in defaultSeedItemsForCategory(config.category)) {
+                    val k = keyFor(seed.packageName, seed.tileType, seed.title)
+                    if (k !in config.excludedKeys && seed.id !in config.excludedKeys && seenKeys.add(k)) {
+                        result.add(seed)
+                    }
+                }
+            }
+
+            return result
+        }
+    }
 }
 
 enum class PageType {
@@ -62,6 +376,7 @@ enum class PageType {
     ALL_APPS
 }
 
+@Immutable
 data class LauncherPage(
     val id: String,
     val title: String,
@@ -113,6 +428,29 @@ enum class Wp10TileStyle(val label: String, val description: String) {
     }
 }
 
+@Immutable
+data class WidgetProviderItem(
+    val providerComponent: String, // ComponentName.flattenToString() -> "pkg/class"
+    val packageName: String,
+    val className: String,
+    val label: String,
+    val appName: String,
+    val description: String = "",
+    val minWidthDp: Int = 110,
+    val minHeightDp: Int = 110,
+    val minResizeWidthDp: Int = 70,
+    val minResizeHeightDp: Int = 70,
+    val targetCellWidth: Int = 2,
+    val targetCellHeight: Int = 2,
+    val resizeMode: Int = 3, // AppWidgetProviderInfo.RESIZE_BOTH (1 = HORIZONTAL, 2 = VERTICAL, 3 = BOTH, 0 = NONE)
+    val recommendedTileSize: TileSize = TileSize.MEDIUM,
+    val allowedTileSizes: List<TileSize> = listOf(TileSize.SMALL, TileSize.MEDIUM, TileSize.WIDE, TileSize.LARGE),
+    val hasConfigurationActivity: Boolean = false,
+    val configureComponent: String = "",
+    val updatePeriodMillis: Int = 0
+)
+
+@Immutable
 @Entity(tableName = "tiles")
 data class TileEntity(
     @PrimaryKey val id: String,
@@ -127,8 +465,43 @@ data class TileEntity(
     val colorOverrideHex: String? = null, // null = theme accent, "TRANSPARENT" = 100% clear tile, "#HEX" = custom color
     val customIconName: String = "",
     val notificationCount: Int = 0,
-    val isLiveEnabled: Boolean = true
-)
+    val isLiveEnabled: Boolean = true,
+    val appWidgetId: Int = -1,
+    val widgetProvider: String = "",
+    val widgetMinSpanX: Int = 1,
+    val widgetMinSpanY: Int = 1,
+    val widgetResizeMode: Int = 3
+) {
+    fun hasBoundOrLinkedWidget(): Boolean {
+        return tileType == TileType.WIDGET || widgetProvider.isNotBlank() || appWidgetId > 0
+    }
+
+    fun allowedSizesForTile(): List<TileSize> {
+        if (!hasBoundOrLinkedWidget()) {
+            return TileSize.entries
+        }
+        val minX = widgetMinSpanX.coerceIn(1, 4)
+        val minY = widgetMinSpanY.coerceIn(1, 4)
+        val canResizeH = (widgetResizeMode and 1) != 0
+        val canResizeV = (widgetResizeMode and 2) != 0
+
+        if (!canResizeH && !canResizeV) {
+            val fixed = TileSize.fromTargetSpans(minX, minY)
+            return listOf(fixed, size).distinct()
+        }
+
+        val matching = TileSize.entries.filter { candidate ->
+            val okX = if (canResizeH) candidate.spanX >= minX else candidate.spanX == minX.coerceAtLeast(2)
+            val okY = if (canResizeV) candidate.spanY >= minY else candidate.spanY == minY.coerceAtLeast(2)
+            okX && okY
+        }
+        return if (matching.isNotEmpty()) {
+            (matching + size).distinct().sortedBy { it.ordinal }
+        } else {
+            listOf(TileSize.MEDIUM, TileSize.WIDE, TileSize.LARGE)
+        }
+    }
+}
 
 enum class AppCategory(
     val label: String,
@@ -186,8 +559,56 @@ enum class AppCategory(
     );
 
     companion object {
-        val assignableCategories: List<AppCategory>
-            get() = entries.filter { it != ALL }
+        val assignableCategories: List<AppCategory> = entries.filter { it != ALL }
+
+        private val commKeywords = listOf(
+            "dialer", "contacts", "mms", "messaging", "telecom", "phone", "call",
+            "zalo", "telegram", "whatsapp", "messenger", "viber", "skype", "wechat",
+            "discord", "signal", "email", "gmail", "outlook", "thunderbird",
+            "điện thoại", "tin nhắn", "danh bạ", "liên lạc", "gọi điện", "thư"
+        )
+
+        private val gameKeywords = listOf(
+            "game", "play.games", "roblox", "minecraft", "genshin", "pubg",
+            "freefire", "arcade", "puzzle", "chess", "solitaire", "asphalt",
+            "candycrush", "clash", "unity", "trò chơi", "cờ vua", "cờ tướng"
+        )
+
+        private val socialKeywords = listOf(
+            "facebook", "instagram", "tiktok", "musically", "twitter", "threads",
+            "reddit", "snapchat", "pinterest", "youtube", "netflix", "twitch",
+            "bilibili", "spotify", "soundcloud", "xã hội", "giải trí"
+        )
+
+        private val mediaKeywords = listOf(
+            "camera", "gallery", "photos", "music", "video", "audio", "podcast",
+            "vlc", "player", "recorder", "soundrecorder", "mediaprovider",
+            "máy ảnh", "thư viện", "ảnh", "nhạc", "video", "ghi âm"
+        )
+
+        private val prodKeywords = listOf(
+            "docs", "sheets", "slides", "drive", "office", "word", "excel",
+            "powerpoint", "keep", "note", "notion", "evernote", "pdf", "wallet",
+            "bank", "pay", "finance", "shop", "store", "vending", "lazada",
+            "shopee", "tiki", "news", "linkedin", "ghi chú", "văn phòng",
+            "cửa hàng", "ch play", "play store", "tài chính", "ngân hàng"
+        )
+
+        private val toolKeywords = listOf(
+            "browser", "chrome", "firefox", "edge", "opera", "webview",
+            "calculator", "deskclock", "clock", "alarm", "calendar", "weather",
+            "files", "documentsui", "filemanager", "explorer", "maps", "translate",
+            "compass", "scanner", "flashlight", "keyboard", "inputmethod",
+            "search", "googlequicksearchbox", "downloads", "download",
+            "trình duyệt", "máy tính", "đồng hồ", "lịch", "thời tiết",
+            "tệp", "quản lý tệp", "bản đồ", "dịch", "la bàn", "công cụ"
+        )
+
+        private val sysKeywords = listOf(
+            "settings", "systemui", "packageinstaller", "permissioncontroller",
+            "stk", "bluetooth", "nfc", "print", "telephony", "certinstaller",
+            "vpndialogs", "shell", "cài đặt", "hệ thống", "bảo mật"
+        )
 
         fun classifyApp(
             packageName: String,
@@ -199,12 +620,6 @@ enum class AppCategory(
             val name = label.lowercase()
 
             // 1. Check Communication first (high priority in MIUI)
-            val commKeywords = listOf(
-                "dialer", "contacts", "mms", "messaging", "telecom", "phone", "call",
-                "zalo", "telegram", "whatsapp", "messenger", "viber", "skype", "wechat",
-                "discord", "signal", "email", "gmail", "outlook", "thunderbird",
-                "điện thoại", "tin nhắn", "danh bạ", "liên lạc", "gọi điện", "thư"
-            )
             if (commKeywords.any { pkg.contains(it) || name.contains(it) }) {
                 return COMMUNICATION
             }
@@ -219,67 +634,31 @@ enum class AppCategory(
             }
 
             // 3. Keyword heuristics for Games
-            val gameKeywords = listOf(
-                "game", "play.games", "roblox", "minecraft", "genshin", "pubg",
-                "freefire", "arcade", "puzzle", "chess", "solitaire", "asphalt",
-                "candycrush", "clash", "unity", "trò chơi", "cờ vua", "cờ tướng"
-            )
             if (gameKeywords.any { pkg.contains(it) || name.contains(it) }) {
                 return GAMES
             }
 
             // 4. Keyword heuristics for Social & Entertainment
-            val socialKeywords = listOf(
-                "facebook", "instagram", "tiktok", "musically", "twitter", "threads",
-                "reddit", "snapchat", "pinterest", "youtube", "netflix", "twitch",
-                "bilibili", "spotify", "soundcloud", "xã hội", "giải trí"
-            )
             if (socialKeywords.any { pkg.contains(it) || name.contains(it) }) {
                 return SOCIAL
             }
 
             // 5. Keyword heuristics for Media & Photography
-            val mediaKeywords = listOf(
-                "camera", "gallery", "photos", "music", "video", "audio", "podcast",
-                "vlc", "player", "recorder", "soundrecorder", "mediaprovider",
-                "máy ảnh", "thư viện", "ảnh", "nhạc", "video", "ghi âm"
-            )
             if (mediaKeywords.any { pkg.contains(it) || name.contains(it) }) {
                 return MEDIA
             }
 
             // 6. Keyword heuristics for Productivity, Finance & Shopping
-            val prodKeywords = listOf(
-                "docs", "sheets", "slides", "drive", "office", "word", "excel",
-                "powerpoint", "keep", "note", "notion", "evernote", "pdf", "wallet",
-                "bank", "pay", "finance", "shop", "store", "vending", "lazada",
-                "shopee", "tiki", "news", "linkedin", "ghi chú", "văn phòng",
-                "cửa hàng", "ch play", "play store", "tài chính", "ngân hàng"
-            )
             if (prodKeywords.any { pkg.contains(it) || name.contains(it) }) {
                 return PRODUCTIVITY
             }
 
             // 7. Keyword heuristics for Tools & Utilities
-            val toolKeywords = listOf(
-                "browser", "chrome", "firefox", "edge", "opera", "webview",
-                "calculator", "deskclock", "clock", "alarm", "calendar", "weather",
-                "files", "documentsui", "filemanager", "explorer", "maps", "translate",
-                "compass", "scanner", "flashlight", "keyboard", "inputmethod",
-                "search", "googlequicksearchbox", "downloads", "download",
-                "trình duyệt", "máy tính", "đồng hồ", "lịch", "thời tiết",
-                "tệp", "quản lý tệp", "bản đồ", "dịch", "la bàn", "công cụ"
-            )
             if (toolKeywords.any { pkg.contains(it) || name.contains(it) }) {
                 return TOOLS
             }
 
             // 8. System apps & Settings
-            val sysKeywords = listOf(
-                "settings", "systemui", "packageinstaller", "permissioncontroller",
-                "stk", "bluetooth", "nfc", "print", "telephony", "certinstaller",
-                "vpndialogs", "shell", "cài đặt", "hệ thống", "bảo mật"
-            )
             if (sysKeywords.any { pkg.contains(it) || name.contains(it) } || isSystemApp) {
                 return SYSTEM
             }
@@ -289,6 +668,7 @@ enum class AppCategory(
     }
 }
 
+@Immutable
 data class AppItem(
     val label: String,
     val packageName: String,
@@ -311,13 +691,18 @@ data class AppItem(
     }
 }
 
+@Immutable
 data class SystemTelemetry(
     val batteryPct: Int = 100,
     val isCharging: Boolean = false,
+    val isSystemPowerSaveMode: Boolean = false,
     val batteryTempC: Float = 28.5f,
     val availableRamMb: Long = 0,
     val totalRamMb: Long = 0,
     val ramUsagePct: Int = 0,
+    val backgroundAppsCount: Int = 0,
+    val lastStoppedAppsCount: Int = 0,
+    val lastFreedRamMb: Long = 0,
     val internalFreeGb: Float = 0f,
     val internalTotalGb: Float = 0f,
     val uptimeHours: Long = 0,
@@ -325,6 +710,28 @@ data class SystemTelemetry(
     val isDefaultLauncher: Boolean = false,
     val currentDefaultLauncherName: String = "Hệ thống"
 )
+
+enum class BatterySaverMode(
+    val label: String,
+    val shortLabel: String,
+    val description: String
+) {
+    AUTO(
+        label = "Tự động khi pin yếu",
+        shortLabel = "Tự động",
+        description = "Tự động giảm tần suất Live Tile và tối giản hiệu ứng 3D khi pin thấp hoặc bật Tiết kiệm pin hệ thống"
+    ),
+    ALWAYS_ON(
+        label = "Luôn bật (Tối giản mượt mà)",
+        shortLabel = "Luôn bật",
+        description = "Luôn tối giản hiệu ứng chuyển động và giảm tần suất cập nhật ngầm để đạt độ mượt tối đa"
+    ),
+    OFF(
+        label = "Tắt",
+        shortLabel = "Tắt",
+        description = "Luôn giữ đầy đủ hiệu ứng chuyển động 3D và tần suất cập nhật Live Tile tiêu chuẩn"
+    )
+}
 
 enum class DynamicAccentMode(
     val label: String,
@@ -348,6 +755,7 @@ enum class DynamicAccentMode(
     )
 }
 
+@Immutable
 data class AppFolder(
     val id: String,
     val title: String,
@@ -356,6 +764,7 @@ data class AppFolder(
     val orderIndex: Int = 0
 )
 
+@Immutable
 data class LauncherSettings(
     val accentColorHex: String = "#0078D7", // Lumia Cyan
     val autoWallpaperAccentEnabled: Boolean = true, // Windows 10 Mobile "Automatically pick an accent color from my background"
@@ -375,8 +784,13 @@ data class LauncherSettings(
     val lockHomeLayout: Boolean = false,
     val fullWallpaperEnabled: Boolean = true,
     val wallpaperGradientIndex: Int = 1, // Windows 10 Mobile Hero default
+    val customWallpaperUri: String = "", // User-selected custom photo wallpaper path/URI
+    val wallpaperDimAlpha: Float = 0.18f, // Minimalist dark overlay over wallpaper for legibility
     val turnstileAnimationEnabled: Boolean = true,
     val glanceScreenEnabled: Boolean = true,
+    val batterySaverMode: BatterySaverMode = BatterySaverMode.AUTO,
+    val batterySaverThresholdPct: Int = 25,
+    val autoOptimizeBackgroundApps: Boolean = true,
     val quickNotes: String = "Chào mừng trở lại Windows 10 Mobile! Ô Tile hỗ trợ tuỳ chỉnh trong suốt xuyên thấu từ 0% đến 100%.",
     val cloudSyncState: String = "Đã đồng bộ cục bộ",
     val defaultHomePageId: String = "page_home_1",
@@ -391,4 +805,39 @@ data class LauncherSettings(
     val customAppCategories: Map<String, String> = emptyMap(),
     val appDrawerFolders: List<AppFolder> = emptyList(),
     val appDrawerCustomOrder: List<String> = emptyList()
-)
+) {
+    fun isBatterySaverActive(telemetry: SystemTelemetry): Boolean {
+        return when (batterySaverMode) {
+            BatterySaverMode.ALWAYS_ON -> true
+            BatterySaverMode.OFF -> false
+            BatterySaverMode.AUTO -> {
+                telemetry.isSystemPowerSaveMode ||
+                    (!telemetry.isCharging && telemetry.batteryPct <= batterySaverThresholdPct.coerceIn(10, 50))
+            }
+        }
+    }
+
+    fun effectiveLiveTileIntervalMs(telemetry: SystemTelemetry, baseIntervalMs: Long): Long {
+        return if (isBatterySaverActive(telemetry)) {
+            baseIntervalMs * 3L
+        } else {
+            baseIntervalMs
+        }
+    }
+
+    fun effectiveTelemetryPollIntervalMs(telemetry: SystemTelemetry): Long {
+        return if (isBatterySaverActive(telemetry)) {
+            30_000L
+        } else {
+            12_000L
+        }
+    }
+
+    fun effectivePageTransitionEffect(telemetry: SystemTelemetry): PageTransitionEffect {
+        return if (isBatterySaverActive(telemetry)) {
+            PageTransitionEffect.CLASSIC_SLIDE
+        } else {
+            pageTransitionEffect
+        }
+    }
+}

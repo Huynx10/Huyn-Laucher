@@ -1,0 +1,172 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 0. Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Hardened Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             data.deviceModel is string && data.deviceModel.size() >= 1 && data.deviceModel.size() <= 100 &&
+             (!('activeBackupId' in data) || data.activeBackupId == null || (data.activeBackupId is string && data.activeBackupId.size() <= 128)) &&
+             data.tileCount is int && data.tileCount >= 0 && data.tileCount <= 500 &&
+             data.pageCount is int && data.pageCount >= 1 && data.pageCount <= 50 &&
+             data.accentColorHex is string && data.accentColorHex.size() >= 4 && data.accentColorHex.size() <= 16 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCloudBackup(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 100 &&
+             data.backupPayloadJson is string && data.backupPayloadJson.size() >= 2 && data.backupPayloadJson.size() <= 200000 &&
+             data.tileCount is int && data.tileCount >= 0 && data.tileCount <= 500 &&
+             data.pageCount is int && data.pageCount >= 1 && data.pageCount <= 50 &&
+             data.accentColorHex is string && data.accentColorHex.size() >= 4 && data.accentColorHex.size() <= 16 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // --- Collection: /users/{userId} ---
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().keys().hasAll([
+                         'userId',
+                         'displayName',
+                         'deviceModel',
+                         'tileCount',
+                         'pageCount',
+                         'accentColorHex',
+                         'createdAt',
+                         'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId',
+                         'displayName',
+                         'deviceModel',
+                         'activeBackupId',
+                         'tileCount',
+                         'pageCount',
+                         'accentColorHex',
+                         'createdAt',
+                         'updatedAt'
+                       ]) &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action: SyncProfileMetadata
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'displayName',
+                           'deviceModel',
+                           'activeBackupId',
+                           'tileCount',
+                           'pageCount',
+                           'accentColorHex',
+                           'updatedAt'
+                         ])
+                       );
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // --- Subcollection: /users/{userId}/backups/{backupId} ---
+      match /backups/{backupId} {
+        allow get: if isOwner(userId) &&
+                      isValidId(userId) &&
+                      isValidId(backupId) &&
+                      existing().userId == request.auth.uid;
+
+        allow list: if isOwner(userId) &&
+                       existing().userId == request.auth.uid;
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(backupId) &&
+                         incoming().keys().hasAll([
+                           'userId',
+                           'title',
+                           'deviceName',
+                           'backupPayloadJson',
+                           'tileCount',
+                           'pageCount',
+                           'accentColorHex',
+                           'createdAt',
+                           'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId',
+                           'title',
+                           'deviceName',
+                           'backupPayloadJson',
+                           'tileCount',
+                           'pageCount',
+                           'accentColorHex',
+                           'createdAt',
+                           'updatedAt'
+                         ]) &&
+                         isValidCloudBackup(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(backupId) &&
+                         isValidCloudBackup(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           // Action: UpdateBackupSnapshot
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'title',
+                             'deviceName',
+                             'backupPayloadJson',
+                             'tileCount',
+                             'pageCount',
+                             'accentColorHex',
+                             'updatedAt'
+                           ])
+                         );
+
+        allow delete: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(backupId) &&
+                         existing().userId == request.auth.uid;
+      }
+    }
+  }
+}
