@@ -247,7 +247,7 @@ class LauncherRepository(
             // Page 1: Primary communication, clock, weather, camera, browser, store, settings
             TileEntity(
                 id = "tile_clock_calendar",
-                title = "Lịch & Giờ",
+                title = "Đồng hồ",
                 tileType = TileType.CLOCK_CALENDAR,
                 size = TileSize.WIDE,
                 orderIndex = 0,
@@ -381,9 +381,9 @@ class LauncherRepository(
             // Page 2: Photos, Battery, Performance, Notes, Quotes
             TileEntity(
                 id = "tile_photos",
-                title = "Ảnh Lumia",
-                packageName = findPackageForCategory(Intent.CATEGORY_APP_GALLERY, "com.google.android.apps.photos", "com.android.gallery3d"),
-                tileType = TileType.PHOTOS,
+                title = "Ảnh",
+                packageName = findPackageForCategory(Intent.CATEGORY_APP_GALLERY, "com.sec.android.gallery3d", "com.google.android.apps.photos", "com.android.gallery3d"),
+                tileType = TileType.APP,
                 size = TileSize.LARGE,
                 orderIndex = 0,
                 pageId = "page_home_2",
@@ -437,6 +437,27 @@ class LauncherRepository(
                 isLiveEnabled = true
             )
         )
+            // A launcher cannot invent weather, news or notes from other apps. Those
+            // surfaces should be added through the real Android widget picker.
+            .filterNot { tile ->
+                tile.tileType in setOf(TileType.WEATHER, TileType.NEWS_QUOTE, TileType.NOTES) ||
+                    (tile.id == "tile_photos" && tile.packageName.isBlank())
+            }
+            // Pack only the factory template; never compact an existing user's free layout.
+            .groupBy { it.pageId }
+            .flatMap { (_, items) ->
+                val placed = mutableListOf<TileEntity>()
+                items.forEachIndexed { index, tile ->
+                    val (x, y) = findFirstFreeGridPosition(
+                        existingPageTiles = placed,
+                        spanX = tile.size.effectiveSpanX(4),
+                        spanY = tile.size.effectiveSpanY(),
+                        totalCols = 4
+                    )
+                    placed.add(tile.copy(gridX = x, gridY = y, orderIndex = index))
+                }
+                placed
+            }
     }
 
     private fun findPackageForCategory(category: String, vararg preferredPackages: String): String {
