@@ -8,6 +8,7 @@ import com.example.data.model.TileType
 import com.example.data.repository.LauncherRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
