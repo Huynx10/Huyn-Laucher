@@ -52,7 +52,8 @@ fun GlanceScreenOverlay(
     LaunchedEffect(Unit) {
         while (true) {
             currentTime = Date()
-            delay(1000)
+            // Time label has minute precision; a per-second wakeup is unnecessary.
+            delay(60_000L)
         }
     }
 
