@@ -16,6 +16,17 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
+import org.json.JSONObject
+
+/** Never truncate serialized layouts: a shortened JSON backup cannot be restored. */
+internal fun validateCloudBackupJson(json: String): String {
+    require(json.isNotBlank()) { "Bản sao lưu đang trống" }
+    require(json.toByteArray(Charsets.UTF_8).size <= 200_000) {
+        "Bản sao lưu vượt giới hạn 200 KB của Firestore; hãy xuất bản sao lưu cục bộ"
+    }
+    JSONObject(json) // Reject malformed payloads before any network write.
+    return json
+}
 
 class CloudSyncRepository(
     private val db: FirebaseFirestore
@@ -120,6 +131,7 @@ class CloudSyncRepository(
         accentColorHex: String
     ): Result<String> = runCatching {
         require(userId.isNotBlank()) { "userId must not be blank" }
+        val validatedJson = validateCloudBackupJson(backupPayloadJson)
         val backupId = "backup_${UUID.randomUUID().toString().replace("-", "").take(20)}"
         val docRef = db.collection("users").document(userId)
             .collection("backups").document(backupId)
@@ -128,7 +140,7 @@ class CloudSyncRepository(
             "userId" to userId,
             "title" to title.trim().ifBlank { "Bản sao lưu Lumia" }.take(120),
             "deviceName" to deviceName.trim().ifBlank { "Thiết bị Android" }.take(100),
-            "backupPayloadJson" to backupPayloadJson.ifBlank { "{}" }.take(200000),
+            "backupPayloadJson" to validatedJson,
             "tileCount" to tileCount.coerceIn(0, 500).toLong(),
             "pageCount" to pageCount.coerceIn(1, 50).toLong(),
             "accentColorHex" to accentColorHex.trim().ifBlank { "#0078D7" }.take(16),
