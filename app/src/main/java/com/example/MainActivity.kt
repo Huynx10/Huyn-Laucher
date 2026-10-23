@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.provider.AlarmClock
 import android.provider.Settings
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -99,6 +100,7 @@ import com.example.data.model.PageTransitionEffect
 import com.example.data.model.PageType
 import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
+import com.example.data.model.WallpaperSource
 import com.example.data.model.Wp10TileStyle
 import com.example.ui.auth.GoogleSignInHelper
 import com.example.ui.components.ActionCenterOverlay
@@ -123,13 +125,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Show Samsung/Android's actual Home wallpaper (including live wallpapers) behind
+        // a transparent Compose surface. Do not read or copy protected wallpaper pixels.
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+        window.setBackgroundDrawableResource(android.R.color.transparent)
         enableEdgeToEdge()
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
             MyApplicationTheme(darkTheme = settings.isDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = if (settings.isDarkTheme) Color.Black else Color(0xFFF2F2F2)
+                    color = if (settings.wallpaperSource == WallpaperSource.SYSTEM) Color.Transparent else if (settings.isDarkTheme) Color.Black else Color(0xFFF2F2F2)
                 ) {
                     LumiaLauncherApp(viewModel = viewModel)
                 }
@@ -466,7 +472,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(wallpaperBrush)
+            .then(
+                if (settings.wallpaperSource == WallpaperSource.LUMIA) Modifier.background(wallpaperBrush)
+                else Modifier.background(Color.Transparent)
+            )
             .pointerInput(isEditMode, selectedTileId) {
                 detectTapGestures(
                     onTap = {
@@ -486,7 +495,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 )
             }
     ) {
-        if (customWallpaperBitmap != null) {
+        if (settings.wallpaperSource == WallpaperSource.CUSTOM && customWallpaperBitmap != null) {
             Image(
                 bitmap = customWallpaperBitmap,
                 contentDescription = "Hình nền tùy chỉnh",
