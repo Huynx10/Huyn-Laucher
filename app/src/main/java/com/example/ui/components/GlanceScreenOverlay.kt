@@ -98,47 +98,6 @@ fun GlanceScreenOverlay(
 
                 Spacer(modifier = Modifier.height(28.dp))
 
-                // Notification pips
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Phone,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "2", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Message,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "5", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Email,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "1", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
                 // Battery status
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
@@ -158,7 +117,7 @@ fun GlanceScreenOverlay(
 
             // Bottom hint
             Text(
-                text = "LUMIA GLANCE SCREEN • CHẠM ĐỂ ĐÁNH THỨC",
+                text = "Chạm để quay lại",
                 color = Color.White.copy(alpha = 0.35f),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Medium,
