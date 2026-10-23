@@ -513,6 +513,9 @@ fun AppDrawer(
     Box(
         modifier = modifier
             .fillMaxSize()
+            // White Metro list text must remain legible over bright system wallpapers.
+            // Apply a page-only scrim without changing Home wallpaper.
+            .background(Color.Black.copy(alpha = 0.40f))
             .onGloballyPositioned { coords ->
                 rootBoxPosition = coords.positionInRoot()
             }
@@ -614,7 +617,7 @@ fun AppDrawer(
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             // Main Content: Listing (METRO_LIST) or Grid (ONE_UI_GRID) — direct rendering without heavy crossfade cloning
             val activeCat = selectedCategory
@@ -675,7 +678,7 @@ fun AppDrawer(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(
-                                            top = if (index == 0) 6.dp else 22.dp,
+                                            top = if (index == 0) 4.dp else 14.dp,
                                             bottom = 6.dp,
                                             start = 10.dp
                                         )
@@ -1462,7 +1465,7 @@ private fun CleanAppDrawerHeaderBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(Icons.Default.Settings, contentDescription = null, tint = accentColor, modifier = Modifier.size(19.dp))
+                Icon(Icons.Default.Settings, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
                 Text("Action Center", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
 
@@ -1476,7 +1479,7 @@ private fun CleanAppDrawerHeaderBar(
                         .testTag("app_drawer_az_button"),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("A-Z", color = accentColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("A-Z", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
             Box(
@@ -1506,7 +1509,7 @@ private fun CleanAppDrawerHeaderBar(
         if (categorizedEnabled) {
             LazyRow(
                 modifier = Modifier.fillMaxWidth()
-                    .padding(top = 4.dp, bottom = 5.dp)
+                    .padding(top = 1.dp, bottom = 3.dp)
                     .testTag("app_drawer_category_bar"),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 contentPadding = PaddingValues(end = 6.dp)
@@ -1520,7 +1523,12 @@ private fun CleanAppDrawerHeaderBar(
                         modifier = Modifier
                             .onGloballyPositioned { coords -> onCategoryTabPositioned(category, coords.boundsInRoot()) }
                             .clip(RoundedCornerShape(18.dp))
-                            .background(if (active) color.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.06f))
+                            .background(if (active) Color.Black.copy(alpha = 0.60f) else Color.Black.copy(alpha = 0.24f))
+                            .border(
+                                width = if (active) 1.dp else 0.dp,
+                                color = if (active) color else Color.Transparent,
+                                shape = RoundedCornerShape(18.dp)
+                            )
                             .clickable { onSelectCategory(category) }
                             .padding(horizontal = 12.dp, vertical = 9.dp)
                             .testTag("app_category_tab_${category.name.lowercase()}"),
