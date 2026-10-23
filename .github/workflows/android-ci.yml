@@ -25,6 +25,9 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Release signing regression checks
+        run: bash scripts/test-verify-beta-signature.sh
+
       - name: Run Unit & Robolectric Tests
         run: gradle :app:testDebugUnitTest
 
