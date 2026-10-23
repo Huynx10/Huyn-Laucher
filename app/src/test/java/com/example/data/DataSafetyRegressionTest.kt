@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.LumiaDatabase
+import com.example.data.db.TileDao
 import com.example.data.model.*
 import com.example.data.repository.LauncherRepository
 import com.example.data.repository.validateCloudBackupJson
@@ -333,6 +334,89 @@ class DataSafetyRegressionTest {
         assertTrue(migrated.gridX >= 2 || migrated.gridY >= 2)
         repo.ensureDefaultTiles()
         assertEquals(after.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+
+    @Test fun failedUnpinDoesNotReleaseLiveWidgetBinding() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val widget = TileEntity("widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 101, widgetProvider = "example/.Provider", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        val released = mutableListOf<Int>()
+        val failingDao = object : TileDao by db.tileDao() {
+            override suspend fun deleteById(tileId: String) {
+                throw IllegalStateException("simulated Room delete failure")
+            }
+        }
+        val guarded = LauncherRepository(context, failingDao, db) { id -> released.add(id) }
+        try {
+            guarded.unpinTile(widget.id)
+            fail("Expected the Room delete to fail")
+        } catch (expected: IllegalStateException) {
+            assertEquals("simulated Room delete failure", expected.message)
+        }
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+        assertTrue(released.isEmpty())
+    }
+
+    @Test fun failedUnlinkDoesNotReleaseLiveWidgetBinding() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val widget = TileEntity("widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 102, widgetProvider = "example/.Provider", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        val released = mutableListOf<Int>()
+        val failingDao = object : TileDao by db.tileDao() {
+            override suspend fun update(tile: TileEntity) {
+                throw IllegalStateException("simulated Room update failure")
+            }
+        }
+        val guarded = LauncherRepository(context, failingDao, db) { id -> released.add(id) }
+        try {
+            guarded.unlinkWidgetFromTile(widget.id)
+            fail("Expected the Room update to fail")
+        } catch (expected: IllegalStateException) {
+            assertEquals("simulated Room update failure", expected.message)
+        }
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+        assertTrue(released.isEmpty())
+    }
+
+    @Test fun failedWidgetReplacementKeepsPreviousHostBinding() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val widget = TileEntity("widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 103, widgetProvider = "example/.Provider", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        val released = mutableListOf<Int>()
+        val failingDao = object : TileDao by db.tileDao() {
+            override suspend fun insertOrUpdate(tile: TileEntity) {
+                throw IllegalStateException("simulated Room replace failure")
+            }
+        }
+        val guarded = LauncherRepository(context, failingDao, db) { id -> released.add(id) }
+        val replacement = WidgetProviderItem(
+            providerComponent = "example/.Replacement", packageName = "example",
+            className = "Replacement", label = "Replacement", appName = "Example"
+        )
+        try {
+            guarded.linkWidgetToExistingTile(widget.id, replacement, 104)
+            fail("Expected the Room replace to fail")
+        } catch (expected: IllegalStateException) {
+            assertEquals("simulated Room replace failure", expected.message)
+        }
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+        assertTrue(released.isEmpty())
+    }
+
+    @Test fun successfulUnpinReleasesBindingAfterRemovingTile() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val widget = TileEntity("widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 105, widgetProvider = "example/.Provider", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        val released = mutableListOf<Int>()
+        val guarded = LauncherRepository(context, db.tileDao(), db) { id -> released.add(id) }
+        guarded.unpinTile(widget.id)
+        assertTrue(db.tileDao().getAllTiles().isEmpty())
+        assertEquals(listOf(105), released)
     }
 
     @Test fun emptySmartFolderDoesNotInventAppsOrLiveContent() = runBlocking {
