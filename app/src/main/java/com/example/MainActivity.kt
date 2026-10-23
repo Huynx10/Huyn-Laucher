@@ -1110,12 +1110,12 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     firstRunPrefs.edit().putBoolean("guided_v1", true).apply()
                     showFirstRunGuide = false
                 },
-                title = { Text("Thiết lập Lumia Launcher") },
+                title = { Text("Bắt đầu với Lumia") },
                 text = {
                     Text(
-                        "1. Màn hình chính: anh có thể đặt Lumia làm ứng dụng Home mặc định.\n\n" +
-                        "2. Widget: Lumia dùng widget thật từ Samsung và ứng dụng đã cài. Android sẽ hỏi quyền khi liên kết và có thể yêu cầu chọn nội dung.\n\n" +
-                        "3. Hình nền: Lumia hiển thị nền hiện tại, không cần cấp quyền ảnh nếu anh không chọn ảnh riêng."
+                        "Đặt Lumia làm màn hình chính nếu muốn sử dụng hằng ngày.\n\n" +
+                        "Widget lấy dữ liệu từ ứng dụng đã cài. Android có thể yêu cầu xác nhận hoặc chọn nội dung khi kết nối.\n\n" +
+                        "Lumia dùng hình nền hiện tại. Chỉ cần chọn ảnh nếu muốn thay bằng ảnh riêng."
                     )
                 },
                 confirmButton = {
