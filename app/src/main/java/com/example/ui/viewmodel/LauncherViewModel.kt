@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -28,6 +29,7 @@ import com.example.data.repository.CloudSyncRepository
 import com.example.data.repository.LauncherRepository
 import com.example.ui.auth.GoogleSignInHelper
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
@@ -66,7 +68,7 @@ data class SmartFolderOpenRequest(
 
 class LauncherViewModel(
     private val repository: LauncherRepository,
-    private val cloudSyncRepository: CloudSyncRepository
+    private val cloudSyncRepository: CloudSyncRepository?
 ) : ViewModel() {
 
     val tiles: StateFlow<List<TileEntity>> = repository.tilesFlow
@@ -127,6 +129,8 @@ class LauncherViewModel(
     private var activeCloudUserId: String? = null
     private var cloudBackupsJob: Job? = null
     private var cloudProfileJob: Job? = null
+    private var appRefreshJob: Job? = null
+    private var lastAppRefreshAtMs: Long = -1L
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         val user = firebaseAuth.currentUser
@@ -154,20 +158,25 @@ class LauncherViewModel(
         }
 
 
-        try {
-            Firebase.auth.addAuthStateListener(authStateListener)
-        } catch (e: Exception) {
-            Log.w(TAG, "FirebaseAuth not initialized in this environment: ${e.message}")
+        if (cloudSyncRepository != null) {
+            try {
+                Firebase.auth.addAuthStateListener(authStateListener)
+            } catch (e: Exception) {
+                Log.w(TAG, "Firebase Auth not available; launcher remains usable offline", e)
+            }
+        } else {
+            Log.i(TAG, "Firebase is not configured; local launcher features remain available")
         }
     }
 
     private fun startObservingCloudData(userId: String, displayName: String) {
+        val cloud = cloudSyncRepository ?: return
         if (activeCloudUserId == userId && cloudBackupsJob?.isActive == true) return
         stopObservingCloudData()
         activeCloudUserId = userId
 
         cloudProfileJob = viewModelScope.launch {
-            cloudSyncRepository.observeUserProfile(userId)
+            cloud.observeUserProfile(userId)
                 .catch { error ->
                     Log.w(TAG, "Error observing cloud user profile", error)
                 }
@@ -177,7 +186,7 @@ class LauncherViewModel(
         }
 
         cloudBackupsJob = viewModelScope.launch {
-            cloudSyncRepository.observeCloudBackups(userId)
+            cloud.observeCloudBackups(userId)
                 .catch { error ->
                     Log.w(TAG, "Error observing cloud backups", error)
                     _cloudSyncMessage.value = "Không thể tải danh sách sao lưu đám mây: ${error.localizedMessage ?: "Lỗi quyền truy cập"}"
@@ -191,7 +200,7 @@ class LauncherViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val currentTilesCount = repository.tilesFlow.stateIn(viewModelScope).value.size
             val homePagesCount = _pages.value.count { it.pageType == PageType.HOME }.coerceAtLeast(1)
-            cloudSyncRepository.upsertUserProfile(
+            cloud.upsertUserProfile(
                 userId = userId,
                 displayName = displayName,
                 deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
@@ -213,6 +222,10 @@ class LauncherViewModel(
     }
 
     fun signInWithGoogleIdToken(idToken: String) {
+        if (cloudSyncRepository == null) {
+            onGoogleSignInError("Chưa cấu hình Firebase; các chức năng launcher vẫn hoạt động offline.")
+            return
+        }
         try {
             val auth = Firebase.auth
             if (auth.currentUser == null) {
@@ -255,6 +268,10 @@ class LauncherViewModel(
     }
 
     fun syncToCloudNow(customTitle: String = "") {
+        val cloud = cloudSyncRepository ?: run {
+            _cloudSyncMessage.value = "Chưa cấu hình Firebase; hãy sử dụng sao lưu cục bộ."
+            return
+        }
         val currentState = _cloudAuthState.value
         if (currentState !is CloudAuthState.Authenticated) {
             _cloudSyncMessage.value = "Vui lòng đăng nhập Google trước khi đồng bộ lên đám mây."
@@ -273,7 +290,7 @@ class LauncherViewModel(
                 val pageCount = _pages.value.count { it.pageType == PageType.HOME }.coerceAtLeast(1)
                 val accentHex = _settings.value.accentColorHex
 
-                val createRes = cloudSyncRepository.createCloudBackup(
+                val createRes = cloud.createCloudBackup(
                     userId = currentState.uid,
                     title = backupTitle,
                     deviceName = deviceName,
@@ -284,7 +301,7 @@ class LauncherViewModel(
                 )
 
                 createRes.onSuccess { backupId ->
-                    cloudSyncRepository.upsertUserProfile(
+                    cloud.upsertUserProfile(
                         userId = currentState.uid,
                         displayName = currentState.displayName,
                         deviceModel = deviceName,
@@ -326,10 +343,11 @@ class LauncherViewModel(
     }
 
     fun deleteCloudBackup(backupId: String) {
+        val cloud = cloudSyncRepository ?: return
         val currentState = _cloudAuthState.value
         if (currentState !is CloudAuthState.Authenticated) return
         viewModelScope.launch(Dispatchers.IO) {
-            cloudSyncRepository.deleteCloudBackup(currentState.uid, backupId)
+            cloud.deleteCloudBackup(currentState.uid, backupId)
                 .onSuccess {
                     _cloudSyncMessage.value = "Đã xóa bản sao lưu trên đám mây."
                 }
@@ -692,8 +710,17 @@ class LauncherViewModel(
         _telemetry.value = repository.getSystemTelemetry()
     }
 
-    fun refreshApps() {
-        viewModelScope.launch(Dispatchers.IO) {
+    fun refreshApps(fromResume: Boolean = false) {
+        // Avoid repeated package/widget scans from rapid HOME/resume events on One UI.
+        // Explicit data changes still call refreshApps() without throttling.
+        if (fromResume) {
+            val now = SystemClock.elapsedRealtime()
+            if (appRefreshJob?.isActive == true ||
+                (lastAppRefreshAtMs >= 0L && now - lastAppRefreshAtMs in 0L..5_000L)
+            ) return
+        }
+        lastAppRefreshAtMs = SystemClock.elapsedRealtime()
+        appRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             val pinned = tiles.value.map { it.packageName }.filter { it.isNotEmpty() }.toSet()
             _apps.value = repository.getInstalledApps(pinned)
             _installedWidgets.value = repository.discoverInstalledWidgets()
@@ -823,11 +850,20 @@ class LauncherViewModel(
                     "APPLICATION_KEY missing from CreationExtras"
                 }
                 val database = LumiaDatabase.getDatabase(app)
-                val databaseId = app.getString(R.string.firestore_database_id)
-                val firestore = FirebaseFirestore.getInstance(databaseId)
+                // The CI debug APK may intentionally lack google-services.json.
+                // Firebase must never block the local Home screen from opening.
+                val cloud = if (FirebaseApp.getApps(app).isEmpty()) {
+                    null
+                } else {
+                    runCatching {
+                        CloudSyncRepository(FirebaseFirestore.getInstance(app.getString(R.string.firestore_database_id)))
+                    }.onFailure {
+                        Log.w(TAG, "Cloud sync unavailable; starting local-only launcher", it)
+                    }.getOrNull()
+                }
                 LauncherViewModel(
                     repository = LauncherRepository(app, database.tileDao()),
-                    cloudSyncRepository = CloudSyncRepository(firestore)
+                    cloudSyncRepository = cloud
                 )
             }
         }
