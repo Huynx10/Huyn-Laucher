@@ -95,7 +95,9 @@ data class SmartFolderItem(
     val packageName: String = "",
     val tileType: TileType = TileType.APP,
     val customIconName: String = "",
-    val category: AppCategory = AppCategory.TOOLS
+    val category: AppCategory = AppCategory.TOOLS,
+    // Optional snapshot for tiles absorbed from Home. Old folder JSON has no snapshot.
+    val sourceTile: TileEntity? = null
 )
 
 @Immutable
@@ -121,6 +123,18 @@ data class SmartFolderConfig(
                 put("tileType", item.tileType.name)
                 put("customIconName", item.customIconName)
                 put("category", item.category.name)
+                item.sourceTile?.takeIf { !it.hasBoundOrLinkedWidget() }?.let { tile ->
+                    put("sourceTile", org.json.JSONObject().apply {
+                        put("id", tile.id)
+                        put("size", tile.size.name)
+                        put("orderIndex", tile.orderIndex)
+                        put("gridX", tile.gridX)
+                        put("gridY", tile.gridY)
+                        put("colorOverrideHex", tile.colorOverrideHex ?: org.json.JSONObject.NULL)
+                        put("notificationCount", tile.notificationCount)
+                        put("isLiveEnabled", tile.isLiveEnabled)
+                    })
+                }
             }
             itemsArr.put(obj)
         }
@@ -166,6 +180,32 @@ data class SmartFolderConfig(
                             } catch (_: Exception) {
                                 cat
                             }
+                            // Only non-widget Home tiles can be reconstructed from snapshots.
+                            // Never restore an AppWidgetHost ID from untrusted folder JSON.
+                            val sourceTile = itemObj.optJSONObject("sourceTile")?.let { source ->
+                                val originalId = source.optString("id", "")
+                                val originalSize = runCatching {
+                                    TileSize.valueOf(source.getString("size"))
+                                }.getOrNull()
+                                if (originalId.isBlank() || originalSize == null ||
+                                    itemType == TileType.WIDGET || itemType == TileType.SMART_FOLDER
+                                ) null else TileEntity(
+                                    id = originalId,
+                                    title = itemObj.optString("title", "Ứng dụng"),
+                                    packageName = itemObj.optString("packageName", ""),
+                                    tileType = itemType,
+                                    size = originalSize,
+                                    orderIndex = source.optInt("orderIndex", 0),
+                                    pageId = tile.pageId,
+                                    gridX = source.optInt("gridX", -1),
+                                    gridY = source.optInt("gridY", -1),
+                                    colorOverrideHex = if (source.isNull("colorOverrideHex")) null
+                                        else source.optString("colorOverrideHex", null),
+                                    customIconName = itemObj.optString("customIconName", ""),
+                                    notificationCount = source.optInt("notificationCount", 0),
+                                    isLiveEnabled = source.optBoolean("isLiveEnabled", true)
+                                )
+                            }
                             itemsList.add(
                                 SmartFolderItem(
                                     id = itemObj.optString("id", "sf_item_$i"),
@@ -173,7 +213,8 @@ data class SmartFolderConfig(
                                     packageName = itemObj.optString("packageName", ""),
                                     tileType = itemType,
                                     customIconName = itemObj.optString("customIconName", ""),
-                                    category = itemCat
+                                    category = itemCat,
+                                    sourceTile = sourceTile
                                 )
                             )
                         }
@@ -248,6 +289,18 @@ data class SmartFolderConfig(
                         label = tile.title
                     )
                 }
+            }
+        }
+
+        // Preserve distinct pinned tiles, even when they launch the same package.
+        // Only generated/legacy entries without a source snapshot are deduplicated.
+        fun distinctItemsPreservingTiles(items: List<SmartFolderItem>): List<SmartFolderItem> {
+            val seen = mutableSetOf<String>()
+            return items.filter { item ->
+                val key = item.sourceTile?.let { "tile:${it.id}" }
+                    ?: if (item.packageName.isNotBlank()) "pkg:${item.packageName}"
+                    else "type:${item.tileType.name}:${item.title.lowercase()}"
+                seen.add(key)
             }
         }
 
