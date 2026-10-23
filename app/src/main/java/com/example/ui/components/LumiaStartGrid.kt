@@ -2053,7 +2053,7 @@ private fun SingleTileContextualBar(
                         onClick = onOpenSmartFolder,
                         testTag = "contextual_bar_open_smart_folder"
                     )
-                } else {
+                } else if (!tile.hasBoundOrLinkedWidget()) {
                     SingleTilePillAction(
                         icon = Icons.Default.FolderSpecial,
                         label = "Gom nhóm",
@@ -2120,3 +2120,4 @@ private fun SingleTilePillAction(
         )
     }
 }
+
