@@ -91,10 +91,9 @@ class LauncherRepository(
                 val totalCols = if (loadSettings().showMoreTiles) 6 else 4
                 val updated = mutableListOf<TileEntity>()
                 allTiles.groupBy { it.pageId }.forEach { (_, pageTiles) ->
-                    val placed = mutableListOf<TileEntity>()
+                    val placed = pageTiles.filter { it.gridX >= 0 && it.gridY >= 0 }.toMutableList()
                     pageTiles.sortedBy { it.orderIndex }.forEach { tile ->
                         if (tile.gridX >= 0 && tile.gridY >= 0) {
-                            placed.add(tile)
                             updated.add(tile)
                         } else {
                             val (gx, gy) = findFirstFreeGridPosition(
@@ -900,7 +899,7 @@ class LauncherRepository(
 
         val matchingTiles = if (absorbMatchingPageTiles) {
             pageTiles.filter {
-                it.tileType != TileType.SMART_FOLDER &&
+                it.tileType != TileType.SMART_FOLDER && !it.hasBoundOrLinkedWidget() &&
                     (category == AppCategory.ALL || SmartFolderConfig.classifyTileCategory(it, customCategories) == category)
             }
         } else {
@@ -979,7 +978,7 @@ class LauncherRepository(
         val totalCols = if (loadSettings().showMoreTiles) 6 else 4
         val pageTiles = allTiles.filter { it.pageId == pageId }.sortedWith(compareBy({ it.gridY.coerceAtLeast(0) }, { it.gridX.coerceAtLeast(0) }, { it.orderIndex }))
 
-        val looseTiles = pageTiles.filter { it.tileType != TileType.SMART_FOLDER }
+        val looseTiles = pageTiles.filter { it.tileType != TileType.SMART_FOLDER && !it.hasBoundOrLinkedWidget() }
         if (looseTiles.isEmpty()) return@withTransaction 0
 
         val existingFoldersByCat = pageTiles
@@ -992,9 +991,9 @@ class LauncherRepository(
         // Delete loose tiles that are being grouped
         looseTiles.forEach { tileDao.deleteById(it.id) }
 
-        val placedTiles = mutableListOf<TileEntity>()
-        // Keep existing folders that didn't get new items first
-        existingFoldersByCat.values.forEach { placedTiles.add(it) }
+        // Reserve all retained tiles, including native widgets, before placing folders.
+        val absorbedIds = looseTiles.map { it.id }.toSet()
+        val placedTiles = pageTiles.filter { it.id !in absorbedIds }.toMutableList()
 
         var foldersCreatedOrUpdated = 0
         for ((cat, catTiles) in groupedByCat) {
@@ -1065,6 +1064,7 @@ class LauncherRepository(
         database.withTransaction {
         val allTiles = tileDao.getAllTiles()
         val target = allTiles.find { it.id == tileId } ?: return@withTransaction null
+        if (target.hasBoundOrLinkedWidget()) return@withTransaction null
         if (target.tileType == TileType.SMART_FOLDER) return@withTransaction target
 
         val customCategories = loadCustomAppCategories()
@@ -1074,7 +1074,7 @@ class LauncherRepository(
 
         val tilesToAbsorb = if (absorbSameCategoryOnPage) {
             pageTiles.filter {
-                it.id == target.id || (it.tileType != TileType.SMART_FOLDER && SmartFolderConfig.classifyTileCategory(it, customCategories) == cat)
+                it.id == target.id || (it.tileType != TileType.SMART_FOLDER && !it.hasBoundOrLinkedWidget() && SmartFolderConfig.classifyTileCategory(it, customCategories) == cat)
             }
         } else {
             listOf(target)
@@ -1166,7 +1166,7 @@ class LauncherRepository(
         tileDao.deleteById(folderTileId)
         val placed = allTiles.filter { it.pageId == folderTile.pageId && it.id != folderTileId }.toMutableList()
 
-        config.items.take(6).forEachIndexed { index, item ->
+        config.items.forEachIndexed { index, item ->
             val (gx, gy) = findFirstFreeGridPosition(
                 existingPageTiles = placed,
                 spanX = TileSize.MEDIUM.effectiveSpanX(totalCols),
@@ -1972,3 +1972,4 @@ class LauncherRepository(
         }
     }
 }
+

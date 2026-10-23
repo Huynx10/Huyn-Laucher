@@ -251,68 +251,9 @@ data class SmartFolderConfig(
             }
         }
 
-        fun defaultSeedItemsForCategory(category: AppCategory): List<SmartFolderItem> {
-            return when (category) {
-                AppCategory.COMMUNICATION -> listOf(
-                    SmartFolderItem("seed_phone", "Điện thoại", "com.google.android.dialer", TileType.APP, "phone", AppCategory.COMMUNICATION),
-                    SmartFolderItem("seed_msg", "Tin nhắn", "com.google.android.apps.messaging", TileType.APP, "message", AppCategory.COMMUNICATION),
-                    SmartFolderItem("seed_contacts", "Danh bạ", "com.google.android.contacts", TileType.APP, "phone", AppCategory.COMMUNICATION),
-                    SmartFolderItem("seed_mail", "Thư điện tử", "com.google.android.gm", TileType.APP, "message", AppCategory.COMMUNICATION),
-                    SmartFolderItem("seed_chat", "Trò chuyện nhóm", "", TileType.APP, "message", AppCategory.COMMUNICATION)
-                )
-                AppCategory.TOOLS -> listOf(
-                    SmartFolderItem("seed_browser", "Trình duyệt", "com.android.chrome", TileType.APP, "web", AppCategory.TOOLS),
-                    SmartFolderItem("seed_clock", "Lịch & Giờ", "", TileType.CLOCK_CALENDAR, "clock", AppCategory.TOOLS),
-                    SmartFolderItem("seed_weather", "Thời tiết", "", TileType.WEATHER, "weather", AppCategory.TOOLS),
-                    SmartFolderItem("seed_maps", "Bản đồ", "com.google.android.apps.maps", TileType.APP, "map", AppCategory.TOOLS),
-                    SmartFolderItem("seed_files", "Quản lý tệp", "com.google.android.documentsui", TileType.APP, "file", AppCategory.TOOLS),
-                    SmartFolderItem("seed_calc", "Máy tính", "com.google.android.calculator", TileType.APP, "settings", AppCategory.TOOLS)
-                )
-                AppCategory.MEDIA -> listOf(
-                    SmartFolderItem("seed_camera", "Máy ảnh", "SYSTEM_CAMERA", TileType.APP, "camera", AppCategory.MEDIA),
-                    SmartFolderItem("seed_photos", "Ảnh Lumia", "", TileType.PHOTOS, "photo", AppCategory.MEDIA),
-                    SmartFolderItem("seed_music", "Âm nhạc", "", TileType.APP, "music", AppCategory.MEDIA),
-                    SmartFolderItem("seed_recorder", "Ghi âm", "", TileType.APP, "record", AppCategory.MEDIA),
-                    SmartFolderItem("seed_video", "Trình phát Video", "", TileType.APP, "photo", AppCategory.MEDIA)
-                )
-                AppCategory.PRODUCTIVITY -> listOf(
-                    SmartFolderItem("seed_notes", "Ghi chú nhanh", "", TileType.NOTES, "note", AppCategory.PRODUCTIVITY),
-                    SmartFolderItem("seed_store", "Cửa hàng", "com.android.vending", TileType.APP, "store", AppCategory.PRODUCTIVITY),
-                    SmartFolderItem("seed_docs", "Tài liệu Office", "", TileType.APP, "note", AppCategory.PRODUCTIVITY),
-                    SmartFolderItem("seed_calendar", "Lịch biểu", "", TileType.CLOCK_CALENDAR, "clock", AppCategory.PRODUCTIVITY),
-                    SmartFolderItem("seed_files_prod", "Lưu trữ Cloud", "", TileType.APP, "file", AppCategory.PRODUCTIVITY)
-                )
-                AppCategory.SOCIAL -> listOf(
-                    SmartFolderItem("seed_quote", "Cảm hứng mỗi ngày", "", TileType.NEWS_QUOTE, "note", AppCategory.SOCIAL),
-                    SmartFolderItem("seed_video_social", "Video giải trí", "com.google.android.youtube", TileType.APP, "music", AppCategory.SOCIAL),
-                    SmartFolderItem("seed_community", "Cộng đồng Lumia", "", TileType.APP, "message", AppCategory.SOCIAL),
-                    SmartFolderItem("seed_news", "Tin tức 24h", "", TileType.NEWS_QUOTE, "web", AppCategory.SOCIAL),
-                    SmartFolderItem("seed_moments", "Khoảnh khắc", "", TileType.PHOTOS, "photo", AppCategory.SOCIAL)
-                )
-                AppCategory.GAMES -> listOf(
-                    SmartFolderItem("seed_game_hub", "Xbox / Game Hub", "", TileType.APP, "store", AppCategory.GAMES),
-                    SmartFolderItem("seed_puzzle", "Giải đố Logic", "", TileType.APP, "store", AppCategory.GAMES),
-                    SmartFolderItem("seed_chess", "Cờ vua cổ điển", "", TileType.APP, "store", AppCategory.GAMES),
-                    SmartFolderItem("seed_perf_boost", "Tăng tốc Game", "", TileType.PERFORMANCE, "settings", AppCategory.GAMES),
-                    SmartFolderItem("seed_arcade", "Đua xe Arcade", "", TileType.APP, "store", AppCategory.GAMES)
-                )
-                AppCategory.SYSTEM -> listOf(
-                    SmartFolderItem("seed_settings", "Cài đặt hệ thống", "SYSTEM_SETTINGS", TileType.APP, "settings", AppCategory.SYSTEM),
-                    SmartFolderItem("seed_battery", "Pin & Nguồn", "", TileType.BATTERY, "settings", AppCategory.SYSTEM),
-                    SmartFolderItem("seed_perf", "Hiệu năng máy", "", TileType.PERFORMANCE, "settings", AppCategory.SYSTEM),
-                    SmartFolderItem("seed_storage", "Bộ nhớ thiết bị", "SYSTEM_SETTINGS", TileType.APP, "file", AppCategory.SYSTEM),
-                    SmartFolderItem("seed_network", "Kết nối mạng", "SYSTEM_SETTINGS", TileType.APP, "web", AppCategory.SYSTEM)
-                )
-                AppCategory.ALL -> listOf(
-                    SmartFolderItem("seed_phone", "Điện thoại", "com.google.android.dialer", TileType.APP, "phone", AppCategory.COMMUNICATION),
-                    SmartFolderItem("seed_browser", "Trình duyệt", "com.android.chrome", TileType.APP, "web", AppCategory.TOOLS),
-                    SmartFolderItem("seed_camera", "Máy ảnh", "SYSTEM_CAMERA", TileType.APP, "camera", AppCategory.MEDIA),
-                    SmartFolderItem("seed_notes", "Ghi chú nhanh", "", TileType.NOTES, "note", AppCategory.PRODUCTIVITY),
-                    SmartFolderItem("seed_settings", "Cài đặt hệ thống", "SYSTEM_SETTINGS", TileType.APP, "settings", AppCategory.SYSTEM),
-                    SmartFolderItem("seed_weather", "Thời tiết", "", TileType.WEATHER, "weather", AppCategory.TOOLS)
-                )
-            }
-        }
+        // Empty folders are intentional. Installed apps are resolved below; never invent content.
+        @Suppress("UNUSED_PARAMETER")
+        fun defaultSeedItemsForCategory(category: AppCategory): List<SmartFolderItem> = emptyList()
 
         fun resolveEffectiveItems(
             config: SmartFolderConfig,
@@ -352,16 +293,6 @@ data class SmartFolderConfig(
                                 )
                             )
                         }
-                    }
-                }
-            }
-
-            // 3. Ensure rich folder-peek preview by topping up with category defaults if fewer than 4 items
-            if (config.autoSyncCategory && result.size < 4) {
-                for (seed in defaultSeedItemsForCategory(config.category)) {
-                    val k = keyFor(seed.packageName, seed.tileType, seed.title)
-                    if (k !in config.excludedKeys && seed.id !in config.excludedKeys && seenKeys.add(k)) {
-                        result.add(seed)
                     }
                 }
             }
@@ -845,3 +776,4 @@ data class LauncherSettings(
         }
     }
 }
+
