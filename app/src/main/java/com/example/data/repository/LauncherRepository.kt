@@ -45,6 +45,7 @@ import com.example.data.model.TileSize
 import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import com.example.data.model.Wp10TileStyle
+import com.example.data.model.WallpaperSource
 import com.example.ui.components.AppIconMemoryCache
 import com.example.ui.theme.DynamicAccentEngine
 import com.example.ui.widget.LumiaWidgetHostManager
@@ -246,7 +247,7 @@ class LauncherRepository(
             // Page 1: Primary communication, clock, weather, camera, browser, store, settings
             TileEntity(
                 id = "tile_clock_calendar",
-                title = "Lịch & Giờ",
+                title = "Đồng hồ",
                 tileType = TileType.CLOCK_CALENDAR,
                 size = TileSize.WIDE,
                 orderIndex = 0,
@@ -380,9 +381,9 @@ class LauncherRepository(
             // Page 2: Photos, Battery, Performance, Notes, Quotes
             TileEntity(
                 id = "tile_photos",
-                title = "Ảnh Lumia",
-                packageName = findPackageForCategory(Intent.CATEGORY_APP_GALLERY, "com.google.android.apps.photos", "com.android.gallery3d"),
-                tileType = TileType.PHOTOS,
+                title = "Ảnh",
+                packageName = findPackageForCategory(Intent.CATEGORY_APP_GALLERY, "com.sec.android.gallery3d", "com.google.android.apps.photos", "com.android.gallery3d"),
+                tileType = TileType.APP,
                 size = TileSize.LARGE,
                 orderIndex = 0,
                 pageId = "page_home_2",
@@ -436,6 +437,27 @@ class LauncherRepository(
                 isLiveEnabled = true
             )
         )
+            // A launcher cannot invent weather, news or notes from other apps. Those
+            // surfaces should be added through the real Android widget picker.
+            .filterNot { tile ->
+                tile.tileType in setOf(TileType.WEATHER, TileType.NEWS_QUOTE, TileType.NOTES) ||
+                    (tile.id == "tile_photos" && tile.packageName.isBlank())
+            }
+            // Pack only the factory template; never compact an existing user's free layout.
+            .groupBy { it.pageId }
+            .flatMap { (_, items) ->
+                val placed = mutableListOf<TileEntity>()
+                items.forEachIndexed { index, tile ->
+                    val (x, y) = findFirstFreeGridPosition(
+                        existingPageTiles = placed,
+                        spanX = tile.size.effectiveSpanX(4),
+                        spanY = tile.size.effectiveSpanY(),
+                        totalCols = 4
+                    )
+                    placed.add(tile.copy(gridX = x, gridY = y, orderIndex = index))
+                }
+                placed
+            }
     }
 
     private fun findPackageForCategory(category: String, vararg preferredPackages: String): String {
@@ -513,6 +535,7 @@ class LauncherRepository(
         val pageOthers = tiles.filter { it.pageId == target.pageId && it.id != target.id }
         val resolvedPageTiles = resolveCollisionsOnly(resizedTarget, pageOthers, totalCols)
         tileDao.insertAll(resolvedPageTiles)
+        autoArrangeIfEnabled(target.pageId)
     }
 
     suspend fun moveTileToGridPosition(
@@ -557,12 +580,14 @@ class LauncherRepository(
                 }
             if (canSwapCleanly) {
                 tileDao.insertAll(listOf(movedTarget, single.copy(gridX = swapX, gridY = swapY)))
+                autoArrangeIfEnabled(target.pageId)
                 return@withContext
             }
         }
 
         val resolved = resolveCollisionsOnly(movedTarget, pageOthers, totalCols)
         tileDao.insertAll(resolved)
+        autoArrangeIfEnabled(target.pageId)
     }
 
     private fun resolveCollisionsOnly(
@@ -628,12 +653,40 @@ class LauncherRepository(
         )
     }
 
+    /**
+     * Compact existing tiles only when requested. The default remains free placement.
+     * No widget IDs are reallocated; only Room tile coordinates are updated.
+     */
+    suspend fun arrangeTilesOnPage(pageId: String) = withContext(Dispatchers.IO) {
+        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+        database.withTransaction {
+            val tiles = tileDao.getAllTiles().filter { it.pageId == pageId }
+                .sortedWith(compareBy<TileEntity>({ it.gridY.coerceAtLeast(0) }, { it.gridX.coerceAtLeast(0) }, { it.orderIndex }))
+            val placed = mutableListOf<TileEntity>()
+            tiles.forEachIndexed { index, tile ->
+                val (x, y) = findFirstFreeGridPosition(
+                    existingPageTiles = placed,
+                    spanX = tile.size.effectiveSpanX(totalCols),
+                    spanY = tile.size.effectiveSpanY(),
+                    totalCols = totalCols
+                )
+                placed.add(tile.copy(gridX = x, gridY = y, orderIndex = index))
+            }
+            if (placed.isNotEmpty()) tileDao.insertAll(placed)
+        }
+    }
+
+    private suspend fun autoArrangeIfEnabled(pageId: String) {
+        if (loadSettings().autoArrangeTiles) arrangeTilesOnPage(pageId)
+    }
+
     suspend fun unpinTile(tileId: String) = withContext(Dispatchers.IO) {
         val target = tileDao.getAllTiles().find { it.id == tileId }
         if (target != null && target.appWidgetId > 0) {
             LumiaWidgetHostManager.getInstance(context).releaseWidgetId(target.appWidgetId)
         }
         tileDao.deleteById(tileId)
+        if (target != null) autoArrangeIfEnabled(target.pageId)
     }
 
     suspend fun pinWidgetTile(
@@ -673,6 +726,7 @@ class LauncherRepository(
             widgetResizeMode = provider.resizeMode
         )
         tileDao.insertOrUpdate(widgetTile)
+        autoArrangeIfEnabled(pageId)
         widgetTile
     }
 
@@ -829,6 +883,7 @@ class LauncherRepository(
             notificationCount = 0
         )
         tileDao.insertOrUpdate(tile)
+        autoArrangeIfEnabled(pageId)
     }
 
     suspend fun pinTile(tile: TileEntity) = withContext(Dispatchers.IO) {
@@ -846,6 +901,7 @@ class LauncherRepository(
             )
         }
         tileDao.insertOrUpdate(tile.copy(orderIndex = pageTiles.size, gridX = gx, gridY = gy))
+        autoArrangeIfEnabled(tile.pageId)
     }
 
     suspend fun resetToDefaultTiles() = withContext(Dispatchers.IO) {
@@ -1568,7 +1624,10 @@ class LauncherRepository(
             pageTransitionEffect = try { PageTransitionEffect.valueOf(transitionStr) } catch (_: Exception) { PageTransitionEffect.TURNSTILE_3D },
             doubleTapToGlance = prefs.getBoolean("double_tap_to_glance", true),
             lockHomeLayout = prefs.getBoolean("lock_home_layout", false),
+            autoArrangeTiles = prefs.getBoolean("auto_arrange_tiles", false),
             fullWallpaperEnabled = prefs.getBoolean("full_wallpaper_enabled", true),
+            wallpaperSource = runCatching { WallpaperSource.valueOf(prefs.getString("wallpaper_source", "") ?: "") }
+                .getOrElse { if (!prefs.getString("custom_wallpaper_uri", "").isNullOrBlank()) WallpaperSource.CUSTOM else if (prefs.contains("wallpaper_gradient_index")) WallpaperSource.LUMIA else WallpaperSource.SYSTEM },
             wallpaperGradientIndex = wallpaperIdx,
             customWallpaperUri = prefs.getString("custom_wallpaper_uri", "") ?: "",
             wallpaperDimAlpha = prefs.getFloat("wallpaper_dim_alpha", 0.18f).coerceIn(0f, 0.75f),
@@ -1622,7 +1681,9 @@ class LauncherRepository(
             .putString("page_transition_effect", settings.pageTransitionEffect.name)
             .putBoolean("double_tap_to_glance", settings.doubleTapToGlance)
             .putBoolean("lock_home_layout", settings.lockHomeLayout)
+            .putBoolean("auto_arrange_tiles", settings.autoArrangeTiles)
             .putBoolean("full_wallpaper_enabled", settings.fullWallpaperEnabled)
+            .putString("wallpaper_source", settings.wallpaperSource.name)
             .putInt("wallpaper_gradient_index", settings.wallpaperGradientIndex)
             .putString("custom_wallpaper_uri", settings.customWallpaperUri)
             .putFloat("wallpaper_dim_alpha", settings.wallpaperDimAlpha.coerceIn(0f, 0.75f))
@@ -1680,11 +1741,13 @@ class LauncherRepository(
             put("pageTransitionEffect", settings.pageTransitionEffect.name)
             put("doubleTapToGlance", settings.doubleTapToGlance)
             put("lockHomeLayout", settings.lockHomeLayout)
+            put("autoArrangeTiles", settings.autoArrangeTiles)
             put("fullWallpaperEnabled", settings.fullWallpaperEnabled)
             put("turnstileAnimationEnabled", settings.turnstileAnimationEnabled)
             put("glanceScreenEnabled", settings.glanceScreenEnabled)
             put("batterySaverMode", settings.batterySaverMode.name)
             put("batterySaverThresholdPct", settings.batterySaverThresholdPct)
+            put("wallpaperSource", settings.wallpaperSource.name)
             put("wallpaperGradientIndex", settings.wallpaperGradientIndex)
             put("wallpaperDimAlpha", settings.wallpaperDimAlpha.toDouble())
             put("autoOptimizeBackgroundApps", settings.autoOptimizeBackgroundApps)
@@ -1797,11 +1860,13 @@ class LauncherRepository(
                     pageTransitionEffect = try { PageTransitionEffect.valueOf(s.optString("pageTransitionEffect", cur.pageTransitionEffect.name)) } catch (_: Exception) { cur.pageTransitionEffect },
                     doubleTapToGlance = s.optBoolean("doubleTapToGlance", cur.doubleTapToGlance),
                     lockHomeLayout = s.optBoolean("lockHomeLayout", s.optBoolean("lock_home_layout", cur.lockHomeLayout)),
+                    autoArrangeTiles = s.optBoolean("autoArrangeTiles", cur.autoArrangeTiles),
                     fullWallpaperEnabled = s.optBoolean("fullWallpaperEnabled", cur.fullWallpaperEnabled),
                     turnstileAnimationEnabled = s.optBoolean("turnstileAnimationEnabled", cur.turnstileAnimationEnabled),
                     glanceScreenEnabled = s.optBoolean("glanceScreenEnabled", cur.glanceScreenEnabled),
                     batterySaverMode = BatterySaverMode.valueOf(s.optString("batterySaverMode", cur.batterySaverMode.name)),
                     batterySaverThresholdPct = s.optInt("batterySaverThresholdPct", cur.batterySaverThresholdPct).coerceIn(10, 50),
+                    wallpaperSource = runCatching { WallpaperSource.valueOf(s.optString("wallpaperSource", cur.wallpaperSource.name)) }.getOrDefault(cur.wallpaperSource),
                     wallpaperGradientIndex = s.optInt("wallpaperGradientIndex", cur.wallpaperGradientIndex),
                     wallpaperDimAlpha = s.optDouble("wallpaperDimAlpha", cur.wallpaperDimAlpha.toDouble()).toFloat().coerceIn(0f, 0.75f),
                     autoOptimizeBackgroundApps = s.optBoolean("autoOptimizeBackgroundApps", cur.autoOptimizeBackgroundApps),
@@ -1929,6 +1994,10 @@ class LauncherRepository(
                 tileDao.insertAll(reflowTiles(tileDao.getAllTiles(), if (settings.showMoreTiles) 6 else 4))
             }
         }
+        val shouldCompact = settings.autoArrangeTiles && !loadSettings().autoArrangeTiles
         saveSettings(settings)
+        if (shouldCompact) {
+            tileDao.getAllTiles().map { it.pageId }.distinct().forEach { arrangeTilesOnPage(it) }
+        }
     }
 }

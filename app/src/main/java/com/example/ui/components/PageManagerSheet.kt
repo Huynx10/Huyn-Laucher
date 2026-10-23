@@ -133,20 +133,20 @@ fun PageManagerSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "ONE UI 9.0 • HYPEROS • LUMIA",
+                            text = "LUMIA LAUNCHER",
                             color = accent.color,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Sắp xếp & Quản lý Trang",
+                            text = "Quản lý trang",
                             color = Color.White,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Nhấn giữ thẻ trang để kéo thả • Chạm biểu tượng Ngôi nhà để đặt Trang chính",
+                            text = "Nhấn giữ để đổi vị trí trang. Chạm biểu tượng nhà để chọn trang chính.",
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 11.sp
                         )
@@ -312,7 +312,7 @@ fun PageManagerSheet(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "SẮP XẾP NHANH CHUẨN UX (1 CHẠM):",
+                        text = "THỨ TỰ TRANG",
                         color = Color.White.copy(alpha = 0.65f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -324,7 +324,7 @@ fun PageManagerSheet(
                     ) {
                         // Preset 1: Standard Lumia / Windows Phone (Default Home at 0, All Apps at the end)
                         QuickSortPresetChip(
-                            label = "Chuẩn Lumia (App cuối)",
+                            label = "Ứng dụng ở cuối",
                             accentColor = accent.color,
                             modifier = Modifier.weight(1f),
                             onClick = {
@@ -337,7 +337,7 @@ fun PageManagerSheet(
 
                         // Preset 2: Center Default Home (One UI 9.0 style when multiple pages exist)
                         QuickSortPresetChip(
-                            label = "Home chính ở giữa (One UI)",
+                            label = "Trang chính ở giữa",
                             accentColor = accent.color,
                             modifier = Modifier.weight(1f),
                             onClick = {
@@ -351,7 +351,7 @@ fun PageManagerSheet(
 
                         // Preset 3: All Apps on far left (index 0)
                         QuickSortPresetChip(
-                            label = "App bên trái cùng",
+                            label = "Ứng dụng ở đầu",
                             accentColor = accent.color,
                             modifier = Modifier.weight(1f),
                             onClick = {
@@ -383,7 +383,7 @@ fun PageManagerSheet(
                     ) {
                         Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Thêm trang Home trống mới", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("Thêm trang mới", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -406,7 +406,7 @@ fun PageManagerSheet(
                             onValueChange = { newPageName = it },
                             placeholder = {
                                 Text(
-                                    text = "Tên trang Home mới (VD: Công việc, Giải trí...)",
+                                    text = "Tên trang",
                                     color = Color.White.copy(alpha = 0.45f),
                                     fontSize = 13.sp
                                 )
@@ -473,7 +473,7 @@ fun PageManagerSheet(
             // Detailed Page Order List with Left / Right / First / Last controls & Rename
             item {
                 Text(
-                    text = "CHI TIẾT THỨ TỰ CÁC TRANG (TRÁI QUA PHẢI)",
+                    text = "THỨ TỰ TRANG",
                     color = Color.White.copy(alpha = 0.65f),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,

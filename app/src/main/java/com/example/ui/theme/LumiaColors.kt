@@ -1,10 +1,14 @@
 package com.example.ui.theme
 
+import android.content.res.Resources
+import android.os.Build
+
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.example.data.model.DynamicAccentMode
 import com.example.data.model.LauncherSettings
+import com.example.data.model.WallpaperSource
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -454,6 +458,15 @@ object LumiaPalette {
      * picking the wallpaper's dynamic tonal color when autoWallpaperAccentEnabled is true.
      */
     fun resolveEffectiveAccent(settings: LauncherSettings): LumiaAccent {
+        if (settings.autoWallpaperAccentEnabled && settings.wallpaperSource == WallpaperSource.SYSTEM &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        ) {
+            // Android 12+ supplies a palette derived from the user's current system wallpaper.
+            val systemAccent = runCatching {
+                Color(Resources.getSystem().getColor(android.R.color.system_accent1_500, null))
+            }.getOrNull()
+            if (systemAccent != null) return getAccent(DynamicAccentEngine.colorToHex(systemAccent))
+        }
         return if (settings.autoWallpaperAccentEnabled) {
             DynamicAccentEngine.resolveAutoAccent(
                 wallpaperIndex = settings.wallpaperGradientIndex,

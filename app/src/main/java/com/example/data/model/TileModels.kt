@@ -764,6 +764,8 @@ data class AppFolder(
     val orderIndex: Int = 0
 )
 
+enum class WallpaperSource { SYSTEM, CUSTOM, LUMIA }
+
 @Immutable
 data class LauncherSettings(
     val accentColorHex: String = "#0078D7", // Lumia Cyan
@@ -782,7 +784,9 @@ data class LauncherSettings(
     val pageTransitionEffect: PageTransitionEffect = PageTransitionEffect.TURNSTILE_3D,
     val doubleTapToGlance: Boolean = true,
     val lockHomeLayout: Boolean = false,
+    val autoArrangeTiles: Boolean = false,
     val fullWallpaperEnabled: Boolean = true,
+    val wallpaperSource: WallpaperSource = WallpaperSource.SYSTEM,
     val wallpaperGradientIndex: Int = 1, // Windows 10 Mobile Hero default
     val customWallpaperUri: String = "", // User-selected custom photo wallpaper path/URI
     val wallpaperDimAlpha: Float = 0.18f, // Minimalist dark overlay over wallpaper for legibility

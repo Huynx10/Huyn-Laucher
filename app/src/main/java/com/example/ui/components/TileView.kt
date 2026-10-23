@@ -727,18 +727,19 @@ private fun MiniTileBadgeButton(
     onClick: () -> Unit
 ) {
     Box(
-        modifier = Modifier
-            .size(23.dp)
-            .clip(CircleShape)
-            .background(bgColor)
-            .clickable { onClick() },
+        modifier = Modifier.size(44.dp).clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = Color.White,
-            modifier = Modifier.size(14.dp)
-        )
+        Box(
+            modifier = Modifier.size(28.dp).clip(CircleShape).background(bgColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }

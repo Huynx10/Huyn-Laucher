@@ -128,9 +128,9 @@ fun ActionCenterOverlay(
             QuickActionTileModel(
                 id = "wifi",
                 title = "Mạng & Wi-Fi",
-                subtitle = "Đã kết nối",
+                subtitle = "Mở cài đặt Wi-Fi",
                 icon = Icons.Default.Wifi,
-                isActive = true,
+                isActive = false,
                 tag = "action_center_tile_wifi",
                 onClick = {
                     try {
@@ -141,7 +141,7 @@ fun ActionCenterOverlay(
             QuickActionTileModel(
                 id = "bluetooth",
                 title = "Bluetooth",
-                subtitle = "Thiết bị gần",
+                subtitle = "Mở cài đặt Bluetooth",
                 icon = Icons.Default.Bluetooth,
                 isActive = false,
                 tag = "action_center_tile_bluetooth",
@@ -169,20 +169,19 @@ fun ActionCenterOverlay(
             ),
             QuickActionTileModel(
                 id = "optimize_ram",
-                title = "Đóng App ngầm",
-                subtitle = "${telemetry.backgroundAppsCount} app • ${telemetry.ramUsagePct}% RAM",
+                title = "Xóa bộ nhớ đệm",
+                subtitle = "Chỉ dọn dữ liệu tạm của launcher",
                 icon = Icons.Default.CleaningServices,
-                isActive = telemetry.backgroundAppsCount == 0,
+                isActive = false,
                 tag = "action_center_tile_optimize_ram",
                 onClick = {
-                    val fresh = onOptimizeMemory()
-                    lastOptimizationFeedback =
-                        "Đã đóng ${fresh.lastStoppedAppsCount} tiến trình ngầm • Giải phóng +${fresh.lastFreedRamMb} MB RAM"
+                    onOptimizeMemory()
+                    lastOptimizationFeedback = "Đã xóa bộ nhớ đệm của launcher"
                 }
             ),
             QuickActionTileModel(
                 id = "tile_transparency",
-                title = "Kính Ô Tile",
+                title = "Kiểu ô",
                 subtitle = when (settings.wp10TileStyle) {
                     Wp10TileStyle.CRYSTAL_CLEAR -> "Trong suốt 100%"
                     Wp10TileStyle.FLUENT_ACRYLIC -> "Kính Acrylic"
@@ -205,8 +204,8 @@ fun ActionCenterOverlay(
             ),
             QuickActionTileModel(
                 id = "glance",
-                title = "Màn hình Glance",
-                subtitle = "Đồng hồ chờ",
+                title = "Xem nhanh",
+                subtitle = "Giờ và trạng thái pin",
                 icon = Icons.Default.NightlightRound,
                 isActive = settings.glanceScreenEnabled,
                 tag = "action_center_tile_glance",
@@ -228,8 +227,8 @@ fun ActionCenterOverlay(
             ),
             QuickActionTileModel(
                 id = "all_settings",
-                title = "Mọi Cài đặt",
-                subtitle = "Live Preview",
+                title = "Cài đặt",
+                subtitle = "Tùy chỉnh Lumia Launcher",
                 icon = Icons.Default.Settings,
                 isActive = true,
                 tag = "action_center_tile_all_settings",

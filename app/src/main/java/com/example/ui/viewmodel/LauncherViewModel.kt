@@ -757,6 +757,7 @@ class LauncherViewModel(
                 updateSettings(
                     _settings.value.copy(
                         customWallpaperUri = savedPath,
+                        wallpaperSource = com.example.data.model.WallpaperSource.CUSTOM,
                         fullWallpaperEnabled = true
                     )
                 )
@@ -767,7 +768,7 @@ class LauncherViewModel(
     fun clearCustomWallpaper() {
         viewModelScope.launch {
             repository.clearCustomWallpaper()
-            updateSettings(_settings.value.copy(customWallpaperUri = ""))
+            updateSettings(_settings.value.copy(customWallpaperUri = "", wallpaperSource = com.example.data.model.WallpaperSource.SYSTEM))
         }
     }
 

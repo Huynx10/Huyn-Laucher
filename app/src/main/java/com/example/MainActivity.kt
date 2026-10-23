@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.provider.AlarmClock
 import android.provider.Settings
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -99,6 +100,7 @@ import com.example.data.model.PageTransitionEffect
 import com.example.data.model.PageType
 import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
+import com.example.data.model.WallpaperSource
 import com.example.data.model.Wp10TileStyle
 import com.example.ui.auth.GoogleSignInHelper
 import com.example.ui.components.ActionCenterOverlay
@@ -123,13 +125,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Show Samsung/Android's actual Home wallpaper (including live wallpapers) behind
+        // a transparent Compose surface. Do not read or copy protected wallpaper pixels.
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+        window.setBackgroundDrawableResource(android.R.color.transparent)
         enableEdgeToEdge()
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
             MyApplicationTheme(darkTheme = settings.isDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = if (settings.isDarkTheme) Color.Black else Color(0xFFF2F2F2)
+                    color = if (settings.wallpaperSource == WallpaperSource.SYSTEM) Color.Transparent else if (settings.isDarkTheme) Color.Black else Color(0xFFF2F2F2)
                 ) {
                     LumiaLauncherApp(viewModel = viewModel)
                 }
@@ -466,7 +472,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(wallpaperBrush)
+            .then(
+                if (settings.wallpaperSource == WallpaperSource.LUMIA) Modifier.background(wallpaperBrush)
+                else Modifier.background(Color.Transparent)
+            )
             .pointerInput(isEditMode, selectedTileId) {
                 detectTapGestures(
                     onTap = {
@@ -486,7 +495,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 )
             }
     ) {
-        if (customWallpaperBitmap != null) {
+        if (settings.wallpaperSource == WallpaperSource.CUSTOM && customWallpaperBitmap != null) {
             Image(
                 bitmap = customWallpaperBitmap,
                 contentDescription = "Hình nền tùy chỉnh",
@@ -604,10 +613,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     viewModel.launchApp(tile.packageName)
                                 }
                                 tile.tileType == TileType.PERFORMANCE -> {
-                                    val fresh = viewModel.optimizeMemory()
+                                    viewModel.optimizeMemory()
                                     Toast.makeText(
                                         context,
-                                        "Đã đóng ${fresh.lastStoppedAppsCount} app chạy ngầm • Giải phóng +${fresh.lastFreedRamMb} MB RAM (Trống: ${fresh.availableRamMb} MB)",
+                                        "Đã xóa bộ nhớ đệm của launcher",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
@@ -710,10 +719,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     val launched = viewModel.launchApp(item.packageName)
                                 }
                                 item.tileType == TileType.PERFORMANCE -> {
-                                    val fresh = viewModel.optimizeMemory()
+                                    viewModel.optimizeMemory()
                                     Toast.makeText(
                                         context,
-                                        "Đã tối ưu hệ thống! RAM trống: ${fresh.availableRamMb} MB",
+                                        "Đã xóa bộ nhớ đệm của launcher",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
@@ -743,7 +752,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     viewModel.openSettings()
                                 }
                                 else -> {
-                                    Toast.makeText(context, "Đang mở: ${item.title}", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Không thể mở mục này", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
@@ -799,7 +808,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                             )
                         },
                         onUpdateSettings = { updated -> viewModel.updateSettings(updated) },
-                        onEnterEditMode = { viewModel.enterEditMode() }
+                        onEnterEditMode = { viewModel.enterEditMode() },
+                        onOpenActionCenter = { isActionCenterOpen = true }
                     )
                 }
             }
@@ -991,43 +1001,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             }
         }
 
-        // Minimalist Windows Action Center Pull Pill at Top-Right when on Home Screen
-        AnimatedVisibility(
-            visible = !isEditMode && !isSettingsOpen && !isActionCenterOpen && activeSmartFolderRequest == null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(top = 4.dp, end = 12.dp)
-                .zIndex(15f)
-        ) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.42f))
-                    .border(0.8.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(50))
-                    .clickable { isActionCenterOpen = true }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .testTag("action_center_trigger_pill"),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.BlurOn,
-                    contentDescription = "Mở Action Center",
-                    tint = accent.color,
-                    modifier = Modifier.size(13.dp)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "Action Center • ${telemetry.batteryPct}%",
-                    color = Color.White.copy(alpha = 0.90f),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-
+        // Action Center is launched from the App Drawer header, not a floating Home pill.
         // Windows 11 / W10M Fluent Acrylic Action Center Overlay
         if (isActionCenterOpen) {
             ActionCenterOverlay(
