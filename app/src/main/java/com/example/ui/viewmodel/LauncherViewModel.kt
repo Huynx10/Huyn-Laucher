@@ -36,6 +36,9 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -85,6 +88,10 @@ class LauncherViewModel(
 
     private val _settings = MutableStateFlow(repository.loadSettings())
     val settings: StateFlow<LauncherSettings> = _settings.asStateFlow()
+    private val pendingSettings = Channel<LauncherSettings>(Channel.CONFLATED)
+    private val settingsMutationMutex = Mutex()
+    private val _isSettingsBusy = MutableStateFlow(false)
+    val isSettingsBusy: StateFlow<Boolean> = _isSettingsBusy.asStateFlow()
 
     private val _telemetry = MutableStateFlow(repository.getSystemTelemetry())
     val telemetry: StateFlow<SystemTelemetry> = _telemetry.asStateFlow()
@@ -152,6 +159,25 @@ class LauncherViewModel(
     }
 
     init {
+        // One writer per launcher: rapid slider/toggle changes cannot start concurrent Room reflows.
+        viewModelScope.launch(Dispatchers.IO) {
+            for (candidate in pendingSettings) {
+                settingsMutationMutex.withLock {
+                    if (candidate != _settings.value) return@withLock
+                    val heavy = candidate.showMoreTiles != repository.loadSettings().showMoreTiles ||
+                        (candidate.autoArrangeTiles && !repository.loadSettings().autoArrangeTiles)
+                    if (heavy) _isSettingsBusy.value = true
+                    try {
+                        repository.saveSettingsWithReflow(candidate)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Settings save failed", e)
+                        _cloudSyncMessage.value = "Không lưu được cài đặt. Hãy thử lại."
+                    } finally {
+                        if (heavy) _isSettingsBusy.value = false
+                    }
+                }
+            }
+        }
         viewModelScope.launch {
             repository.ensureDefaultTiles()
             refreshApps()
@@ -807,9 +833,7 @@ class LauncherViewModel(
                 }
             }
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.saveSettingsWithReflow(syncedSettings)
-        }
+        pendingSettings.trySend(syncedSettings)
     }
 
     suspend fun exportBackup(): String {
@@ -817,20 +841,33 @@ class LauncherViewModel(
     }
 
     suspend fun restoreBackup(json: String): Boolean {
-        val success = repository.restoreFromJson(json)
-        if (success) {
-            _settings.value = repository.loadSettings()
+        return settingsMutationMutex.withLock {
+            val success = repository.restoreFromJson(json)
+            if (success) {
+                _settings.value = repository.loadSettings()
+                _pages.value = repository.loadPages()
+                refreshApps()
+            }
+            success
+        }
+    }
+
+    suspend fun resetDefaultsAwait() {
+        settingsMutationMutex.withLock {
+            repository.resetToDefaultTiles()
             _pages.value = repository.loadPages()
             refreshApps()
         }
-        return success
     }
 
     fun resetDefaults() {
         viewModelScope.launch {
-            repository.resetToDefaultTiles()
-            _pages.value = repository.loadPages()
-            refreshApps()
+            try {
+                resetDefaultsAwait()
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not reset launcher layout", e)
+                _cloudSyncMessage.value = "Không đặt lại được bố cục. Hãy thử lại."
+            }
         }
     }
 
