@@ -799,7 +799,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                             )
                         },
                         onUpdateSettings = { updated -> viewModel.updateSettings(updated) },
-                        onEnterEditMode = { viewModel.enterEditMode() }
+                        onEnterEditMode = { viewModel.enterEditMode() },
+                        onOpenActionCenter = { isActionCenterOpen = true }
                     )
                 }
             }
@@ -991,43 +992,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             }
         }
 
-        // Minimalist Windows Action Center Pull Pill at Top-Right when on Home Screen
-        AnimatedVisibility(
-            visible = !isEditMode && !isSettingsOpen && !isActionCenterOpen && activeSmartFolderRequest == null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(top = 4.dp, end = 12.dp)
-                .zIndex(15f)
-        ) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.42f))
-                    .border(0.8.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(50))
-                    .clickable { isActionCenterOpen = true }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .testTag("action_center_trigger_pill"),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.BlurOn,
-                    contentDescription = "Mở Action Center",
-                    tint = accent.color,
-                    modifier = Modifier.size(13.dp)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "Action Center • ${telemetry.batteryPct}%",
-                    color = Color.White.copy(alpha = 0.90f),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-
+        // Action Center is launched from the App Drawer header, not a floating Home pill.
         // Windows 11 / W10M Fluent Acrylic Action Center Overlay
         if (isActionCenterOpen) {
             ActionCenterOverlay(
