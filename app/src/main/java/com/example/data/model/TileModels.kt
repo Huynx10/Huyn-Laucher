@@ -200,7 +200,7 @@ data class SmartFolderConfig(
                                     gridX = source.optInt("gridX", -1),
                                     gridY = source.optInt("gridY", -1),
                                     colorOverrideHex = if (source.isNull("colorOverrideHex")) null
-                                        else source.optString("colorOverrideHex", null),
+                                        else source.optString("colorOverrideHex"),
                                     customIconName = itemObj.optString("customIconName", ""),
                                     notificationCount = source.optInt("notificationCount", 0),
                                     isLiveEnabled = source.optBoolean("isLiveEnabled", true)
@@ -323,8 +323,13 @@ data class SmartFolderConfig(
             // 1. Explicit items in config
             for (item in config.items) {
                 val k = keyFor(item.packageName, item.tileType, item.title)
-                if (k !in config.excludedKeys && item.id !in config.excludedKeys && seenKeys.add(k)) {
-                    result.add(item)
+                if (k !in config.excludedKeys && item.id !in config.excludedKeys) {
+                    // Two intentionally pinned Home tiles may launch the same app.
+                    val uniqueKey = item.sourceTile?.let { "tile:${it.id}" } ?: k
+                    if (seenKeys.add(uniqueKey)) {
+                        result.add(item)
+                        seenKeys.add(k) // Still suppress the auto-synced duplicate.
+                    }
                 }
             }
 
