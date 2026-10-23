@@ -81,39 +81,10 @@ class LauncherRepository(
             prefs.edit().putBoolean("smart_folder_default_seeded_v1", true).apply()
         } else {
             val allTiles = tileDao.getAllTiles().toMutableList()
+            // Never insert a new Smart Folder into an existing or restored home layout.
+            // Keep the legacy migration marker without changing the user's tiles.
             if (!prefs.getBoolean("smart_folder_default_seeded_v1", false)) {
                 prefs.edit().putBoolean("smart_folder_default_seeded_v1", true).apply()
-                if (allTiles.none { it.tileType == TileType.SMART_FOLDER }) {
-                    val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-                    val home1Tiles = allTiles.filter { it.pageId == "page_home_1" }
-                    val (gx, gy) = findFirstFreeGridPosition(
-                        existingPageTiles = home1Tiles,
-                        spanX = TileSize.MEDIUM.effectiveSpanX(totalCols),
-                        spanY = TileSize.MEDIUM.effectiveSpanY(),
-                        totalCols = totalCols
-                    )
-                    val seedConfig = SmartFolderConfig(
-                        category = AppCategory.TOOLS,
-                        autoSyncCategory = true,
-                        layoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
-                        items = SmartFolderConfig.defaultSeedItemsForCategory(AppCategory.TOOLS)
-                    )
-                    val smartTile = TileEntity(
-                        id = "tile_smart_folder_tools",
-                        title = "Công cụ & Tiện ích",
-                        packageName = seedConfig.toJsonString(),
-                        tileType = TileType.SMART_FOLDER,
-                        size = TileSize.MEDIUM,
-                        orderIndex = home1Tiles.size,
-                        pageId = "page_home_1",
-                        gridX = gx,
-                        gridY = gy,
-                        customIconName = AppCategory.TOOLS.name.lowercase(),
-                        isLiveEnabled = true
-                    )
-                    tileDao.insertOrUpdate(smartTile)
-                    allTiles.add(smartTile)
-                }
             }
             val needsCoordInit = allTiles.any { it.gridX < 0 || it.gridY < 0 }
             if (needsCoordInit) {
