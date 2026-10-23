@@ -44,6 +44,36 @@ class DataSafetyRegressionTest {
         assertEquals(settings, repo.loadSettings())
     }
 
+    @Test fun invalidPendingRestoreJournalDoesNotCrashOrOverwriteExistingTiles() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val saved = TileEntity("saved", "My existing tile", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(saved)
+        assertTrue(prefs.edit().putBoolean("home_initialized", true)
+            .putString("pending_restore_json", "{invalid").commit())
+
+        repo.ensureDefaultTiles()
+
+        assertEquals(listOf(saved), db.tileDao().getAllTiles())
+        assertEquals("{invalid", prefs.getString("pending_restore_json", null))
+    }
+
+    @Test fun validPendingRestoreJournalStillReplaysAndClearsMarker() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        repo.ensureDefaultTiles()
+        val expected = db.tileDao().getAllTiles().toSet()
+        val journal = repo.exportBackupJson()
+        db.tileDao().clearAll()
+        db.tileDao().insertOrUpdate(TileEntity("interrupted", "Interrupted", gridX = 0, gridY = 0))
+        assertTrue(prefs.edit().putString("pending_restore_json", journal).commit())
+
+        repo.ensureDefaultTiles()
+
+        assertEquals(expected, db.tileDao().getAllTiles().toSet())
+        assertNull(prefs.getString("pending_restore_json", null))
+    }
+
     @Test fun emptyRestoreStaysEmptyAfterInitialization() = runBlocking {
         repo.ensureDefaultTiles()
         val backup = JSONObject(repo.exportBackupJson()).put("tiles", JSONArray())
