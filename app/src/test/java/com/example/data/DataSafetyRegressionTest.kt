@@ -145,6 +145,27 @@ class DataSafetyRegressionTest {
         assertTrue(repo.loadSettings().autoArrangeTiles)
     }
 
+    @Test fun existingHomeLayoutIsNotModifiedByLegacySmartFolderSeeding() = runBlocking {
+        val original = TileEntity("user_tile", "My tile", packageName = "example.app",
+            gridX = 2, gridY = 8, pageId = "page_home_1")
+        db.tileDao().insertAll(listOf(original))
+
+        repo.ensureDefaultTiles()
+        assertEquals(listOf(original), db.tileDao().getAllTiles())
+        // Repeated launcher startup must remain idempotent.
+        repo.ensureDefaultTiles()
+        assertEquals(listOf(original), db.tileDao().getAllTiles())
+    }
+
+    @Test fun deliberatelyEmptyInitializedHomeStaysEmptyAfterLegacyUpgrade() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("home_initialized", true).commit()
+
+        repo.ensureDefaultTiles()
+        assertTrue(db.tileDao().getAllTiles().isEmpty())
+    }
+
     @Test fun version2MigrationPreservesTileAndAddsUnboundWidgetFields() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "migration_data_safety.db"
