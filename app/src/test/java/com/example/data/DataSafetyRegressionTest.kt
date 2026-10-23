@@ -192,4 +192,66 @@ class DataSafetyRegressionTest {
         }
     }
 
+    @Test fun ungroupRestoresAllItemsBeyondPreviewLimit() = runBlocking {
+        val items = (1..12).map { SmartFolderItem("app_$it", "App $it", "example.app$it") }
+        db.tileDao().insertOrUpdate(TileEntity("folder", "Folder", tileType = TileType.SMART_FOLDER,
+            packageName = SmartFolderConfig(items = items).toJsonString(), gridX = 0, gridY = 0))
+        repo.ungroupSmartFolderToTiles("folder")
+        val after = db.tileDao().getAllTiles()
+        assertEquals(items.map { it.packageName }.toSet(), after.map { it.packageName }.toSet())
+        assertEquals(12, after.size)
+        assertEquals(12, after.map { it.gridX to it.gridY }.distinct().size)
+    }
+
+    @Test fun allFolderAbsorptionPathsPreserveNativeWidgets() = runBlocking {
+        val widgets = listOf(
+            TileEntity("widget", "Widget", tileType = TileType.WIDGET, appWidgetId = 102,
+                widgetProvider = "example/.Provider", gridX = 0, gridY = 0),
+            TileEntity("linked", "Linked app", tileType = TileType.APP, appWidgetId = 103,
+                widgetProvider = "example/.Provider", gridX = 2, gridY = 0),
+            TileEntity("pending", "Needs rebind", tileType = TileType.APP,
+                widgetProvider = "example/.Provider", gridX = 0, gridY = 2)
+        )
+        val app = TileEntity("app", "App", packageName = "example.app", gridX = 2, gridY = 2)
+        for (operation in 0..2) {
+            db.tileDao().clearAll()
+            db.tileDao().insertAll(widgets + app)
+            when (operation) {
+                0 -> repo.groupPageTilesByCategoryIntoSmartFolders("page_home_1")
+                1 -> repo.createSmartFolderByCategory(AppCategory.ALL, absorbMatchingPageTiles = true)
+                2 -> repo.convertTileIntoSmartFolder("app", absorbSameCategoryOnPage = true)
+            }
+            val after = db.tileDao().getAllTiles()
+            widgets.forEach { expected -> assertEquals(expected, after.single { it.id == expected.id }) }
+            val folder = after.single { it.tileType == TileType.SMART_FOLDER }
+            assertEquals(listOf("example.app"), SmartFolderConfig.fromTile(folder).items.map { it.packageName })
+            widgets.forEach { widget ->
+                assertFalse(folder.gridX < widget.gridX + 2 && folder.gridX + 2 > widget.gridX &&
+                    folder.gridY < widget.gridY + 2 && folder.gridY + 2 > widget.gridY)
+            }
+        }
+        widgets.forEach { assertNull(repo.convertTileIntoSmartFolder(it.id)) }
+    }
+
+    @Test fun coordinateMigrationReservesLaterPositionedTiles() = runBlocking {
+        val fixed = TileEntity("fixed", "Fixed", orderIndex = 1, gridX = 0, gridY = 0)
+        db.tileDao().insertAll(listOf(TileEntity("legacy", "Legacy", orderIndex = 0), fixed))
+        repo.ensureDefaultTiles()
+        val after = db.tileDao().getAllTiles()
+        assertEquals(fixed, after.single { it.id == "fixed" })
+        val migrated = after.single { it.id == "legacy" }
+        assertTrue(migrated.gridX >= 2 || migrated.gridY >= 2)
+        repo.ensureDefaultTiles()
+        assertEquals(after.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun emptySmartFolderDoesNotInventAppsOrLiveContent() = runBlocking {
+        val folder = repo.createSmartFolderByCategory(AppCategory.MEDIA)
+        val config = SmartFolderConfig.fromTile(folder)
+        assertTrue(config.items.isEmpty())
+        assertTrue(SmartFolderConfig.resolveEffectiveItems(config, emptyList()).isEmpty())
+        AppCategory.entries.forEach { assertTrue(SmartFolderConfig.defaultSeedItemsForCategory(it).isEmpty()) }
+    }
+
 }
+
