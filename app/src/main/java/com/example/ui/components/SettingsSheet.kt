@@ -42,6 +42,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Check
@@ -162,12 +163,11 @@ fun SettingsSheet(
     onRefreshTelemetry: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
-    BackHandler { onDismiss() }
-
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var selectedTab by remember { mutableStateOf(SettingsCategoryTab.WALLPAPER_COLOR) }
+    var selectedTab by remember { mutableStateOf<SettingsCategoryTab?>(null) }
+    BackHandler { if (selectedTab != null) selectedTab = null else onDismiss() }
     var isExpandedHeight by remember { mutableStateOf(false) }
 
     var selectedAccentHex by remember(settings.accentColorHex) { mutableStateOf(settings.accentColorHex) }
@@ -335,7 +335,7 @@ fun SettingsSheet(
     }
 
     val targetHeightFraction by animateFloatAsState(
-        targetValue = if (isExpandedHeight) 0.84f else 0.52f,
+        targetValue = if (selectedTab == null || isExpandedHeight) 0.84f else 0.64f,
         animationSpec = tween(durationMillis = 220),
         label = "settingsDockHeight"
     )
@@ -414,6 +414,11 @@ fun SettingsSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (selectedTab != null) {
+                                IconButton(onClick = { selectedTab = null }, modifier = Modifier.size(44.dp)) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại cài đặt", tint = Color.White)
+                                }
+                            }
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
@@ -424,7 +429,7 @@ fun SettingsSheet(
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "Cài đặt",
+                                        text = selectedTab?.title ?: "Cài đặt",
                                         color = Color.White,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold
@@ -476,51 +481,6 @@ fun SettingsSheet(
                 }
             }
 
-            // 4 Clear Category Tabs (No more giant single list!)
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                contentPadding = PaddingValues(horizontal = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                itemsIndexed(SettingsCategoryTab.entries) { _, tab ->
-                    val isSelected = selectedTab == tab
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(
-                                if (isSelected) accent.color
-                                else Color.White.copy(alpha = 0.07f)
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isSelected) Color.White.copy(alpha = 0.35f)
-                                else Color.White.copy(alpha = 0.08f),
-                                shape = RoundedCornerShape(50)
-                            )
-                            .clickable { selectedTab = tab }
-                            .padding(horizontal = 13.dp, vertical = 8.dp)
-                            .testTag(tab.tag),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = tab.title,
-                            tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.68f),
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = tab.title,
-                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.78f),
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        )
-                    }
-                }
-            }
-
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 
             // Active Tab Content (Focused, clean, minimal scrolling)
@@ -532,6 +492,39 @@ fun SettingsSheet(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 when (selectedTab) {
+                    null -> {
+                        item(key = "settings_home") {
+                            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                                SettingsCategoryTab.entries.forEachIndexed { index, category ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { selectedTab = category }
+                                            .padding(horizontal = 16.dp, vertical = 17.dp)
+                                            .testTag(category.tag),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(category.icon, contentDescription = null, tint = accent.color, modifier = Modifier.size(24.dp))
+                                        Spacer(Modifier.width(16.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(category.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                            val subtitle = when (category) {
+                                                SettingsCategoryTab.WALLPAPER_COLOR -> "Theo hệ thống, màu sắc, giao diện tối"
+                                                SettingsCategoryTab.TILES_LAYOUT -> "Sắp xếp ô, kích thước và hiệu ứng"
+                                                SettingsCategoryTab.APP_DRAWER -> "Danh sách A–Z, tìm kiếm và nhóm"
+                                                SettingsCategoryTab.BATTERY_SYSTEM -> "Sao lưu, pin và cài đặt mặc định"
+                                            }
+                                            Text(subtitle, color = Color.White.copy(alpha = 0.64f), fontSize = 12.sp)
+                                        }
+                                        Text("›", color = Color.White.copy(alpha = 0.54f), fontSize = 25.sp)
+                                    }
+                                    if (index < SettingsCategoryTab.entries.lastIndex) {
+                                        HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+                                    }
+                                }
+                            }
+                        }
+                    }
                     SettingsCategoryTab.WALLPAPER_COLOR -> {
                         item {
                             MinimalGroupCard(title = "HÌNH NỀN") {
