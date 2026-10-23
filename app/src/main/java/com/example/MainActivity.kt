@@ -144,7 +144,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.refreshApps()
+        viewModel.refreshApps(fromResume = true)
     }
 
     override fun onStop() {
