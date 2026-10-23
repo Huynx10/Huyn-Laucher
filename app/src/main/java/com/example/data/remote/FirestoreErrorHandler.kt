@@ -1,8 +1,6 @@
 package com.example.data.remote
 
 import android.util.Log
-import com.google.firebase.auth.FirebaseAuth
-import org.json.JSONArray
 import org.json.JSONObject
 
 enum class OperationType(val value: String) {
@@ -14,37 +12,14 @@ enum class OperationType(val value: String) {
     WRITE("write")
 }
 
+/** Diagnostic logs must not contain account identifiers, provider emails or document contents. */
 fun handleFirestoreError(exception: Exception, operationType: OperationType, path: String?): String {
-    val auth = try {
-        FirebaseAuth.getInstance()
-    } catch (_: Exception) {
-        null
-    }
-    val currentUser = auth?.currentUser
-
-    val providerInfoList = currentUser?.providerData?.map { provider ->
-        JSONObject().apply {
-            put("providerId", provider.providerId)
-            put("email", provider.email)
-        }
-    } ?: emptyList()
-
-    val authInfoJson = JSONObject().apply {
-        put("userId", currentUser?.uid)
-        put("email", currentUser?.email)
-        put("emailVerified", currentUser?.isEmailVerified)
-        put("tenantId", currentUser?.tenantId)
-        put("providerInfo", JSONArray(providerInfoList))
-    }
-
-    val errorInfoJson = JSONObject().apply {
-        put("error", exception.message ?: exception.toString())
+    val sanitizedPath = path?.replace(Regex("users/[^/]+"), "users/[redacted]")
+    val jsonString = JSONObject().apply {
+        put("errorType", exception.javaClass.simpleName)
         put("operationType", operationType.value)
-        put("path", path)
-        put("authInfo", authInfoJson)
-    }
-
-    val jsonString = errorInfoJson.toString()
-    Log.e("FirestoreError", "Firestore Error: $jsonString")
+        put("path", sanitizedPath)
+    }.toString()
+    Log.e("FirestoreError", jsonString)
     return jsonString
 }
