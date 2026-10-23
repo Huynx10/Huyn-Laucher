@@ -102,6 +102,7 @@ import com.example.data.model.TileSize
 import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import com.example.ui.theme.LumiaPalette
+import com.example.ui.widget.DefaultWidgetMatcher
 import kotlin.math.roundToInt
 
 private val DropFootprintSpringSpec = spring<Dp>(
@@ -938,6 +939,10 @@ fun LumiaStartGrid(
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             var customLabel by remember(tile.id) { mutableStateOf(tile.title) }
             var selectedColorHex by remember(tile.id) { mutableStateOf(tile.colorOverrideHex) }
+            var showAdvancedTileOptions by remember(tile.id) { mutableStateOf(false) }
+            val recommendedWidget = remember(tile, installedWidgets) {
+                DefaultWidgetMatcher.recommend(tile, installedWidgets)
+            }
 
             ModalBottomSheet(
                 onDismissRequest = { tileToCustomize = null },
@@ -952,19 +957,61 @@ fun LumiaStartGrid(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "TUỲ CHỈNH Ô TILE RIÊNG BIỆT",
-                        color = accent.color,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
+                        text = tile.title,
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
+                    if (recommendedWidget != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(accent.color.copy(alpha = 0.18f))
+                                .clickable {
+                                    tileToCustomize = null
+                                    onPickAndBindWidget(recommendedWidget, currentPage.id, tile.id)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 15.dp)
+                                .testTag("connect_recommended_widget"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(Icons.Default.Widgets, contentDescription = null, tint = accent.color)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Kết nối widget", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${recommendedWidget.appName} · ${recommendedWidget.label}",
+                                    fontSize = 12.sp,
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Icon(Icons.Default.Link, contentDescription = "Kết nối widget đề xuất", tint = Color.White)
+                        }
+                    } else if (tile.hasBoundOrLinkedWidget()) {
+                        Text("Đã liên kết với widget trên điện thoại", color = Color.White.copy(alpha = 0.72f), fontSize = 13.sp)
+                    } else if (tile.tileType == TileType.PERFORMANCE || tile.tileType == TileType.BATTERY) {
+                        Text("Ô này dùng dữ liệu hệ thống. Không cần kết nối widget khác.",
+                            color = Color.White.copy(alpha = 0.72f), fontSize = 13.sp)
+                    } else if (tile.id == "tile_clock_calendar") {
+                        Text("Ô này đang dùng giờ từ thiết bị.", color = Color.White.copy(alpha = 0.72f), fontSize = 13.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { showAdvancedTileOptions = !showAdvancedTileOptions },
+                        modifier = Modifier.fillMaxWidth().testTag("toggle_advanced_tile_options")
+                    ) {
+                        Text(if (showAdvancedTileOptions) "Thu gọn" else "Tùy chỉnh thêm")
+                    }
+                    if (showAdvancedTileOptions) {
                     OutlinedTextField(
                         value = customLabel,
                         onValueChange = { newText ->
                             customLabel = newText
                             onCustomizeTile(tile.id, selectedColorHex, newText, tile.isLiveEnabled)
                         },
-                        label = { Text("Tên hiển thị trên ô Tile (Tự động lưu)", color = Color.White.copy(alpha = 0.7f)) },
+                        label = { Text("Tên ô", color = Color.White.copy(alpha = 0.7f)) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
@@ -976,7 +1023,7 @@ fun LumiaStartGrid(
                     )
 
                     Text(
-                        text = "Kiểu nền & Màu sắc riêng cho ô này (Chạm để áp dụng ngay):",
+                        text = "Màu ô",
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
@@ -1006,13 +1053,13 @@ fun LumiaStartGrid(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Trong suốt hoàn toàn (Windows 10 Mobile Clear Tile)",
+                                text = "Trong suốt",
                                 color = Color.White,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Làm ô này trong suốt xuyên thấu 100% hình nền + viền sáng Fluent",
+                                text = "Hiển thị hình nền qua ô",
                                 color = Color.White.copy(alpha = 0.65f),
                                 fontSize = 11.sp
                             )
@@ -1088,7 +1135,7 @@ fun LumiaStartGrid(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "LIÊN KẾT ANDROID WIDGET VỚI TILE NÀY",
+                                text = "CHỌN WIDGET KHÁC",
                                 color = accent.color,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -1114,13 +1161,13 @@ fun LumiaStartGrid(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Gỡ liên kết Widget (Trả về App Tile)",
+                                        text = "Gỡ widget",
                                         color = Color.White,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = "Provider: ${tile.widgetProvider.ifBlank { "ID #${tile.appWidgetId}" }}",
+                                        text = "Quay lại ô ứng dụng",
                                         color = Color.White.copy(alpha = 0.68f),
                                         fontSize = 11.sp,
                                         maxLines = 1,
@@ -1196,6 +1243,7 @@ fun LumiaStartGrid(
                         }
                     }
 
+                    } // Advanced: name, appearance and alternate widget providers
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }
