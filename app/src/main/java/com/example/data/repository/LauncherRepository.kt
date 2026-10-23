@@ -62,7 +62,11 @@ import java.util.Locale
 class LauncherRepository(
     private val context: Context,
     private val tileDao: TileDao,
-    private val database: LumiaDatabase = LumiaDatabase.getDatabase(context)
+    private val database: LumiaDatabase = LumiaDatabase.getDatabase(context),
+    // Test seam: failed Room writes must not release the widget host's live binding.
+    private val releaseWidgetBinding: (Int) -> Unit = { id ->
+        LumiaWidgetHostManager.getInstance(context).releaseWidgetId(id)
+    }
 ) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
@@ -658,10 +662,11 @@ class LauncherRepository(
 
     suspend fun unpinTile(tileId: String) = withContext(Dispatchers.IO) {
         val target = tileDao.getAllTiles().find { it.id == tileId }
-        if (target != null && target.appWidgetId > 0) {
-            LumiaWidgetHostManager.getInstance(context).releaseWidgetId(target.appWidgetId)
-        }
+        // Persist removal before releasing a live host ID; a failed write leaves it intact.
         tileDao.deleteById(tileId)
+        if (target != null && target.appWidgetId > 0) {
+            releaseWidgetBinding(target.appWidgetId)
+        }
         if (target != null) autoArrangeIfEnabled(target.pageId)
     }
 
@@ -713,9 +718,7 @@ class LauncherRepository(
     ): TileEntity? = withContext(Dispatchers.IO) {
         val allTiles = tileDao.getAllTiles()
         val target = allTiles.find { it.id == tileId } ?: return@withContext null
-        if (target.appWidgetId > 0 && target.appWidgetId != appWidgetId) {
-            LumiaWidgetHostManager.getInstance(context).releaseWidgetId(target.appWidgetId)
-        }
+        val oldWidgetId = target.appWidgetId.takeIf { it > 0 && it != appWidgetId }
         val minSpanX = ((provider.minWidthDp + 69) / 70).coerceIn(1, provider.targetCellWidth)
         val minSpanY = ((provider.minHeightDp + 69) / 70).coerceIn(1, provider.targetCellHeight)
         val newSize = if (target.size in provider.allowedTileSizes) {
@@ -740,15 +743,14 @@ class LauncherRepository(
         } else {
             tileDao.insertOrUpdate(updated)
         }
+        // Only retire the previous binding once the replacement is durable.
+        oldWidgetId?.let(releaseWidgetBinding)
         updated
     }
 
     suspend fun unlinkWidgetFromTile(tileId: String) = withContext(Dispatchers.IO) {
         val allTiles = tileDao.getAllTiles()
         val target = allTiles.find { it.id == tileId } ?: return@withContext
-        if (target.appWidgetId > 0) {
-            LumiaWidgetHostManager.getInstance(context).releaseWidgetId(target.appWidgetId)
-        }
         tileDao.update(
             target.copy(
                 tileType = TileType.APP,
@@ -759,6 +761,9 @@ class LauncherRepository(
                 widgetResizeMode = 3
             )
         )
+        if (target.appWidgetId > 0) {
+            releaseWidgetBinding(target.appWidgetId)
+        }
     }
 
     suspend fun moveTileInPage(tileId: String, pageId: String, moveUp: Boolean) = withContext(Dispatchers.IO) {
