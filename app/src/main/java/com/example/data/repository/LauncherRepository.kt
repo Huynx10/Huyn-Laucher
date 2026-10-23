@@ -913,12 +913,14 @@ class LauncherRepository(
                 packageName = t.packageName,
                 tileType = t.tileType,
                 customIconName = t.customIconName,
-                category = SmartFolderConfig.classifyTileCategory(t, customCategories)
+                category = SmartFolderConfig.classifyTileCategory(t, customCategories),
+                sourceTile = t
             )
         }
 
-        val mergedItems = (absorbedItems + SmartFolderConfig.defaultSeedItemsForCategory(category))
-            .distinctBy { if (it.packageName.isNotBlank()) "pkg:${it.packageName}" else "title:${it.title.lowercase()}" }
+        val mergedItems = SmartFolderConfig.distinctItemsPreservingTiles(
+            absorbedItems + SmartFolderConfig.defaultSeedItemsForCategory(category)
+        )
 
         val remainingPageTiles = if (matchingTiles.isNotEmpty()) {
             val absorbedIds = matchingTiles.map { it.id }.toSet()
@@ -1004,14 +1006,16 @@ class LauncherRepository(
                     packageName = t.packageName,
                     tileType = t.tileType,
                     customIconName = t.customIconName,
-                    category = cat
+                    category = cat,
+                    sourceTile = t
                 )
             }
             val existingFolder = existingFoldersByCat[cat]
             if (existingFolder != null) {
                 val oldConfig = SmartFolderConfig.fromTile(existingFolder)
-                val combined = (oldConfig.items + newItems + SmartFolderConfig.defaultSeedItemsForCategory(cat))
-                    .distinctBy { if (it.packageName.isNotBlank()) "pkg:${it.packageName}" else "title:${it.title.lowercase()}" }
+                val combined = SmartFolderConfig.distinctItemsPreservingTiles(
+                    oldConfig.items + newItems + SmartFolderConfig.defaultSeedItemsForCategory(cat)
+                )
                 val updatedConfig = oldConfig.copy(items = combined)
                 val updatedFolder = existingFolder.copy(packageName = updatedConfig.toJsonString())
                 placedTiles.removeAll { it.id == existingFolder.id }
@@ -1026,8 +1030,9 @@ class LauncherRepository(
                     spanY = folderSize.effectiveSpanY(),
                     totalCols = totalCols
                 )
-                val combined = (newItems + SmartFolderConfig.defaultSeedItemsForCategory(cat))
-                    .distinctBy { if (it.packageName.isNotBlank()) "pkg:${it.packageName}" else "title:${it.title.lowercase()}" }
+                val combined = SmartFolderConfig.distinctItemsPreservingTiles(
+                    newItems + SmartFolderConfig.defaultSeedItemsForCategory(cat)
+                )
                 val config = SmartFolderConfig(
                     category = cat,
                     autoSyncCategory = true,
@@ -1103,17 +1108,17 @@ class LauncherRepository(
             findFirstFreeGridPosition(remainingPageTiles, spanX, spanY, totalCols)
         }
 
-        val items = (tilesToAbsorb.map { t ->
+        val items = SmartFolderConfig.distinctItemsPreservingTiles(tilesToAbsorb.map { t ->
             SmartFolderItem(
                 id = "item_${t.id}",
                 title = t.title,
                 packageName = t.packageName,
                 tileType = t.tileType,
                 customIconName = t.customIconName,
-                category = cat
+                category = cat,
+                sourceTile = t
             )
         } + SmartFolderConfig.defaultSeedItemsForCategory(cat))
-            .distinctBy { if (it.packageName.isNotBlank()) "pkg:${it.packageName}" else "title:${it.title.lowercase()}" }
 
         val config = SmartFolderConfig(
             category = cat,
@@ -1166,26 +1171,50 @@ class LauncherRepository(
         tileDao.deleteById(folderTileId)
         val placed = allTiles.filter { it.pageId == folderTile.pageId && it.id != folderTileId }.toMutableList()
 
+        // Keep original tile metadata for items created by Home grouping. Legacy and
+        // auto-synced folder entries have no snapshot and use the previous defaults.
+        val usedIds = allTiles.filter { it.id != folderTileId }.map { it.id }.toMutableSet()
         config.items.forEachIndexed { index, item ->
-            val (gx, gy) = findFirstFreeGridPosition(
-                existingPageTiles = placed,
-                spanX = TileSize.MEDIUM.effectiveSpanX(totalCols),
-                spanY = TileSize.MEDIUM.effectiveSpanY(),
-                totalCols = totalCols,
-                startY = folderTile.gridY.coerceAtLeast(0)
-            )
-            val newTile = TileEntity(
-                id = "unpacked_${item.id}_${System.currentTimeMillis()}_$index",
+            val source = item.sourceTile?.takeIf {
+                !it.hasBoundOrLinkedWidget() && it.tileType == item.tileType
+            }
+            val tileSize = source?.size ?: TileSize.MEDIUM
+            val spanX = tileSize.effectiveSpanX(totalCols)
+            val spanY = tileSize.effectiveSpanY()
+            val originalX = source?.gridX ?: -1
+            val originalY = source?.gridY ?: -1
+            val originalPositionFree = originalX >= 0 && originalY >= 0 &&
+                originalX + spanX <= totalCols &&
+                placed.none { other ->
+                    rectsOverlap(originalX, originalY, spanX, spanY,
+                        other.gridX.coerceAtLeast(0), other.gridY.coerceAtLeast(0),
+                        other.size.effectiveSpanX(totalCols), other.size.effectiveSpanY())
+                }
+            val (gx, gy) = if (originalPositionFree) originalX to originalY else
+                findFirstFreeGridPosition(
+                    existingPageTiles = placed,
+                    spanX = spanX,
+                    spanY = spanY,
+                    totalCols = totalCols,
+                    startY = folderTile.gridY.coerceAtLeast(0)
+                )
+            val restoredId = source?.id?.takeIf { it !in usedIds }
+                ?: "unpacked_${item.id}_${System.currentTimeMillis()}_$index"
+            usedIds.add(restoredId)
+            val newTile = (source ?: TileEntity(
+                id = restoredId,
                 title = item.title,
                 packageName = item.packageName,
-                tileType = if (item.tileType == TileType.SMART_FOLDER) TileType.APP else item.tileType,
-                size = TileSize.MEDIUM,
-                orderIndex = placed.size + index,
+                tileType = if (item.tileType == TileType.SMART_FOLDER) TileType.APP else item.tileType
+            )).copy(
+                id = restoredId,
+                title = item.title,
+                packageName = item.packageName,
+                customIconName = item.customIconName,
+                orderIndex = source?.orderIndex ?: placed.size,
                 pageId = folderTile.pageId,
                 gridX = gx,
-                gridY = gy,
-                customIconName = item.customIconName,
-                isLiveEnabled = true
+                gridY = gy
             )
             placed.add(newTile)
             tileDao.insertOrUpdate(newTile)

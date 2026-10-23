@@ -233,6 +233,66 @@ class DataSafetyRegressionTest {
         widgets.forEach { assertNull(repo.convertTileIntoSmartFolder(it.id)) }
     }
 
+    @Test fun customizedTilesRoundTripThroughAllFolderGroupingPaths() = runBlocking {
+        // Two distinct Home tiles for the same app must not be collapsed by package.
+        val original = listOf(
+            TileEntity("wide", "Wide", packageName = "example.same", size = TileSize.WIDE,
+                orderIndex = 4, gridX = 0, gridY = 0, colorOverrideHex = "#123456",
+                customIconName = "star", notificationCount = 7, isLiveEnabled = false),
+            TileEntity("small", "Small", packageName = "example.same", size = TileSize.SMALL,
+                orderIndex = 5, gridX = 0, gridY = 3, colorOverrideHex = "TRANSPARENT",
+                customIconName = "heart", notificationCount = 2, isLiveEnabled = true)
+        )
+        for (operation in 0..2) {
+            db.tileDao().clearAll()
+            db.tileDao().insertAll(original)
+            val folder = when (operation) {
+                0 -> {
+                    repo.groupPageTilesByCategoryIntoSmartFolders("page_home_1")
+                    db.tileDao().getAllTiles().single { it.tileType == TileType.SMART_FOLDER }
+                }
+                1 -> repo.createSmartFolderByCategory(AppCategory.ALL,
+                    absorbMatchingPageTiles = true)
+                else -> requireNotNull(repo.convertTileIntoSmartFolder("wide",
+                    absorbSameCategoryOnPage = true))
+            }
+            val persistedFolder = db.tileDao().getAllTiles().single { it.id == folder.id }
+            val items = SmartFolderConfig.fromTile(persistedFolder).items
+            assertEquals(2, items.size)
+            assertEquals(original.map { it.id }.toSet(),
+                items.mapNotNull { it.sourceTile?.id }.toSet())
+            // Folder UI must show both pinned tiles, but not add an auto-synced third.
+            val visible = SmartFolderConfig.resolveEffectiveItems(
+                SmartFolderConfig.fromTile(persistedFolder),
+                listOf(AppItem(packageName = "example.same", label = "Same app"))
+            )
+            assertEquals(2, visible.size)
+            repo.ungroupSmartFolderToTiles(folder.id)
+            assertEquals(original.toSet(), db.tileDao().getAllTiles().toSet())
+        }
+    }
+
+    @Test fun ungroupNeverOverwritesAnExistingTileWithSnapshotId() = runBlocking {
+        val source = TileEntity("original", "Original", packageName = "example.app",
+            size = TileSize.WIDE, colorOverrideHex = "#AABBCC", isLiveEnabled = false)
+        val item = SmartFolderItem("item_original", source.title, source.packageName,
+            source.tileType, source.customIconName, sourceTile = source)
+        val folder = TileEntity("folder", "Folder", tileType = TileType.SMART_FOLDER,
+            packageName = SmartFolderConfig(items = listOf(item)).toJsonString(),
+            gridX = 0, gridY = 0)
+        val occupied = TileEntity("original", "Other page", pageId = "page_home_2",
+            packageName = "example.other", gridX = 0, gridY = 0)
+        db.tileDao().insertAll(listOf(folder, occupied))
+        repo.ungroupSmartFolderToTiles(folder.id)
+        val after = db.tileDao().getAllTiles()
+        assertEquals(occupied, after.single { it.id == occupied.id })
+        val unpacked = after.single { it.pageId == folder.pageId }
+        assertEquals(source.size, unpacked.size)
+        assertEquals(source.colorOverrideHex, unpacked.colorOverrideHex)
+        assertFalse(unpacked.isLiveEnabled)
+        assertNotEquals(occupied.id, unpacked.id)
+    }
+
     @Test fun coordinateMigrationReservesLaterPositionedTiles() = runBlocking {
         val fixed = TileEntity("fixed", "Fixed", orderIndex = 1, gridX = 0, gridY = 0)
         db.tileDao().insertAll(listOf(TileEntity("legacy", "Legacy", orderIndex = 0), fixed))
