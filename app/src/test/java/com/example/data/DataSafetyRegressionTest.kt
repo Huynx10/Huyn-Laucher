@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.LumiaDatabase
 import com.example.data.model.*
 import com.example.data.repository.LauncherRepository
+import com.example.data.repository.validateCloudBackupJson
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.json.JSONArray
@@ -86,6 +87,24 @@ class DataSafetyRegressionTest {
         assertEquals(-1, tile.appWidgetId)
         assertEquals("example/.Provider", tile.widgetProvider)
     }
+    @Test fun cloudBackupPayloadRejectsOversizedJsonInsteadOfSilentlyTruncating() {
+        val small = """{"app":"LumiaLauncher","tiles":[]}"""
+        assertEquals(small, validateCloudBackupJson(small))
+        val tooLarge = JSONObject().put("tiles", "x".repeat(200_001)).toString()
+        try {
+            validateCloudBackupJson(tooLarge)
+            fail("Oversized backup must not be accepted")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message?.contains("200 KB") == true)
+        }
+        try {
+            validateCloudBackupJson("""{"app":""")
+            fail("Malformed JSON must not be accepted")
+        } catch (expected: org.json.JSONException) {
+            // Reject before uploading.
+        }
+    }
+
     @Test fun version2MigrationPreservesTileAndAddsUnboundWidgetFields() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "migration_data_safety.db"
