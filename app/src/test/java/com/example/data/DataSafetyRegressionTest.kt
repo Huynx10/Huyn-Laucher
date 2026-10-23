@@ -261,6 +261,12 @@ class DataSafetyRegressionTest {
             assertEquals(2, items.size)
             assertEquals(original.map { it.id }.toSet(),
                 items.mapNotNull { it.sourceTile?.id }.toSet())
+            // Folder UI must show both pinned tiles, but not add an auto-synced third.
+            val visible = SmartFolderConfig.resolveEffectiveItems(
+                SmartFolderConfig.fromTile(persistedFolder),
+                listOf(AppItem(packageName = "example.same", label = "Same app"))
+            )
+            assertEquals(2, visible.size)
             repo.ungroupSmartFolderToTiles(folder.id)
             assertEquals(original.toSet(), db.tileDao().getAllTiles().toSet())
         }
