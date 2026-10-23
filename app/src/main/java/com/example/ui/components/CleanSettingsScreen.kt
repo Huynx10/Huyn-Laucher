@@ -130,15 +130,15 @@ fun CleanSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 if (section == null) {
-                    item { Hint("Tùy chỉnh màn hình theo cách anh muốn.") }
+                    item { Hint("Chọn cách hiển thị màn hình và ứng dụng.") }
                     CleanSection.entries.forEach { group ->
                         item(key = group.name) {
                             SettingAction(group.label, when (group) {
                                 CleanSection.HOME -> "Bố cục, Tile và chuyển trang"
                                 CleanSection.APPS -> "A–Z, tìm kiếm và nhóm"
-                                CleanSection.WALLPAPER -> "Theo hệ thống hoặc ảnh của anh"
+                                CleanSection.WALLPAPER -> "Hình nền hệ thống hoặc ảnh riêng"
                                 CleanSection.WIDGETS -> "Nội dung thật từ ứng dụng"
-                                CleanSection.BACKUP -> "Lưu và khôi phục bố cục"
+                                CleanSection.BACKUP -> "Sao lưu và khôi phục bố cục"
                             }, { section = group }, card = true)
                         }
                     }
@@ -189,9 +189,9 @@ fun CleanSettingsScreen(
                             if (settings.wallpaperSource == WallpaperSource.SYSTEM) "Đang dùng" else "Dùng ảnh nền Samsung",
                             { onSaveSettings(settings.copy(wallpaperSource = WallpaperSource.SYSTEM)) }) }
                         item { SettingAction("Nền Lumia",
-                            if (settings.wallpaperSource == WallpaperSource.LUMIA) "Đang dùng" else "Màu nền phong cách Lumia",
+                            if (settings.wallpaperSource == WallpaperSource.LUMIA) "Đang dùng" else "Hình nền màu Lumia",
                             { onSaveSettings(settings.copy(wallpaperSource = WallpaperSource.LUMIA)) }) }
-                        item { SettingAction("Chọn ảnh riêng", null, { photoPicker.launch("image/*") }) }
+                        item { SettingAction("Chọn ảnh", null, { photoPicker.launch("image/*") }) }
                         item { Heading("Màu sắc") }
                         item { SettingToggle("Lấy màu theo hình nền", null, settings.autoWallpaperAccentEnabled) {
                             onSaveSettings(settings.copy(autoWallpaperAccentEnabled = it))
@@ -204,9 +204,9 @@ fun CleanSettingsScreen(
                     }
                     CleanSection.WIDGETS -> {
                         item { Heading("Widget thật từ ứng dụng") }
-                        item { Hint("Lumia dùng widget của Samsung và các ứng dụng đã cài. Android sẽ chỉ yêu cầu xác nhận khi liên kết widget cần quyền.") }
-                        item { SettingAction("Thêm widget", "Quay về Home, nhấn giữ vùng trống và chọn Thêm ô", onDismiss) }
-                        item { SettingAction("Đặt làm màn hình chính", "Chọn Lumia làm launcher mặc định", ::chooseHome) }
+                        item { Hint("Lumia sử dụng widget từ các ứng dụng đã cài. Android sẽ yêu cầu xác nhận nếu cần.") }
+                        item { SettingAction("Thêm widget", "Trên Home, nhấn giữ vùng trống rồi chọn Thêm ô", onDismiss) }
+                        item { SettingAction("Đặt làm màn hình chính", "Dùng Lumia khi nhấn nút Home", ::chooseHome) }
                     }
                     CleanSection.BACKUP -> {
                         item { Heading("Sao lưu trên máy") }
