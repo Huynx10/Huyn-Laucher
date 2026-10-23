@@ -17,8 +17,9 @@ android {
     applicationId = "com.aistudio.lumialauncher.wp10m"
     minSdk = 24
     targetSdk = 36
-    versionCode = 4
-    versionName = "1.1.0-beta3"
+    // CI beta releases override these without changing AI Studio/local defaults.
+    versionCode = System.getenv("BETA_VERSION_CODE")?.toIntOrNull() ?: 4
+    versionName = System.getenv("BETA_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.1.0-beta3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
