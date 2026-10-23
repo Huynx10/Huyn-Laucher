@@ -110,6 +110,7 @@ import com.example.data.model.AllAppsViewMode
 import com.example.data.model.BatterySaverMode
 import com.example.data.model.DynamicAccentMode
 import com.example.data.model.LauncherSettings
+import com.example.data.model.WallpaperSource
 import com.example.data.model.PageTransitionEffect
 import com.example.data.model.SystemTelemetry
 import com.example.data.model.Wp10TileStyle
@@ -185,6 +186,8 @@ fun SettingsSheet(
     var pageTransition by remember(settings.pageTransitionEffect) { mutableStateOf(settings.pageTransitionEffect) }
     var doubleTapToGlance by remember(settings.doubleTapToGlance) { mutableStateOf(settings.doubleTapToGlance) }
     var lockHomeLayout by remember(settings.lockHomeLayout) { mutableStateOf(settings.lockHomeLayout) }
+    var autoArrangeTiles by remember(settings.autoArrangeTiles) { mutableStateOf(settings.autoArrangeTiles) }
+    var wallpaperSource by remember(settings.wallpaperSource) { mutableStateOf(settings.wallpaperSource) }
     var wallpaperIndex by remember(settings.wallpaperGradientIndex) { mutableIntStateOf(settings.wallpaperGradientIndex) }
     var wallpaperDimAlpha by remember(settings.wallpaperDimAlpha) { mutableFloatStateOf(settings.wallpaperDimAlpha) }
     var turnstileAnim by remember(settings.turnstileAnimationEnabled) { mutableStateOf(settings.turnstileAnimationEnabled) }
@@ -230,6 +233,7 @@ fun SettingsSheet(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
+            wallpaperSource = WallpaperSource.CUSTOM
             onPickCustomWallpaper(uri)
         }
     }
@@ -309,6 +313,8 @@ fun SettingsSheet(
                 pageTransitionEffect = pageTransition,
                 doubleTapToGlance = doubleTapToGlance,
                 lockHomeLayout = lockHomeLayout,
+                autoArrangeTiles = autoArrangeTiles,
+                wallpaperSource = wallpaperSource,
                 wallpaperGradientIndex = wallpaperIndex,
                 wallpaperDimAlpha = wallpaperDimAlpha,
                 turnstileAnimationEnabled = turnstileAnim,
@@ -561,7 +567,10 @@ fun SettingsSheet(
                                     }
 
                                     OutlinedButton(
-                                        onClick = { openSystemWallpaperChooser() },
+                                        onClick = {
+                                            wallpaperSource = WallpaperSource.SYSTEM
+                                            applyChanges()
+                                        },
                                         shape = RoundedCornerShape(12.dp),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                         modifier = Modifier
@@ -576,7 +585,7 @@ fun SettingsSheet(
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "Hình nền hệ thống",
+                                            text = "Theo hệ thống",
                                             color = Color.White,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium
@@ -584,7 +593,11 @@ fun SettingsSheet(
                                     }
                                 }
 
-                                if (settings.customWallpaperUri.isNotBlank()) {
+                                OutlinedButton(onClick = { openSystemWallpaperChooser() }) {
+                                    Text("Đổi hình nền điện thoại", fontSize = 12.sp, color = Color.White)
+                                }
+
+                                if (settings.wallpaperSource == WallpaperSource.CUSTOM && settings.customWallpaperUri.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Row(
                                         modifier = Modifier
@@ -641,7 +654,7 @@ fun SettingsSheet(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     itemsIndexed(LumiaPalette.Wallpapers) { idx, pair ->
-                                        val isSelected = wallpaperIndex == idx && settings.customWallpaperUri.isBlank()
+                                        val isSelected = wallpaperSource == WallpaperSource.LUMIA && wallpaperIndex == idx
                                         Column(
                                             modifier = Modifier
                                                 .width(78.dp)
@@ -653,9 +666,7 @@ fun SettingsSheet(
                                                 )
                                                 .clickable {
                                                     wallpaperIndex = idx
-                                                    if (settings.customWallpaperUri.isNotBlank()) {
-                                                        onClearCustomWallpaper()
-                                                    }
+                                                    wallpaperSource = WallpaperSource.LUMIA
                                                     applyChanges()
                                                 }
                                                 .padding(5.dp)
@@ -968,7 +979,18 @@ fun SettingsSheet(
                                 )
                                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
                                 MinimalSwitchRow(
-                                    title = "Khóa bố cục Màn hình chính",
+                                    title = "Tự dồn ô",
+                                    subtitle = "Tự lấp khoảng trống khi thêm, di chuyển hoặc xóa ô",
+                                    checked = autoArrangeTiles,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        autoArrangeTiles = it
+                                        applyChanges()
+                                    }
+                                )
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
+                                MinimalSwitchRow(
+                                    title = "Khóa bố cục",
                                     subtitle = "Ngăn vô tình di chuyển hoặc xóa các ô Tile",
                                     checked = lockHomeLayout,
                                     accentColor = accent.color,
