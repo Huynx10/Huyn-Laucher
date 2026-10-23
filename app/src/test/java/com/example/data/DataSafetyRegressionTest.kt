@@ -105,6 +105,46 @@ class DataSafetyRegressionTest {
         }
     }
 
+    @Test fun manualLayoutPreservesGapsWhenAutoArrangeIsOff() = runBlocking {
+        val before = listOf(
+            TileEntity("a", "A", gridX = 0, gridY = 8),
+            TileEntity("b", "B", gridX = 2, gridY = 12)
+        )
+        db.tileDao().insertAll(before)
+        repo.saveSettings(repo.loadSettings().copy(autoArrangeTiles = false))
+        assertEquals(before.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun autoArrangeCompactsTilesWithoutLosingWidgetBindings() = runBlocking {
+        db.tileDao().insertAll(listOf(
+            TileEntity("a", "A", gridX = 0, gridY = 8, size = TileSize.MEDIUM),
+            TileEntity("widget", "Widget", gridX = 2, gridY = 12, size = TileSize.MEDIUM,
+                tileType = TileType.WIDGET, appWidgetId = 102, widgetProvider = "example/.Widget")
+        ))
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(autoArrangeTiles = true))
+        val after = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(0, after.getValue("a").gridY)
+        assertEquals(0, after.getValue("widget").gridY)
+        assertEquals(2, after.getValue("widget").gridX)
+        assertEquals(102, after.getValue("widget").appWidgetId)
+    }
+
+    @Test fun wallpaperAndArrangeOptionsSurviveBackupRestore() = runBlocking {
+        repo.ensureDefaultTiles()
+        repo.saveSettings(repo.loadSettings().copy(
+            wallpaperSource = WallpaperSource.LUMIA,
+            autoArrangeTiles = true
+        ))
+        val backup = repo.exportBackupJson()
+        repo.saveSettings(repo.loadSettings().copy(
+            wallpaperSource = WallpaperSource.SYSTEM,
+            autoArrangeTiles = false
+        ))
+        assertTrue(repo.restoreFromJson(backup))
+        assertEquals(WallpaperSource.LUMIA, repo.loadSettings().wallpaperSource)
+        assertTrue(repo.loadSettings().autoArrangeTiles)
+    }
+
     @Test fun version2MigrationPreservesTileAndAddsUnboundWidgetFields() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "migration_data_safety.db"
