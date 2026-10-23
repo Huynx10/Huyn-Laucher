@@ -25,7 +25,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.example.data.model.TileSize
 import com.example.data.model.WidgetProviderItem
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 
 sealed interface WidgetHostState {
@@ -203,7 +202,7 @@ class LumiaWidgetHostManager private constructor(context: Context) {
     @Volatile
     private var isListening: Boolean = false
 
-    private val lastReportedSizes = ConcurrentHashMap<Int, Pair<Int, Int>>()
+    private val sizeUpdateTracker = WidgetSizeUpdateTracker()
 
     @Synchronized
     fun startListening() {
@@ -239,7 +238,7 @@ class LumiaWidgetHostManager private constructor(context: Context) {
 
     fun releaseWidgetId(appWidgetId: Int) {
         if (appWidgetId <= 0) return
-        lastReportedSizes.remove(appWidgetId)
+        sizeUpdateTracker.forget(appWidgetId)
         try {
             appWidgetHost.deleteAppWidgetId(appWidgetId)
         } catch (e: Exception) {
@@ -426,11 +425,7 @@ class LumiaWidgetHostManager private constructor(context: Context) {
         if (appWidgetId <= 0) return
         val clampedW = widthDp.coerceIn(56, 800)
         val clampedH = heightDp.coerceIn(56, 800)
-        val prev = lastReportedSizes[appWidgetId]
-        if (prev != null && abs(prev.first - clampedW) < 4 && abs(prev.second - clampedH) < 4) {
-            return
-        }
-        lastReportedSizes[appWidgetId] = clampedW to clampedH
+        if (!sizeUpdateTracker.needsUpdate(appWidgetId, clampedW, clampedH)) return
         try {
             val options = Bundle().apply {
                 putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, clampedW)
@@ -445,6 +440,8 @@ class LumiaWidgetHostManager private constructor(context: Context) {
                 }
             }
             appWidgetManager.updateAppWidgetOptions(appWidgetId, options)
+            // Cache only successful binder updates: a transient failure must be retried.
+            sizeUpdateTracker.markUpdated(appWidgetId, clampedW, clampedH)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to updateAppWidgetOptions for id=$appWidgetId: ${e.message}")
         }
