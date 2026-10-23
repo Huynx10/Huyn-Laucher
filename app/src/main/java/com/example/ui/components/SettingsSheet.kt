@@ -1721,9 +1721,12 @@ private fun LiveSliderRow(
                 fontWeight = FontWeight.Bold
             )
         }
+        // Preview while dragging, commit once on release to avoid Room/settings reflow storms.
+        var previewValue by remember(value) { mutableFloatStateOf(value) }
         Slider(
-            value = value,
-            onValueChange = onValueChange,
+            value = previewValue,
+            onValueChange = { previewValue = it },
+            onValueChangeFinished = { onValueChange(previewValue) },
             valueRange = valueRange,
             colors = SliderDefaults.colors(
                 thumbColor = Color.White,
