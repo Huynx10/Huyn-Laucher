@@ -227,7 +227,7 @@ class ExampleRobolectricTest {
       config = parsedConfig,
       installedApps = emptyList()
     )
-    assertTrue(effectiveItems.size >= 4) // 3 direct-launch slots + Folder-Peek cluster items
+    assertEquals(parsedConfig.items, effectiveItems) // No invented apps to fill the preview.
 
     // Group all remaining loose tiles on page_home_2 by category into Smart Folders
     val groupedCount = repo.groupPageTilesByCategoryIntoSmartFolders("page_home_2")
@@ -476,4 +476,5 @@ class ExampleRobolectricTest {
     assertTrue(columns.contains("widgetResizeMode"))
   }
 }
+
 
