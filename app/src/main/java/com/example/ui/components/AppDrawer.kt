@@ -588,11 +588,11 @@ fun AppDrawer(
                         when (target) {
                             is GridDrawerEntry.FolderEntry -> "Thả để gom vào nhóm \"${target.folder.title}\""
                             is GridDrawerEntry.AppEntry -> "Thả để tạo nhóm thư mục với \"${target.app.label}\""
-                            else -> "Thả vào giữa ứng dụng khác để gom nhóm"
+                            else -> "Thả lên ứng dụng khác để tạo thư mục"
                         }
                     }
-                    GridDropIntent.REORDER_SLOT -> "Thả để đổi vị trí sắp xếp trên lưới"
-                    GridDropIntent.NONE -> "Kéo đè lên ứng dụng khác để gom nhóm • Kéo lên thanh phân loại để đổi mục"
+                    GridDropIntent.REORDER_SLOT -> "Thả để đổi vị trí"
+                    GridDropIntent.NONE -> "Kéo lên ứng dụng khác để tạo thư mục"
                 }
                 Box(
                     modifier = Modifier
@@ -1183,7 +1183,7 @@ fun AppDrawer(
 
                     // Group into Folder section (for Grid View)
                     Text(
-                        text = "GOM NHÓM THƯ MỤC (GRID VIEW):",
+                        text = "THƯ MỤC",
                         color = accent.color,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -1279,7 +1279,7 @@ fun AppDrawer(
 
                     // Category Filter Assignment (Auto-Save on Tap)
                     Text(
-                        text = "BỘ LỌC PHÂN LOẠI (CHẠM ĐỂ ĐỔI NHÓM):",
+                        text = "LỌC THEO NHÓM",
                         color = accent.color,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -1584,7 +1584,7 @@ private fun AndroidDefaultSearchBar(
         ) {
             if (query.isEmpty()) {
                 Text(
-                    text = "Tìm kiếm ứng dụng & Android...",
+                    text = "Tìm ứng dụng",
                     color = Color.White.copy(alpha = 0.5f),
                     fontSize = 14.sp,
                     maxLines = 1,
