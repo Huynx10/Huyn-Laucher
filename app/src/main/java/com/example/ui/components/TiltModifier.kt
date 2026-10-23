@@ -14,9 +14,20 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 
+private val MetroPressSpring = spring<Float>(
+    dampingRatio = 0.68f,
+    stiffness = 720f
+)
+
+private val MetroReleaseSpring = spring<Float>(
+    dampingRatio = Spring.DampingRatioLowBouncy,
+    stiffness = Spring.StiffnessMediumLow
+)
+
 /**
  * Windows 10 Mobile 3D Perspective Tilt + Xiaomi HyperOS / One UI 9.0 Spring Physics.
  * Applies responsive 3D plane depression on press and an under-damped spring rebound on release.
+ * Reads animation state strictly inside graphicsLayer to avoid recomposition during touch feedback.
  */
 fun Modifier.metroTilt(
     enabled: Boolean = true,
@@ -24,7 +35,7 @@ fun Modifier.metroTilt(
     onClick: () -> Unit
 ): Modifier = composed {
     if (!enabled) {
-        return@composed this.pointerInput(Unit) {
+        return@composed this.pointerInput(onLongClick, onClick) {
             detectTapGestures(
                 onLongPress = { onLongClick?.invoke() },
                 onTap = { onClick() }
@@ -33,58 +44,37 @@ fun Modifier.metroTilt(
     }
 
     var isPressed by remember { mutableStateOf(false) }
-    var tiltX by remember { mutableFloatStateOf(0f) }
-    var tiltY by remember { mutableFloatStateOf(0f) }
+    var targetTiltX by remember { mutableFloatStateOf(0f) }
+    var targetTiltY by remember { mutableFloatStateOf(0f) }
 
-    val pressSpring = spring<Float>(
-        dampingRatio = 0.68f,
-        stiffness = 720f
-    )
-    val releaseSpring = spring<Float>(
-        dampingRatio = Spring.DampingRatioLowBouncy,
-        stiffness = Spring.StiffnessMediumLow
-    )
-    val activeSpec = if (isPressed) pressSpring else releaseSpring
-
-    val animatedScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.95f else 1f,
-        animationSpec = activeSpec,
-        label = "metroSpringScale"
-    )
-    val animatedTiltX by animateFloatAsState(
-        targetValue = if (isPressed) tiltX else 0f,
-        animationSpec = activeSpec,
-        label = "metroSpringTiltX"
-    )
-    val animatedTiltY by animateFloatAsState(
-        targetValue = if (isPressed) tiltY else 0f,
-        animationSpec = activeSpec,
-        label = "metroSpringTiltY"
-    )
-    val animatedDepthOffsetY by animateFloatAsState(
-        targetValue = if (isPressed) 3f else 0f,
-        animationSpec = activeSpec,
-        label = "metroSpringDepthOffsetY"
+    val pressProgressState = animateFloatAsState(
+        targetValue = if (isPressed) 1f else 0f,
+        animationSpec = if (isPressed) MetroPressSpring else MetroReleaseSpring,
+        label = "metroSpringPressProgress"
     )
 
     this
         .graphicsLayer {
-            scaleX = animatedScale
-            scaleY = animatedScale
-            rotationX = animatedTiltX
-            rotationY = animatedTiltY
-            translationY = animatedDepthOffsetY
-            cameraDistance = 16f * density
+            val p = pressProgressState.value
+            if (p != 0f) {
+                val s = 1f - (0.05f * p)
+                scaleX = s
+                scaleY = s
+                rotationX = targetTiltX * p
+                rotationY = targetTiltY * p
+                translationY = 3f * p
+                cameraDistance = 16f * density
+            }
         }
-        .pointerInput(Unit) {
+        .pointerInput(onLongClick, onClick) {
             detectTapGestures(
                 onPress = { offset ->
                     val centerX = size.width / 2f
                     val centerY = size.height / 2f
                     val normX = ((offset.x - centerX) / (centerX.coerceAtLeast(1f))).coerceIn(-1f, 1f)
                     val normY = ((offset.y - centerY) / (centerY.coerceAtLeast(1f))).coerceIn(-1f, 1f)
-                    tiltX = -normY * 13f
-                    tiltY = normX * 13f
+                    targetTiltX = -normY * 13f
+                    targetTiltY = normX * 13f
                     isPressed = true
                     tryAwaitRelease()
                     isPressed = false

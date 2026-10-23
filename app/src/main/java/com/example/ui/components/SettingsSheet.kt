@@ -5,54 +5,72 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -61,8 +79,9 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -73,7 +92,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -81,26 +104,55 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.data.model.AllAppsSortOrder
 import com.example.data.model.AllAppsViewMode
+import com.example.data.model.BatterySaverMode
 import com.example.data.model.DynamicAccentMode
 import com.example.data.model.LauncherSettings
 import com.example.data.model.PageTransitionEffect
 import com.example.data.model.SystemTelemetry
 import com.example.data.model.Wp10TileStyle
+import com.example.data.remote.CloudBackup
 import com.example.ui.theme.DynamicAccentEngine
 import com.example.ui.theme.LumiaPalette
+import com.example.ui.viewmodel.CloudAuthState
 import kotlinx.coroutines.launch
-import kotlin.math.abs
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
+enum class SettingsCategoryTab(
+    val title: String,
+    val icon: ImageVector,
+    val tag: String
+) {
+    WALLPAPER_COLOR("Hình nền & Màu", Icons.Default.Palette, "settings_tab_wallpaper"),
+    TILES_LAYOUT("Ô Tile & Bố cục", Icons.Default.GridView, "settings_tab_tiles"),
+    APP_DRAWER("Danh sách App", Icons.Default.Tune, "settings_tab_drawer"),
+    BATTERY_SYSTEM("Pin & Hệ thống", Icons.Default.BatterySaver, "settings_tab_system")
+}
+
+private val LocalSettingsGlassStyle = compositionLocalOf<AdaptiveGlassStyle?> { null }
+
 @Composable
 fun SettingsSheet(
     settings: LauncherSettings,
     telemetry: SystemTelemetry,
+    customWallpaperBitmap: ImageBitmap? = null,
     pagesCount: Int = 2,
+    cloudAuthState: CloudAuthState = CloudAuthState.Unauthenticated,
+    cloudBackups: List<CloudBackup> = emptyList(),
+    isCloudSyncing: Boolean = false,
+    onSignInWithGoogle: () -> Unit = {},
+    onSignOutCloud: () -> Unit = {},
+    onSyncToCloudNow: (String) -> Unit = {},
+    onRestoreCloudBackup: (CloudBackup) -> Unit = {},
+    onDeleteCloudBackup: (String) -> Unit = {},
     onSaveSettings: (LauncherSettings) -> Unit,
+    onPickCustomWallpaper: (Uri) -> Unit = {},
+    onClearCustomWallpaper: () -> Unit = {},
     onOpenPageManager: () -> Unit = {},
     onExportBackup: suspend () -> String,
     onRestoreBackup: suspend (String) -> Boolean,
@@ -109,42 +161,49 @@ fun SettingsSheet(
     onRefreshTelemetry: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    BackHandler { onDismiss() }
+
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var selectedAccentHex by remember { mutableStateOf(settings.accentColorHex) }
-    var autoWallpaperAccent by remember { mutableStateOf(settings.autoWallpaperAccentEnabled) }
-    var dynamicAccentMode by remember { mutableStateOf(settings.dynamicAccentMode) }
-    var dynamicSwatchIndex by remember { mutableIntStateOf(settings.dynamicSwatchIndex) }
-    var isDarkTheme by remember { mutableStateOf(settings.isDarkTheme) }
-    var tileOpacity by remember { mutableFloatStateOf(settings.tileOpacity) }
-    var wp10TileStyle by remember { mutableStateOf(settings.wp10TileStyle) }
-    var wp10RevealBorder by remember { mutableStateOf(settings.wp10RevealBorder) }
-    var showMoreTiles by remember { mutableStateOf(settings.showMoreTiles) }
-    var tileCornerRadius by remember { mutableIntStateOf(settings.tileCornerRadiusDp) }
-    var tileSpacingDp by remember { mutableIntStateOf(settings.tileSpacingDp) }
-    var useRealAppIcons by remember { mutableStateOf(settings.useRealAppIcons) }
-    var miuiGlassBorder by remember { mutableStateOf(settings.miuiGlassBorder) }
-    var pageTransition by remember { mutableStateOf(settings.pageTransitionEffect) }
-    var doubleTapToGlance by remember { mutableStateOf(settings.doubleTapToGlance) }
-    var lockHomeLayout by remember { mutableStateOf(settings.lockHomeLayout) }
-    var wallpaperIndex by remember { mutableIntStateOf(settings.wallpaperGradientIndex) }
-    var turnstileAnim by remember { mutableStateOf(settings.turnstileAnimationEnabled) }
-    var glanceScreen by remember { mutableStateOf(settings.glanceScreenEnabled) }
-    var showPageHeaderTitle by remember { mutableStateOf(settings.showPageHeaderTitle) }
-    var allAppsViewMode by remember { mutableStateOf(settings.allAppsViewMode) }
-    var allAppsGridColumns by remember { mutableIntStateOf(settings.allAppsGridColumns) }
-    var allAppsSortOrder by remember { mutableStateOf(settings.allAppsSortOrder) }
-    var allAppsShowSearchBar by remember { mutableStateOf(settings.allAppsShowSearchBar) }
-    var allAppsShowLetterHeaders by remember { mutableStateOf(settings.allAppsShowLetterHeaders) }
-    var allAppsCategorizedEnabled by remember { mutableStateOf(settings.allAppsCategorizedEnabled) }
-    var quickNoteText by remember { mutableStateOf(settings.quickNotes) }
+    var selectedTab by remember { mutableStateOf(SettingsCategoryTab.WALLPAPER_COLOR) }
+    var isExpandedHeight by remember { mutableStateOf(false) }
 
-    var expandThemePalette by remember { mutableStateOf(false) }
-    var expandAppDrawerOptions by remember { mutableStateOf(false) }
-    var restoreJsonInput by remember { mutableStateOf("") }
+    var selectedAccentHex by remember(settings.accentColorHex) { mutableStateOf(settings.accentColorHex) }
+    var autoWallpaperAccent by remember(settings.autoWallpaperAccentEnabled) { mutableStateOf(settings.autoWallpaperAccentEnabled) }
+    var dynamicAccentMode by remember(settings.dynamicAccentMode) { mutableStateOf(settings.dynamicAccentMode) }
+    var dynamicSwatchIndex by remember(settings.dynamicSwatchIndex) { mutableIntStateOf(settings.dynamicSwatchIndex) }
+    var isDarkTheme by remember(settings.isDarkTheme) { mutableStateOf(settings.isDarkTheme) }
+    var tileOpacity by remember(settings.tileOpacity) { mutableFloatStateOf(settings.tileOpacity) }
+    var wp10TileStyle by remember(settings.wp10TileStyle) { mutableStateOf(settings.wp10TileStyle) }
+    var wp10RevealBorder by remember(settings.wp10RevealBorder) { mutableStateOf(settings.wp10RevealBorder) }
+    var showMoreTiles by remember(settings.showMoreTiles) { mutableStateOf(settings.showMoreTiles) }
+    var tileCornerRadius by remember(settings.tileCornerRadiusDp) { mutableIntStateOf(settings.tileCornerRadiusDp) }
+    var tileSpacingDp by remember(settings.tileSpacingDp) { mutableIntStateOf(settings.tileSpacingDp) }
+    var useRealAppIcons by remember(settings.useRealAppIcons) { mutableStateOf(settings.useRealAppIcons) }
+    var miuiGlassBorder by remember(settings.miuiGlassBorder) { mutableStateOf(settings.miuiGlassBorder) }
+    var pageTransition by remember(settings.pageTransitionEffect) { mutableStateOf(settings.pageTransitionEffect) }
+    var doubleTapToGlance by remember(settings.doubleTapToGlance) { mutableStateOf(settings.doubleTapToGlance) }
+    var lockHomeLayout by remember(settings.lockHomeLayout) { mutableStateOf(settings.lockHomeLayout) }
+    var wallpaperIndex by remember(settings.wallpaperGradientIndex) { mutableIntStateOf(settings.wallpaperGradientIndex) }
+    var wallpaperDimAlpha by remember(settings.wallpaperDimAlpha) { mutableFloatStateOf(settings.wallpaperDimAlpha) }
+    var turnstileAnim by remember(settings.turnstileAnimationEnabled) { mutableStateOf(settings.turnstileAnimationEnabled) }
+    var glanceScreen by remember(settings.glanceScreenEnabled) { mutableStateOf(settings.glanceScreenEnabled) }
+    var batterySaverMode by remember(settings.batterySaverMode) { mutableStateOf(settings.batterySaverMode) }
+    var batterySaverThreshold by remember(settings.batterySaverThresholdPct) { mutableIntStateOf(settings.batterySaverThresholdPct) }
+    var autoOptimizeBgApps by remember(settings.autoOptimizeBackgroundApps) { mutableStateOf(settings.autoOptimizeBackgroundApps) }
+    var showPageHeaderTitle by remember(settings.showPageHeaderTitle) { mutableStateOf(settings.showPageHeaderTitle) }
+    var allAppsViewMode by remember(settings.allAppsViewMode) { mutableStateOf(settings.allAppsViewMode) }
+    var allAppsGridColumns by remember(settings.allAppsGridColumns) { mutableIntStateOf(settings.allAppsGridColumns) }
+    var allAppsSortOrder by remember(settings.allAppsSortOrder) { mutableStateOf(settings.allAppsSortOrder) }
+    var allAppsShowSearchBar by remember(settings.allAppsShowSearchBar) { mutableStateOf(settings.allAppsShowSearchBar) }
+    var allAppsShowLetterHeaders by remember(settings.allAppsShowLetterHeaders) { mutableStateOf(settings.allAppsShowLetterHeaders) }
+    var allAppsCategorizedEnabled by remember(settings.allAppsCategorizedEnabled) { mutableStateOf(settings.allAppsCategorizedEnabled) }
+    var quickNoteText by remember(settings.quickNotes) { mutableStateOf(settings.quickNotes) }
+
     var showRestoreDialog by remember { mutableStateOf(false) }
+    var restoreJsonInput by remember { mutableStateOf("") }
+    var lastOptimizeBanner by remember { mutableStateOf<String?>(null) }
 
     val dynamicPalette = remember(wallpaperIndex, dynamicAccentMode) {
         DynamicAccentEngine.extractPaletteForWallpaper(wallpaperIndex, dynamicAccentMode)
@@ -155,7 +214,25 @@ fun SettingsSheet(
         selectedAccentHex
     }
     val accent = LumiaPalette.getAccent(effectiveAccentHex)
-    val currentWallpaper = LumiaPalette.Wallpapers.getOrNull(wallpaperIndex) ?: LumiaPalette.Wallpapers.first()
+    val glassStyle = rememberAdaptiveGlassStyle(
+        settings = settings.copy(
+            wallpaperGradientIndex = wallpaperIndex,
+            dynamicAccentMode = dynamicAccentMode,
+            dynamicSwatchIndex = dynamicSwatchIndex,
+            accentColorHex = effectiveAccentHex,
+            autoWallpaperAccentEnabled = autoWallpaperAccent,
+            isDarkTheme = isDarkTheme
+        ),
+        customWallpaperBitmap = customWallpaperBitmap
+    )
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onPickCustomWallpaper(uri)
+        }
+    }
 
     val homeRoleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -197,6 +274,17 @@ fun SettingsSheet(
         openSystemDefaultLauncherSettings()
     }
 
+    fun openSystemWallpaperChooser() {
+        try {
+            val intent = Intent(Intent.ACTION_SET_WALLPAPER).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "Chọn hình nền hệ thống"))
+        } catch (_: Exception) {
+            Toast.makeText(context, "Không thể mở trình chọn hình nền hệ thống", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun applyChanges() {
         val resolvedHex = if (autoWallpaperAccent) {
             DynamicAccentEngine.resolveAutoAccent(wallpaperIndex, dynamicAccentMode, dynamicSwatchIndex).hex
@@ -222,8 +310,12 @@ fun SettingsSheet(
                 doubleTapToGlance = doubleTapToGlance,
                 lockHomeLayout = lockHomeLayout,
                 wallpaperGradientIndex = wallpaperIndex,
+                wallpaperDimAlpha = wallpaperDimAlpha,
                 turnstileAnimationEnabled = turnstileAnim,
                 glanceScreenEnabled = glanceScreen,
+                batterySaverMode = batterySaverMode,
+                batterySaverThresholdPct = batterySaverThreshold,
+                autoOptimizeBackgroundApps = autoOptimizeBgApps,
                 showPageHeaderTitle = showPageHeaderTitle,
                 allAppsViewMode = allAppsViewMode,
                 allAppsGridColumns = allAppsGridColumns,
@@ -236,774 +328,346 @@ fun SettingsSheet(
         )
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Color(0xFF000000),
-        contentColor = Color.White,
-        dragHandle = null
+    val targetHeightFraction by animateFloatAsState(
+        targetValue = if (isExpandedHeight) 0.84f else 0.52f,
+        animationSpec = tween(durationMillis = 220),
+        label = "settingsDockHeight"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(50f)
     ) {
-        Column(
+        // Upper Live-Preview Zone: completely transparent (no dark scrim!) so user sees real Home Screen changes immediately
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF000000))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() }
         ) {
-            // Samsung One UI Top App Bar ("Cài đặt Màn hình chờ")
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.62f))
+                    .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                Icon(
+                    imageVector = Icons.Default.Visibility,
+                    contentDescription = null,
+                    tint = accent.color,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Xem trước trực tiếp • Chạm màn hình trên để đóng",
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        // Bottom Docked Minimalist Settings Panel with Dynamic Wallpaper-Adaptive Fluent Acrylic Glassmorphism
+        CompositionLocalProvider(LocalSettingsGlassStyle provides glassStyle) {
+            FluentGlassPanel(
+                glassStyle = glassStyle,
+                customWallpaperBitmap = customWallpaperBitmap,
+                shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+                blurRadius = 28.dp,
+                borderWidth = 1.2.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(targetHeightFraction)
+                    .shadow(28.dp, RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { /* Consume clicks inside dock */ }
+                    .testTag("settings_fluent_glass_dock")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding()
                 ) {
-                    IconButton(
-                        onClick = {
-                            applyChanges()
-                            onDismiss()
-                        }
+                    // Compact Top Header + Height Toggle + Close Button
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 18.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(accent.color)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "Cài đặt Trực quan",
+                                        color = Color.White,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (isExpandedHeight) "Mở rộng" else "Live Preview",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(glassStyle.activeTileGlassBrush)
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "Fluent Acrylic • ${glassStyle.sourceLabel}",
+                                    color = Color.White.copy(alpha = 0.68f),
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.testTag("settings_glass_source_label")
+                                )
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { isExpandedHeight = !isExpandedHeight },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .testTag("toggle_settings_height_button")
+                            ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Quay lại",
-                            tint = Color.White
+                            imageVector = if (isExpandedHeight) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                            contentDescription = if (isExpandedHeight) "Thu gọn để xem trực tiếp" else "Mở rộng bảng cài đặt",
+                            tint = Color.White.copy(alpha = 0.8f)
                         )
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Column {
-                        Text(
-                            text = "Cài đặt Màn hình chờ",
-                            color = Color.White,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Giao diện Tile Windows 10 Mobile • Tự động lưu mọi thay đổi",
-                            color = Color(0xFF9E9EA8),
-                            fontSize = 11.sp
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Đóng cài đặt",
+                            tint = Color.White.copy(alpha = 0.8f)
                         )
                     }
                 }
             }
 
-            LazyColumn(
+            // 4 Clear Category Tabs (No more giant single list!)
+            LazyRow(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // One UI Visual Preview Banner (Live Tile Home vs App Screen)
-                item {
-                    OneUiVisualPreviewCard(
-                        accentColor = accent.color,
-                        wallpaperBrush = currentWallpaper.second,
-                        wp10TileStyle = wp10TileStyle,
-                        tileOpacity = tileOpacity,
-                        showMoreTiles = showMoreTiles,
-                        tileCornerRadius = tileCornerRadius,
-                        allAppsViewMode = allAppsViewMode
-                    )
-                }
-
-                // Group 1: Default Home App (Ứng dụng Màn hình chờ mặc định)
-                item {
-                    OneUiSectionLabel("TRÌNH KHỞI CHẠY HỆ THỐNG")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OneUiGroupCard {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (telemetry.isDefaultLauncher) Color(0xFF107C41)
-                                            else accent.color
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = if (telemetry.isDefaultLauncher) Icons.Default.CheckCircle else Icons.Default.Home,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Column {
-                                    Text(
-                                        text = "Ứng dụng Màn hình chờ mặc định",
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = if (telemetry.isDefaultLauncher)
-                                            "Đang sử dụng Lumia Launcher làm mặc định"
-                                        else
-                                            "Hiện tại: ${telemetry.currentDefaultLauncherName}",
-                                        color = if (telemetry.isDefaultLauncher) Color(0xFF4CAF50) else accent.color,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Button(
-                                    onClick = { requestSetDefaultLauncher() },
-                                    modifier = Modifier.testTag("set_default_launcher_button"),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (telemetry.isDefaultLauncher) Color(0xFF2B2B33) else accent.color
-                                    )
-                                ) {
-                                    Text(
-                                        text = if (telemetry.isDefaultLauncher) "Thay đổi" else "Đặt mặc định",
-                                        fontSize = 12.sp
-                                    )
-                                }
-                                IconButton(
-                                    onClick = { openSystemDefaultLauncherSettings() },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .testTag("open_home_settings_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.OpenInNew,
-                                        contentDescription = "Mở cài đặt hệ thống",
-                                        tint = Color(0xFF9E9EA8),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Group 2: One UI Home Screen Layout & Grid (Bố cục và Lưới Màn hình chờ)
-                item {
-                    OneUiSectionLabel("BỐ CỤC & LƯỚI MÀN HÌNH CHỜ")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OneUiGroupCard {
-                        // Row 1: Bố cục Màn hình chờ & Trang Tất cả ứng dụng
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expandAppDrawerOptions = !expandAppDrawerOptions }
-                                .padding(horizontal = 18.dp, vertical = 14.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Bố cục Màn hình chờ",
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = "Trang Tile & ${allAppsViewMode.label}",
-                                        color = accent.color,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                                Icon(
-                                    imageVector = if (expandAppDrawerOptions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                    contentDescription = null,
-                                    tint = Color(0xFF9E9EA8)
-                                )
-                            }
-
-                            AnimatedVisibility(visible = expandAppDrawerOptions) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Text(
-                                        text = "Kiểu hiển thị Trang Tất cả ứng dụng:",
-                                        color = Color(0xFF9E9EA8),
-                                        fontSize = 12.sp
-                                    )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        AllAppsViewMode.entries.forEach { mode ->
-                                            val selected = allAppsViewMode == mode
-                                            OneUiChoicePill(
-                                                label = mode.label,
-                                                selected = selected,
-                                                accentColor = accent.color,
-                                                modifier = Modifier.weight(1f),
-                                                onClick = {
-                                                    allAppsViewMode = mode
-                                                    applyChanges()
-                                                }
-                                            )
-                                        }
-                                    }
-
-                                    Text(
-                                        text = "Thứ tự sắp xếp danh sách ứng dụng:",
-                                        color = Color(0xFF9E9EA8),
-                                        fontSize = 12.sp
-                                    )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        AllAppsSortOrder.entries.forEach { order ->
-                                            val selected = allAppsSortOrder == order
-                                            OneUiChoicePill(
-                                                label = order.label,
-                                                selected = selected,
-                                                accentColor = accent.color,
-                                                modifier = Modifier.weight(1f),
-                                                onClick = {
-                                                    allAppsSortOrder = order
-                                                    applyChanges()
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        // Row 2: Lưới Màn hình chờ (4 cột vs 6 cột)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Lưới Màn hình chờ (Kích thước lưới Tile)",
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = if (showMoreTiles) "6 cột (Mở rộng W10M / One UI)" else "4 cột (Tiêu chuẩn Lumia)",
-                                        color = accent.color,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OneUiChoicePill(
-                                    label = "4 cột (Chuẩn Lumia)",
-                                    selected = !showMoreTiles,
-                                    accentColor = accent.color,
-                                    modifier = Modifier.weight(1f),
-                                    onClick = {
-                                        showMoreTiles = false
-                                        applyChanges()
-                                    }
-                                )
-                                OneUiChoicePill(
-                                    label = "6 cột (Nhiều ô hơn)",
-                                    selected = showMoreTiles,
-                                    accentColor = accent.color,
-                                    modifier = Modifier.weight(1f),
-                                    onClick = {
-                                        showMoreTiles = true
-                                        applyChanges()
-                                    }
-                                )
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        // Row 3: Lưới Màn hình ứng dụng (khi dùng chế độ Lưới biểu tượng One UI)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Lưới Màn hình ứng dụng",
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = "${allAppsGridColumns}x5 (Áp dụng khi bật chế độ Lưới biểu tượng)",
-                                        color = accent.color,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf(4, 5).forEach { cols ->
-                                        OneUiChoicePill(
-                                            label = "${cols}x5",
-                                            selected = allAppsGridColumns == cols,
-                                            accentColor = accent.color,
-                                            onClick = {
-                                                allAppsGridColumns = cols
-                                                applyChanges()
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        // Row 4: Khóa bố cục Màn hình chờ
-                        OneUiSwitchRow(
-                            title = "Khóa bố cục Màn hình chờ",
-                            subtitle = "Ngăn các ô Tile trên Màn hình chờ bị gỡ bỏ, đổi cỡ hoặc di chuyển.",
-                            checked = lockHomeLayout,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                lockHomeLayout = it
-                                applyChanges()
-                            }
+                itemsIndexed(SettingsCategoryTab.entries) { _, tab ->
+                    val isSelected = selectedTab == tab
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (isSelected) accent.color
+                                else Color.White.copy(alpha = 0.07f)
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) Color.White.copy(alpha = 0.35f)
+                                else Color.White.copy(alpha = 0.08f),
+                                shape = RoundedCornerShape(50)
+                            )
+                            .clickable { selectedTab = tab }
+                            .padding(horizontal = 13.dp, vertical = 8.dp)
+                            .testTag(tab.tag),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = tab.title,
+                            tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.68f),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = tab.title,
+                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.78f),
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }
+            }
 
-                // Group 3: Giao diện Ô Tile Trong suốt Windows 10 Mobile & Chủ đề
-                item {
-                    OneUiSectionLabel("GIAO DIỆN Ô TILE TRONG SUỐT & CHỦ ĐỀ")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OneUiGroupCard {
-                        // Windows 10 Mobile Tile Style selector
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Kiểu trong suốt ô Tile (Windows 10 Mobile)",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = wp10TileStyle.label,
-                                color = accent.color,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Wp10TileStyle.entries.forEach { style ->
-                                    val selected = wp10TileStyle == style
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(
-                                                if (selected) accent.color.copy(alpha = 0.2f)
-                                                else Color(0xFF23232A)
-                                            )
-                                            .border(
-                                                width = if (selected) 1.5.dp else 0.dp,
-                                                color = if (selected) accent.color else Color.Transparent,
-                                                shape = RoundedCornerShape(14.dp)
-                                            )
-                                            .clickable {
-                                                wp10TileStyle = style
-                                                if (style == Wp10TileStyle.CRYSTAL_CLEAR) {
-                                                    tileOpacity = 0f
-                                                } else if (style == Wp10TileStyle.CLASSIC_METRO) {
-                                                    tileOpacity = 1f
-                                                } else if (tileOpacity == 0f || tileOpacity == 1f) {
-                                                    tileOpacity = 0.35f
-                                                }
-                                                applyChanges()
-                                            }
-                                            .padding(horizontal = 14.dp, vertical = 10.dp)
-                                            .testTag("wp10_tile_style_${style.name.lowercase()}"),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = style.label,
-                                                color = Color.White,
-                                                fontSize = 13.sp,
-                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                            )
-                                            Text(
-                                                text = style.description,
-                                                color = Color(0xFF9E9EA8),
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                        if (selected) {
-                                            Icon(
-                                                imageVector = Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = accent.color,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        // Transparency Slider (0%..100%)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp)
-                        ) {
-                            val transparencyPct = ((1f - tileOpacity) * 100).roundToInt().coerceIn(0, 100)
-                            val opacityPct = (tileOpacity * 100).roundToInt().coerceIn(0, 100)
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Độ trong suốt nền ô Tile",
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "$transparencyPct% trong suốt ($opacityPct% đậm)",
-                                    color = accent.color,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            Slider(
-                                value = 1f - tileOpacity,
-                                onValueChange = { transparencyVal ->
-                                    tileOpacity = (1f - transparencyVal).coerceIn(0f, 1f)
-                                    wp10TileStyle = when {
-                                        tileOpacity <= 0.02f -> Wp10TileStyle.CRYSTAL_CLEAR
-                                        tileOpacity >= 0.98f && wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR -> Wp10TileStyle.TINTED_TRANSLUCENT
-                                        wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR -> Wp10TileStyle.TINTED_TRANSLUCENT
-                                        wp10TileStyle == Wp10TileStyle.CLASSIC_METRO -> Wp10TileStyle.TINTED_TRANSLUCENT
-                                        else -> wp10TileStyle
-                                    }
-                                    applyChanges()
-                                },
-                                valueRange = 0f..1f,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = accent.color,
-                                    activeTrackColor = accent.color,
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.16f)
-                                )
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                listOf(
-                                    1.0f to "0% Đặc",
-                                    0.65f to "35% Vừa",
-                                    0.35f to "65% W10M",
-                                    0.15f to "85% Mỏng",
-                                    0.0f to "100% Trong"
-                                ).forEach { (opVal, chipLabel) ->
-                                    val isChipSelected = abs(tileOpacity - opVal) < 0.04f
-                                    OneUiChoicePill(
-                                        label = chipLabel,
-                                        selected = isChipSelected,
-                                        accentColor = accent.color,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = {
-                                            tileOpacity = opVal
-                                            wp10TileStyle = when {
-                                                opVal <= 0.01f -> Wp10TileStyle.CRYSTAL_CLEAR
-                                                opVal >= 0.99f -> Wp10TileStyle.CLASSIC_METRO
-                                                wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR || wp10TileStyle == Wp10TileStyle.CLASSIC_METRO -> Wp10TileStyle.TINTED_TRANSLUCENT
-                                                else -> wp10TileStyle
-                                            }
-                                            applyChanges()
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        // Dynamic Accent Color Engine (Windows 10 Mobile + Material You)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Tự động lấy màu chủ đạo từ hình nền",
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = if (autoWallpaperAccent) {
-                                            "Đang bật (${dynamicAccentMode.shortLabel} • ${accent.hex})"
-                                        } else {
-                                            "Đang chọn màu thủ công (${accent.name})"
-                                        },
-                                        color = accent.color,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                                Switch(
-                                    checked = autoWallpaperAccent,
-                                    onCheckedChange = { enabled ->
-                                        autoWallpaperAccent = enabled
-                                        if (enabled) {
-                                            selectedAccentHex = dynamicPalette.getSwatch(dynamicSwatchIndex).hex
-                                        }
-                                        applyChanges()
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = accent.color
-                                    ),
-                                    modifier = Modifier.testTag("auto_wallpaper_accent_switch")
-                                )
-                            }
-
-                            AnimatedVisibility(visible = autoWallpaperAccent) {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        DynamicAccentMode.entries.forEach { mode ->
-                                            val isSelected = dynamicAccentMode == mode
-                                            OneUiChoicePill(
-                                                label = mode.shortLabel,
-                                                selected = isSelected,
-                                                accentColor = accent.color,
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .testTag("dynamic_accent_mode_${mode.name.lowercase()}"),
-                                                onClick = {
-                                                    dynamicAccentMode = mode
-                                                    val newPalette = DynamicAccentEngine.extractPaletteForWallpaper(wallpaperIndex, mode)
-                                                    selectedAccentHex = newPalette.getSwatch(dynamicSwatchIndex).hex
-                                                    applyChanges()
-                                                }
-                                            )
-                                        }
-                                    }
-
-                                    Text(
-                                        text = "Bảng hạt màu Material You trích xuất từ \"${currentWallpaper.first}\":",
-                                        color = Color(0xFF9E9EA8),
-                                        fontSize = 11.sp
-                                    )
-
-                                    val swatchLabels = listOf("Chủ đạo W10M", "Tonal Dịu", "Hòa sắc", "Metro Đậm")
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        dynamicPalette.swatches.forEachIndexed { sIdx, swatch ->
-                                            val isPicked = dynamicSwatchIndex == sIdx
-                                            Column(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .background(
-                                                        if (isPicked) swatch.color.copy(alpha = 0.25f)
-                                                        else Color(0xFF23232A)
-                                                    )
-                                                    .border(
-                                                        width = if (isPicked) 1.5.dp else 0.8.dp,
-                                                        color = if (isPicked) swatch.color else Color.White.copy(alpha = 0.12f),
-                                                        shape = RoundedCornerShape(12.dp)
-                                                    )
-                                                    .clickable {
-                                                        dynamicSwatchIndex = sIdx
-                                                        selectedAccentHex = swatch.hex
-                                                        applyChanges()
-                                                    }
-                                                    .padding(vertical = 8.dp, horizontal = 4.dp)
-                                                    .testTag("dynamic_wallpaper_swatch_$sIdx"),
-                                                horizontalAlignment = Alignment.CenterHorizontally,
-                                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(26.dp)
-                                                        .clip(CircleShape)
-                                                        .background(swatch.color)
-                                                        .border(
-                                                            width = if (isPicked) 2.dp else 1.dp,
-                                                            color = if (isPicked) Color.White else Color.White.copy(alpha = 0.35f),
-                                                            shape = CircleShape
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    if (isPicked) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.Check,
-                                                            contentDescription = null,
-                                                            tint = Color.White,
-                                                            modifier = Modifier.size(14.dp)
-                                                        )
-                                                    }
-                                                }
-                                                Text(
-                                                    text = swatchLabels.getOrElse(sIdx) { "Tonal" },
-                                                    color = Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = if (isPicked) FontWeight.Bold else FontWeight.Normal,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        // Bảng màu & Hình nền (Expandable One UI style)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expandThemePalette = !expandThemePalette }
-                                .padding(horizontal = 18.dp, vertical = 14.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Bảng màu chủ đề & Hình nền",
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = "${accent.name} • ${currentWallpaper.first}",
-                                        color = accent.color,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
+            // Active Tab Content (Focused, clean, minimal scrolling)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                contentPadding = PaddingValues(vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                when (selectedTab) {
+                    SettingsCategoryTab.WALLPAPER_COLOR -> {
+                        item {
+                            MinimalGroupCard(title = "HÌNH NỀN MÀN HÌNH CHÍNH") {
+                                // Custom Photo Picker & System Wallpaper Actions
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Box(
+                                    Button(
+                                        onClick = {
+                                            photoPickerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = accent.color),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                         modifier = Modifier
-                                            .size(22.dp)
-                                            .clip(CircleShape)
-                                            .background(accent.color)
-                                            .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape)
-                                    )
-                                    Icon(
-                                        imageVector = if (expandThemePalette) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                        contentDescription = null,
-                                        tint = Color(0xFF9E9EA8)
-                                    )
-                                }
-                            }
+                                            .weight(1f)
+                                            .testTag("pick_custom_wallpaper_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Image,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Chọn ảnh từ máy",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
 
-                            AnimatedVisibility(visible = expandThemePalette) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Text(
-                                        text = "Chọn màu chủ đề thủ công (Accent):",
-                                        color = Color(0xFF9E9EA8),
-                                        fontSize = 12.sp
-                                    )
-                                    LazyVerticalGrid(
-                                        columns = GridCells.Fixed(6),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    OutlinedButton(
+                                        onClick = { openSystemWallpaperChooser() },
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("open_system_wallpaper_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Wallpaper,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Hình nền hệ thống",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+
+                                if (settings.customWallpaperUri.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(108.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(accent.color.copy(alpha = 0.15f))
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        items(LumiaPalette.Accents) { acc ->
-                                            val isSelected = !autoWallpaperAccent && acc.hex.equals(selectedAccentHex, ignoreCase = true)
+                                        Text(
+                                            text = "Đang dùng ảnh cá nhân từ thư viện",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "Gỡ ảnh",
+                                            color = accent.color,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier
+                                                .clickable { onClearCustomWallpaper() }
+                                                .padding(4.dp)
+                                                .testTag("clear_custom_wallpaper_button")
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Live Wallpaper Dim Slider
+                                LiveSliderRow(
+                                    label = "Độ tối lớp phủ nền",
+                                    valueText = "${(wallpaperDimAlpha * 100).roundToInt()}%",
+                                    value = wallpaperDimAlpha,
+                                    valueRange = 0f..0.70f,
+                                    accentColor = accent.color,
+                                    onValueChange = {
+                                        wallpaperDimAlpha = it
+                                        applyChanges()
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Bộ sưu tập nền Gradient tối giản",
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 11.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    itemsIndexed(LumiaPalette.Wallpapers) { idx, pair ->
+                                        val isSelected = wallpaperIndex == idx && settings.customWallpaperUri.isBlank()
+                                        Column(
+                                            modifier = Modifier
+                                                .width(78.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .border(
+                                                    width = if (isSelected) 2.dp else 1.dp,
+                                                    color = if (isSelected) accent.color else Color.White.copy(alpha = 0.14f),
+                                                    shape = RoundedCornerShape(12.dp)
+                                                )
+                                                .clickable {
+                                                    wallpaperIndex = idx
+                                                    if (settings.customWallpaperUri.isNotBlank()) {
+                                                        onClearCustomWallpaper()
+                                                    }
+                                                    applyChanges()
+                                                }
+                                                .padding(5.dp)
+                                                .testTag("wallpaper_option_$idx"),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .aspectRatio(1f)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(acc.color)
-                                                    .border(
-                                                        width = if (isSelected) 2.dp else 0.dp,
-                                                        color = if (isSelected) Color.White else Color.Transparent,
-                                                        shape = RoundedCornerShape(10.dp)
-                                                    )
-                                                    .clickable {
-                                                        autoWallpaperAccent = false
-                                                        selectedAccentHex = acc.hex
-                                                        applyChanges()
-                                                    },
+                                                    .fillMaxWidth()
+                                                    .height(36.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(pair.second),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 if (isSelected) {
@@ -1011,874 +675,1112 @@ fun SettingsSheet(
                                                         imageVector = Icons.Default.Check,
                                                         contentDescription = null,
                                                         tint = Color.White,
-                                                        modifier = Modifier.size(18.dp)
+                                                        modifier = Modifier.size(15.dp)
                                                     )
                                                 }
                                             }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = pair.first,
+                                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
+                                                fontSize = 10.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
+                                }
+                            }
+                        }
 
-                                    Text(
-                                        text = "Chọn hình nền Màn hình chờ (Tự động trích xuất màu khi đổi):",
-                                        color = Color(0xFF9E9EA8),
-                                        fontSize = 12.sp
-                                    )
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        LumiaPalette.Wallpapers.forEachIndexed { idx, pair ->
-                                            val isSelected = idx == wallpaperIndex
-                                            val previewPalette = remember(idx, dynamicAccentMode) {
-                                                DynamicAccentEngine.extractPaletteForWallpaper(idx, dynamicAccentMode)
-                                            }
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .background(
-                                                        if (isSelected) accent.color.copy(alpha = 0.2f)
-                                                        else Color(0xFF23232A)
-                                                    )
-                                                    .border(
-                                                        width = if (isSelected) 1.5.dp else 0.dp,
-                                                        color = if (isSelected) accent.color else Color.Transparent,
-                                                        shape = RoundedCornerShape(12.dp)
-                                                    )
-                                                    .clickable {
-                                                        wallpaperIndex = idx
-                                                        if (autoWallpaperAccent) {
-                                                            selectedAccentHex = previewPalette.getSwatch(dynamicSwatchIndex).hex
-                                                        }
-                                                        applyChanges()
-                                                    }
-                                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                                                    .testTag("wallpaper_option_$idx"),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
+                        item {
+                            MinimalGroupCard(title = "MÀU CHỦ ĐẠO & GIAO DIỆN") {
+                                MinimalSwitchRow(
+                                    title = "Tự động đồng bộ màu theo hình nền",
+                                    subtitle = "Trích xuất bảng màu thông minh từ hình nền",
+                                    checked = autoWallpaperAccent,
+                                    accentColor = accent.color,
+                                    switchTag = "auto_wallpaper_accent_switch",
+                                    onCheckedChange = {
+                                        autoWallpaperAccent = it
+                                        applyChanges()
+                                    }
+                                )
+
+                                AnimatedVisibility(visible = autoWallpaperAccent) {
+                                    Column(modifier = Modifier.padding(top = 8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            DynamicAccentMode.entries.forEach { mode ->
+                                                val isModeSelected = dynamicAccentMode == mode
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(28.dp)
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(pair.second)
-                                                )
-                                                Spacer(modifier = Modifier.width(12.dp))
-                                                Text(
-                                                    text = pair.first,
-                                                    color = Color.White,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                Row(
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(9.dp))
+                                                        .background(
+                                                            if (isModeSelected) accent.color.copy(alpha = 0.25f)
+                                                            else Color.White.copy(alpha = 0.05f)
+                                                        )
+                                                        .border(
+                                                            width = if (isModeSelected) 1.5.dp else 1.dp,
+                                                            color = if (isModeSelected) accent.color else Color.White.copy(alpha = 0.1f),
+                                                            shape = RoundedCornerShape(9.dp)
+                                                        )
+                                                        .clickable {
+                                                            dynamicAccentMode = mode
+                                                            applyChanges()
+                                                        }
+                                                        .padding(vertical = 7.dp)
+                                                        .testTag("dynamic_accent_mode_${mode.name.lowercase()}"),
+                                                    contentAlignment = Alignment.Center
                                                 ) {
-                                                    previewPalette.swatches.take(3).forEach { sw ->
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(10.dp)
-                                                                .clip(CircleShape)
-                                                                .background(sw.color)
+                                                    Text(
+                                                        text = mode.shortLabel,
+                                                        color = if (isModeSelected) Color.White else Color.White.copy(alpha = 0.7f),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = if (isModeSelected) FontWeight.Bold else FontWeight.Medium,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            dynamicPalette.swatches.forEachIndexed { sIdx, swatch ->
+                                                val isSwatchSelected = dynamicSwatchIndex == sIdx
+                                                Row(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(9.dp))
+                                                        .background(swatch.color.copy(alpha = 0.2f))
+                                                        .border(
+                                                            width = if (isSwatchSelected) 1.5.dp else 1.dp,
+                                                            color = if (isSwatchSelected) Color.White else swatch.color.copy(alpha = 0.5f),
+                                                            shape = RoundedCornerShape(9.dp)
                                                         )
-                                                    }
-                                                    if (isSelected) {
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Icon(
-                                                            imageVector = Icons.Default.Check,
-                                                            contentDescription = null,
-                                                            tint = accent.color
-                                                        )
-                                                    }
+                                                        .clickable {
+                                                            dynamicSwatchIndex = sIdx
+                                                            selectedAccentHex = swatch.hex
+                                                            applyChanges()
+                                                        }
+                                                        .padding(vertical = 7.dp, horizontal = 6.dp)
+                                                        .testTag("dynamic_wallpaper_swatch_$sIdx"),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(12.dp)
+                                                            .clip(CircleShape)
+                                                            .background(swatch.color)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = swatch.name,
+                                                        color = Color.White,
+                                                        fontSize = 10.sp,
+                                                        maxLines = 1
+                                                    )
                                                 }
                                             }
                                         }
                                     }
                                 }
-                            }
-                        }
 
-                        OneUiDivider()
-
-                        // Corner Radius & Tile Spacing
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = "Độ bo góc & Khoảng cách ô Tile",
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium
+                                    text = "Bảng màu Lumia thủ công",
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 11.sp
                                 )
-                                Text(
-                                    text = "Bo ${tileCornerRadius}dp • Cách ${tileSpacingDp}dp",
-                                    color = accent.color,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                                Spacer(modifier = Modifier.height(6.dp))
 
-                            Slider(
-                                value = tileCornerRadius.toFloat(),
-                                onValueChange = {
-                                    tileCornerRadius = it.toInt()
-                                    applyChanges()
-                                },
-                                valueRange = 0f..18f,
-                                steps = 17,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = accent.color,
-                                    activeTrackColor = accent.color,
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.16f)
-                                )
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                listOf(
-                                    4 to "Sát cạnh (4dp)",
-                                    6 to "Chuẩn W10M (6dp)",
-                                    8 to "Lumia (8dp)",
-                                    12 to "One UI (12dp)"
-                                ).forEach { (dpVal, label) ->
-                                    OneUiChoicePill(
-                                        label = label,
-                                        selected = tileSpacingDp == dpVal,
-                                        accentColor = accent.color,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = {
-                                            tileSpacingDp = dpVal
-                                            applyChanges()
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Viền sáng Fluent Reveal (Windows 10 Mobile)",
-                            subtitle = "Hiển thị viền ánh sáng tinh tế cho các ô Tile trong suốt.",
-                            checked = wp10RevealBorder,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                wp10RevealBorder = it
-                                applyChanges()
-                            }
-                        )
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Hiển thị biểu tượng ứng dụng gốc",
-                            subtitle = "Dùng biểu tượng thật của ứng dụng Android trên ô Tile.",
-                            checked = useRealAppIcons,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                useRealAppIcons = it
-                                applyChanges()
-                            }
-                        )
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Viền kính nổi One UI / HyperOS",
-                            subtitle = "Tăng độ tương phản cạnh cho tất cả các ô Live Tile.",
-                            checked = miuiGlassBorder,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                miuiGlassBorder = it
-                                applyChanges()
-                            }
-                        )
-                    }
-                }
-
-                // Group 4: Hiệu ứng chuyển cảnh & Cử chỉ thông minh (One UI Gestures & Transitions)
-                item {
-                    OneUiSectionLabel("CHUYỂN CẢNH & CỬ CHỈ MÀN HÌNH CHỜ")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OneUiGroupCard {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Hiệu ứng chuyển trang",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = pageTransition.label,
-                                color = accent.color,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                PageTransitionEffect.entries.forEach { effect ->
-                                    OneUiChoicePill(
-                                        label = effect.label,
-                                        selected = pageTransition == effect,
-                                        accentColor = accent.color,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = {
-                                            pageTransition = effect
-                                            applyChanges()
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Hiệu ứng nhấn nghiêng 3D (Metro Tilt)",
-                            subtitle = "Phản hồi lún đàn hồi chuẩn Windows Phone khi chạm vào ô Tile.",
-                            checked = turnstileAnim,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                turnstileAnim = it
-                                applyChanges()
-                            }
-                        )
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Chạm đúp vào vùng trống để bật Glance",
-                            subtitle = "Chạm hai lần vào khoảng trống trên Màn hình chờ để mở đồng hồ Glance.",
-                            checked = doubleTapToGlance,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                doubleTapToGlance = it
-                                applyChanges()
-                            }
-                        )
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Màn hình chờ Nokia Glance Screen",
-                            subtitle = "Hiển thị đồng hồ đêm AMOLED tiết kiệm pin và thông tin nhanh.",
-                            checked = glanceScreen,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                glanceScreen = it
-                                applyChanges()
-                            }
-                        )
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Hiển thị thanh tìm kiếm ở Trang ứng dụng",
-                            subtitle = "Tìm nhanh ứng dụng trên đầu trang Tất cả ứng dụng.",
-                            checked = allAppsShowSearchBar,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                allAppsShowSearchBar = it
-                                applyChanges()
-                            }
-                        )
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Hiển thị chữ cái phân nhóm A-Z",
-                            subtitle = "Chạm vào chữ cái để nhảy nhanh theo bảng chữ cái kiểu Lumia.",
-                            checked = allAppsShowLetterHeaders,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                allAppsShowLetterHeaders = it
-                                applyChanges()
-                            }
-                        )
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Thanh bộ lọc phân loại ứng dụng",
-                            subtitle = "Hiển thị bộ lọc phân loại (Liên lạc, Giải trí, Trò chơi, Công cụ...) trên Trang ứng dụng.",
-                            checked = allAppsCategorizedEnabled,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                allAppsCategorizedEnabled = it
-                                applyChanges()
-                            }
-                        )
-
-                        OneUiDivider()
-
-                        OneUiSwitchRow(
-                            title = "Hiển thị tiêu đề tên trang trên Màn hình chờ",
-                            subtitle = "Trang trống luôn tự động ẩn tiêu đề để giữ nguyên hình nền.",
-                            checked = showPageHeaderTitle,
-                            accentColor = accent.color,
-                            onCheckedChange = {
-                                showPageHeaderTitle = it
-                                applyChanges()
-                            }
-                        )
-                    }
-                }
-
-                // Group 5: Ghi chú nhanh trên Live Tile & Tối ưu thiết bị (Device Care)
-                item {
-                    OneUiSectionLabel("TIỆN ÍCH GHI CHÚ & TỐI ƯU THIẾT BỊ")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OneUiGroupCard {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Nội dung Ghi chú nhanh trên Live Tile",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            OutlinedTextField(
-                                value = quickNoteText,
-                                onValueChange = {
-                                    quickNoteText = it
-                                    applyChanges()
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = {
-                                    Text(
-                                        text = "Nhập nội dung hiển thị trên ô Ghi chú...",
-                                        color = Color(0xFF9E9EA8)
-                                    )
-                                },
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = accent.color,
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
-                                )
-                            )
-                        }
-
-                        OneUiDivider()
-
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Chăm sóc thiết bị & Bộ nhớ (Device Care)",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            OneUiMetricRow(
-                                label = "Bộ nhớ RAM",
-                                value = "${telemetry.availableRamMb} MB trống / ${telemetry.totalRamMb} MB (${telemetry.ramUsagePct}%)"
-                            )
-                            OneUiMetricRow(
-                                label = "Bộ nhớ lưu trữ",
-                                value = "${telemetry.internalFreeGb} GB trống / ${telemetry.internalTotalGb} GB"
-                            )
-                            OneUiMetricRow(
-                                label = "Trạng thái Pin",
-                                value = "${telemetry.batteryPct}% • ${telemetry.batteryTempC}°C" + if (telemetry.isCharging) " (Đang sạc)" else ""
-                            )
-
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Button(
-                                onClick = {
-                                    val updated = onOptimizeMemory()
-                                    Toast.makeText(
-                                        context,
-                                        "Đã tối ưu bộ nhớ! RAM trống: ${updated.availableRamMb} MB",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = accent.color)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CleaningServices,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Tối ưu ngay", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-
-                // Group 6: Sao lưu, Khôi phục & Đặt lại (Backup & Reset)
-                item {
-                    OneUiSectionLabel("SAO LƯU, KHÔI PHỤC & ĐẶT LẠI")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OneUiGroupCard {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text(
-                                text = "Sao lưu và khôi phục bố cục Màn hình chờ",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = settings.cloudSyncState,
-                                color = accent.color,
-                                fontSize = 12.sp
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Button(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            val json = onExportBackup()
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            val clip = ClipData.newPlainText("LumiaLauncherBackup", json)
-                                            clipboard.setPrimaryClip(clip)
-                                            Toast.makeText(
-                                                context,
-                                                "Đã sao chép bản sao lưu JSON vào bộ nhớ tạm!",
-                                                Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = accent.color)
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Sao lưu", fontSize = 13.sp)
-                                }
-
-                                OutlinedButton(
-                                    onClick = { showRestoreDialog = !showRestoreDialog },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(imageVector = Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Khôi phục", color = Color.White, fontSize = 13.sp)
-                                }
-                            }
-
-                            if (showRestoreDialog) {
-                                OutlinedTextField(
-                                    value = restoreJsonInput,
-                                    onValueChange = { restoreJsonInput = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    placeholder = {
-                                        Text(
-                                            text = "Dán dữ liệu JSON sao lưu vào đây...",
-                                            color = Color(0xFF9E9EA8),
-                                            fontSize = 12.sp
-                                        )
-                                    },
-                                    maxLines = 4
-                                )
-                                Button(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            val success = onRestoreBackup(restoreJsonInput)
-                                            if (success) {
-                                                Toast.makeText(context, "Đã khôi phục bố cục thành công!", Toast.LENGTH_SHORT).show()
-                                                showRestoreDialog = false
-                                                onDismiss()
-                                            } else {
-                                                Toast.makeText(context, "Dữ liệu JSON không hợp lệ!", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF107C41))
-                                ) {
-                                    Text("Áp dụng bản khôi phục")
-                                }
-                            }
-                        }
-
-                        OneUiDivider()
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onResetDefaults()
-                                    Toast.makeText(context, "Đã đặt lại bố cục Màn hình chờ mặc định!", Toast.LENGTH_SHORT).show()
-                                    onDismiss()
-                                }
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Đặt lại bố cục Màn hình chờ mặc định",
-                                    color = Color(0xFFFF6B6B),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "Khôi phục vị trí các ô Live Tile và trang mặc định ban đầu",
-                                    color = Color(0xFF9E9EA8),
-                                    fontSize = 12.sp
-                                )
-                            }
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = null,
-                                tint = Color(0xFFFF6B6B)
-                            )
-                        }
-                    }
-                }
-
-                // Group 7: About Home Screen (Thông tin về Màn hình chờ)
-                item {
-                    OneUiGroupCard {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "Thông tin về Màn hình chờ",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Lumia Start Home • Phiên bản One UI 9.0 Bridge (W10M 1709)",
-                                color = accent.color,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Hỗ trợ chỉnh sửa riêng từng ô Tile khi nhấn giữ, sắp xếp tự do 2D trên lưới không tự động dồn ô, và quản lý trang chuẩn One UI.",
-                                color = Color(0xFF9E9EA8),
-                                fontSize = 11.sp,
-                                lineHeight = 16.sp
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(32.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun OneUiVisualPreviewCard(
-    accentColor: Color,
-    wallpaperBrush: androidx.compose.ui.graphics.Brush,
-    wp10TileStyle: Wp10TileStyle,
-    tileOpacity: Float,
-    showMoreTiles: Boolean,
-    tileCornerRadius: Int,
-    allAppsViewMode: AllAppsViewMode
-) {
-    val fillAlpha = when (wp10TileStyle) {
-        Wp10TileStyle.CRYSTAL_CLEAR -> 0.05f
-        Wp10TileStyle.CLASSIC_METRO -> 1f
-        Wp10TileStyle.FLUENT_ACRYLIC -> (tileOpacity * 0.55f).coerceIn(0.12f, 0.72f)
-        Wp10TileStyle.TINTED_TRANSLUCENT -> tileOpacity.coerceIn(0.05f, 0.95f)
-    }
-
-    OneUiGroupCard {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Left Mini Mockup: Home Screen Live Tiles
-            Column(
-                modifier = Modifier.weight(1f),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(106.dp)
-                        .height(142.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(wallpaperBrush)
-                        .border(1.5.dp, accentColor.copy(alpha = 0.85f), RoundedCornerShape(16.dp))
-                        .padding(8.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(26.dp)
-                                .clip(RoundedCornerShape(tileCornerRadius.coerceAtMost(8).dp))
-                                .background(accentColor.copy(alpha = fillAlpha))
-                                .border(
-                                    0.6.dp,
-                                    Color.White.copy(alpha = 0.35f),
-                                    RoundedCornerShape(tileCornerRadius.coerceAtMost(8).dp)
-                                )
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            repeat(if (showMoreTiles) 3 else 2) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(24.dp)
-                                        .clip(RoundedCornerShape(tileCornerRadius.coerceAtMost(8).dp))
-                                        .background(accentColor.copy(alpha = fillAlpha))
-                                        .border(
-                                            0.6.dp,
-                                            Color.White.copy(alpha = 0.35f),
-                                            RoundedCornerShape(tileCornerRadius.coerceAtMost(8).dp)
-                                        )
-                                )
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(28.dp)
-                                .clip(RoundedCornerShape(tileCornerRadius.coerceAtMost(8).dp))
-                                .background(accentColor.copy(alpha = fillAlpha))
-                                .border(
-                                    0.6.dp,
-                                    Color.White.copy(alpha = 0.35f),
-                                    RoundedCornerShape(tileCornerRadius.coerceAtMost(8).dp)
-                                )
-                        )
-                    }
-                }
-                Text(
-                    text = if (showMoreTiles) "Màn hình chờ (6 cột)" else "Màn hình chờ (4 cột)",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-
-            // Right Mini Mockup: All Apps Page
-            Column(
-                modifier = Modifier.weight(1f),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(106.dp)
-                        .height(142.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(wallpaperBrush)
-                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
-                        .padding(8.dp)
-                ) {
-                    if (allAppsViewMode == AllAppsViewMode.METRO_LIST) {
-                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            repeat(5) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(14.dp)
-                                            .clip(RoundedCornerShape(3.dp))
-                                            .background(accentColor)
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(6.dp)
-                                            .clip(RoundedCornerShape(3.dp))
-                                            .background(Color.White.copy(alpha = 0.65f))
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            repeat(4) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    repeat(4) {
+                                    itemsIndexed(LumiaPalette.Accents) { _, item ->
+                                        val isSelected = !autoWallpaperAccent &&
+                                            item.hex.equals(selectedAccentHex, ignoreCase = true)
                                         Box(
                                             modifier = Modifier
-                                                .size(15.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(accentColor.copy(alpha = 0.85f))
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .background(item.color)
+                                                .border(
+                                                    width = if (isSelected) 2.5.dp else 1.dp,
+                                                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.2f),
+                                                    shape = CircleShape
+                                                )
+                                                .clickable {
+                                                    autoWallpaperAccent = false
+                                                    selectedAccentHex = item.hex
+                                                    applyChanges()
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = item.name,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                MinimalSwitchRow(
+                                    title = "Nền tối AMOLED (Dark Theme)",
+                                    subtitle = "Tiết kiệm pin tối đa trên màn hình OLED",
+                                    checked = isDarkTheme,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        isDarkTheme = it
+                                        applyChanges()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    SettingsCategoryTab.TILES_LAYOUT -> {
+                        item {
+                            MinimalGroupCard(title = "ĐỘ TRONG SUỐT & KIỂU Ô TILE (XEM TRỰC TIẾP)") {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Wp10TileStyle.entries.forEach { style ->
+                                        val isSelected = wp10TileStyle == style
+                                        val shortTitle = when (style) {
+                                            Wp10TileStyle.CRYSTAL_CLEAR -> "Trong suốt"
+                                            Wp10TileStyle.FLUENT_ACRYLIC -> "Kính mờ"
+                                            Wp10TileStyle.TINTED_TRANSLUCENT -> "Nhuộm màu"
+                                            Wp10TileStyle.CLASSIC_METRO -> "Đặc 100%"
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(
+                                                    if (isSelected) accent.color
+                                                    else Color.White.copy(alpha = 0.07f)
+                                                )
+                                                .clickable {
+                                                    wp10TileStyle = style
+                                                    when (style) {
+                                                        Wp10TileStyle.CRYSTAL_CLEAR -> tileOpacity = 0f
+                                                        Wp10TileStyle.CLASSIC_METRO -> tileOpacity = 1f
+                                                        Wp10TileStyle.FLUENT_ACRYLIC -> if (tileOpacity > 0.7f || tileOpacity < 0.1f) tileOpacity = 0.38f
+                                                        Wp10TileStyle.TINTED_TRANSLUCENT -> if (tileOpacity > 0.75f || tileOpacity < 0.1f) tileOpacity = 0.42f
+                                                    }
+                                                    applyChanges()
+                                                }
+                                                .padding(vertical = 8.dp)
+                                                .testTag("wp10_tile_style_${style.name.lowercase()}"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = shortTitle,
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                LiveSliderRow(
+                                    label = "Độ đặc nền Tile",
+                                    valueText = "${(tileOpacity * 100).roundToInt()}%",
+                                    value = tileOpacity,
+                                    valueRange = 0f..1f,
+                                    accentColor = accent.color,
+                                    onValueChange = {
+                                        tileOpacity = it
+                                        if (it <= 0.03f && wp10TileStyle == Wp10TileStyle.CLASSIC_METRO) {
+                                            wp10TileStyle = Wp10TileStyle.CRYSTAL_CLEAR
+                                        } else if (it < 0.98f && wp10TileStyle == Wp10TileStyle.CLASSIC_METRO) {
+                                            wp10TileStyle = Wp10TileStyle.TINTED_TRANSLUCENT
+                                        }
+                                        applyChanges()
+                                    }
+                                )
+
+                                LiveSliderRow(
+                                    label = "Bo góc Ô Tile",
+                                    valueText = "${tileCornerRadius}dp",
+                                    value = tileCornerRadius.toFloat(),
+                                    valueRange = 0f..24f,
+                                    accentColor = accent.color,
+                                    onValueChange = {
+                                        tileCornerRadius = it.roundToInt()
+                                        applyChanges()
+                                    }
+                                )
+
+                                LiveSliderRow(
+                                    label = "Khoảng cách giữa các Ô",
+                                    valueText = "${tileSpacingDp}dp",
+                                    value = tileSpacingDp.toFloat(),
+                                    valueRange = 2f..14f,
+                                    accentColor = accent.color,
+                                    onValueChange = {
+                                        tileSpacingDp = it.roundToInt()
+                                        applyChanges()
+                                    }
+                                )
+                            }
+                        }
+
+                        item {
+                            MinimalGroupCard(title = "BỐ CỤC LƯỚI & HIỆU ỨNG") {
+                                MinimalSwitchRow(
+                                    title = "Lưới 6 cột mở rộng (Show More Tiles)",
+                                    subtitle = "Tăng mật độ ô trên màn hình chính từ 4 lên 6 cột",
+                                    checked = showMoreTiles,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        showMoreTiles = it
+                                        applyChanges()
+                                    }
+                                )
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
+                                MinimalSwitchRow(
+                                    title = "Viền kính mảnh (Reveal Border)",
+                                    subtitle = "Đường viền ánh sáng tinh tế quanh các ô",
+                                    checked = wp10RevealBorder,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        wp10RevealBorder = it
+                                        applyChanges()
+                                    }
+                                )
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
+                                MinimalSwitchRow(
+                                    title = "Khóa bố cục Màn hình chính",
+                                    subtitle = "Ngăn vô tình di chuyển hoặc xóa các ô Tile",
+                                    checked = lockHomeLayout,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        lockHomeLayout = it
+                                        applyChanges()
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "Hiệu ứng chuyển trang",
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 11.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    PageTransitionEffect.entries.forEach { effect ->
+                                        val isSelected = pageTransition == effect
+                                        val label = when (effect) {
+                                            PageTransitionEffect.TURNSTILE_3D -> "Turnstile"
+                                            PageTransitionEffect.CLASSIC_SLIDE -> "Trượt phẳng"
+                                            PageTransitionEffect.MIUI_CUBE -> "Khối 3D"
+                                            PageTransitionEffect.ONE_UI_DEPTH -> "Chiều sâu"
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(9.dp))
+                                                .background(
+                                                    if (isSelected) accent.color
+                                                    else Color.White.copy(alpha = 0.07f)
+                                                )
+                                                .clickable {
+                                                    pageTransition = effect
+                                                    applyChanges()
+                                                }
+                                                .padding(vertical = 7.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = Color.White,
+                                                fontSize = 10.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsCategoryTab.APP_DRAWER -> {
+                        item {
+                            MinimalGroupCard(title = "TRANG TẤT CẢ ỨNG DỤNG (APP DRAWER)") {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    AllAppsViewMode.entries.forEach { mode ->
+                                        val isSelected = allAppsViewMode == mode
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(
+                                                    if (isSelected) accent.color
+                                                    else Color.White.copy(alpha = 0.07f)
+                                                )
+                                                .clickable {
+                                                    allAppsViewMode = mode
+                                                    applyChanges()
+                                                }
+                                                .padding(vertical = 9.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = mode.label,
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+
+                                AnimatedVisibility(visible = allAppsViewMode == AllAppsViewMode.ONE_UI_GRID) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Số cột lưới:",
+                                            color = Color.White.copy(alpha = 0.75f),
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.weight(1f)
                                         )
+                                        listOf(3, 4, 5).forEach { cols ->
+                                            val isSelected = allAppsGridColumns == cols
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (isSelected) accent.color
+                                                        else Color.White.copy(alpha = 0.08f)
+                                                    )
+                                                    .clickable {
+                                                        allAppsGridColumns = cols
+                                                        applyChanges()
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = "$cols cột",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                MinimalSwitchRow(
+                                    title = "Hiển thị chữ cái đầu nhóm A–Z tối giản",
+                                    subtitle = "Chỉ hiện chữ cái thuần túy với khoảng cách thoáng",
+                                    checked = allAppsShowLetterHeaders,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        allAppsShowLetterHeaders = it
+                                        applyChanges()
+                                    }
+                                )
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
+                                MinimalSwitchRow(
+                                    title = "Thanh lọc danh mục thông minh",
+                                    subtitle = "Phân loại tự động Giao tiếp, Giải trí, Công cụ...",
+                                    checked = allAppsCategorizedEnabled,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        allAppsCategorizedEnabled = it
+                                        applyChanges()
+                                    }
+                                )
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
+                                MinimalSwitchRow(
+                                    title = "Thanh tìm kiếm nhanh ở đầu trang",
+                                    subtitle = "Tìm ứng dụng tức thì khi vuốt sang phải",
+                                    checked = allAppsShowSearchBar,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        allAppsShowSearchBar = it
+                                        applyChanges()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    SettingsCategoryTab.BATTERY_SYSTEM -> {
+                        // 1. Background App Hibernation & RAM Optimizer
+                        item {
+                            MinimalGroupCard(title = "BỘ NHỚ LAUNCHER & PIN") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.05f))
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    StatMiniColumn(
+                                        title = "Tiến trình hiển thị",
+                                        value = "${telemetry.backgroundAppsCount} app",
+                                        valueColor = if (telemetry.backgroundAppsCount > 2) Color(0xFFFFB300) else Color(0xFF4CAF50)
+                                    )
+                                    StatMiniColumn(
+                                        title = "Bộ nhớ RAM",
+                                        value = "${telemetry.ramUsagePct}% (${telemetry.availableRamMb}MB trống)",
+                                        valueColor = Color.White
+                                    )
+                                    StatMiniColumn(
+                                        title = "Pin & Nhiệt độ",
+                                        value = "${telemetry.batteryPct}% • ${telemetry.batteryTempC}°C",
+                                        valueColor = if (telemetry.batteryPct <= 25) Color(0xFFFF5252) else Color(0xFF4CAF50)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Button(
+                                    onClick = {
+                                        val fresh = onOptimizeMemory()
+                                        lastOptimizeBanner =
+                                            "Đã xóa bộ nhớ đệm biểu tượng của Launcher"
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = accent.color),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("optimize_background_apps_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CleaningServices,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Xóa bộ nhớ đệm Launcher",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                lastOptimizeBanner?.let { banner ->
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = banner,
+                                        color = Color(0xFF81C784),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Android quản lý ứng dụng chạy nền. Launcher chỉ quản lý bộ nhớ đệm của chính mình.", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                            }
+                        }
+
+                        // 2. Battery Saver Mode
+                        item {
+                            val isSaverActiveNow = settings.copy(
+                                batterySaverMode = batterySaverMode,
+                                batterySaverThresholdPct = batterySaverThreshold
+                            ).isBatterySaverActive(telemetry)
+
+                            MinimalGroupCard(title = "CHẾ ĐỘ TIẾT KIỆM PIN LAUNCHER") {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Giảm tần suất cập nhật Tile 3x & tắt 3D khi pin thấp",
+                                        color = Color.White.copy(alpha = 0.72f),
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(
+                                                if (isSaverActiveNow) Color(0xFF2E7D32).copy(alpha = 0.32f)
+                                                else Color.White.copy(alpha = 0.08f)
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                            .testTag("battery_saver_status_badge")
+                                    ) {
+                                        Text(
+                                            text = if (isSaverActiveNow) "ĐANG BẬT" else "CHỜ",
+                                            color = if (isSaverActiveNow) Color(0xFF81C784) else Color.White.copy(alpha = 0.65f),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    BatterySaverMode.entries.forEach { mode ->
+                                        val isSelected = batterySaverMode == mode
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(9.dp))
+                                                .background(
+                                                    if (isSelected) accent.color
+                                                    else Color.White.copy(alpha = 0.07f)
+                                                )
+                                                .clickable {
+                                                    batterySaverMode = mode
+                                                    applyChanges()
+                                                }
+                                                .padding(vertical = 8.dp)
+                                                .testTag("battery_saver_mode_${mode.name.lowercase()}"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = mode.shortLabel,
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+
+                                AnimatedVisibility(visible = batterySaverMode == BatterySaverMode.AUTO) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Ngưỡng kích hoạt:",
+                                            color = Color.White.copy(alpha = 0.7f),
+                                            fontSize = 11.sp
+                                        )
+                                        listOf(15, 20, 25, 30, 35).forEach { pct ->
+                                            val isSelected = batterySaverThreshold == pct
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(
+                                                        if (isSelected) accent.color
+                                                        else Color.White.copy(alpha = 0.07f)
+                                                    )
+                                                    .clickable {
+                                                        batterySaverThreshold = pct
+                                                        applyChanges()
+                                                    }
+                                                    .padding(vertical = 5.dp)
+                                                    .testTag("battery_saver_threshold_$pct"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "$pct%",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Default Launcher & Cloud Sync / Backup
+                        item {
+                            MinimalGroupCard(title = "MÀN HÌNH CHÍNH MẶC ĐỊNH & ĐÁM MÂY") {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = { requestSetDefaultLauncher() },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (telemetry.isDefaultLauncher) Color(0xFF2E7D32) else accent.color
+                                        ),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("set_default_launcher_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Home,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (telemetry.isDefaultLauncher) "Đã đặt Mặc định" else "Đặt làm Mặc định",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { openSystemDefaultLauncherSettings() },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.testTag("open_home_settings_button")
+                                    ) {
+                                        Text(
+                                            text = "Cài đặt Home",
+                                            color = Color.White,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Cloud Sync Section
+                                when (cloudAuthState) {
+                                    is CloudAuthState.Authenticated -> {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CloudDone,
+                                                    contentDescription = null,
+                                                    tint = accent.color,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column {
+                                                    Text(
+                                                        text = cloudAuthState.displayName,
+                                                        color = Color.White,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Text(
+                                                        text = cloudAuthState.email ?: "Đã kết nối Firebase Cloud",
+                                                        color = Color.White.copy(alpha = 0.6f),
+                                                        fontSize = 10.sp
+                                                    )
+                                                }
+                                            }
+                                            IconButton(
+                                                onClick = onSignOutCloud,
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .testTag("google_sign_out_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Logout,
+                                                    contentDescription = "Đăng xuất",
+                                                    tint = Color.White.copy(alpha = 0.7f),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Button(
+                                            onClick = {
+                                                val stamp = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date())
+                                                onSyncToCloudNow("Bản sao lưu $stamp")
+                                            },
+                                            enabled = !isCloudSyncing,
+                                            colors = ButtonDefaults.buttonColors(containerColor = accent.color),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("sync_to_cloud_button")
+                                        ) {
+                                            if (isCloudSyncing) {
+                                                CircularProgressIndicator(
+                                                    color = Color.White,
+                                                    strokeWidth = 2.dp,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.CloudUpload,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Đồng bộ lên Đám mây ngay",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        if (cloudBackups.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            cloudBackups.take(3).forEach { backup ->
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 3.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(Color.White.copy(alpha = 0.05f))
+                                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                        .testTag("cloud_backup_item_${backup.id}"),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = backup.title,
+                                                            color = Color.White,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1
+                                                        )
+                                                        Text(
+                                                            text = "${backup.tileCount} ô • ${backup.deviceName}",
+                                                            color = Color.White.copy(alpha = 0.55f),
+                                                            fontSize = 10.sp,
+                                                            maxLines = 1
+                                                        )
+                                                    }
+                                                    Row {
+                                                        Text(
+                                                            text = "Khôi phục",
+                                                            color = accent.color,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier
+                                                                .clickable { onRestoreCloudBackup(backup) }
+                                                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                                                .testTag("restore_cloud_backup_${backup.id}")
+                                                        )
+                                                        IconButton(
+                                                            onClick = { onDeleteCloudBackup(backup.id) },
+                                                            modifier = Modifier
+                                                                .size(24.dp)
+                                                                .testTag("delete_cloud_backup_${backup.id}")
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Delete,
+                                                                contentDescription = "Xóa bản sao lưu",
+                                                                tint = Color.White.copy(alpha = 0.6f),
+                                                                modifier = Modifier.size(14.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    else -> {
+                                        Button(
+                                            onClick = onSignInWithGoogle,
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.12f)),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("google_sign_in_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Person,
+                                                contentDescription = null,
+                                                tint = accent.color,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "Đăng nhập Google để Sao lưu Đám mây",
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                val json = onExportBackup()
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboard.setPrimaryClip(ClipData.newPlainText("LumiaBackup", json))
+                                                Toast.makeText(context, "Đã sao chép JSON sao lưu vào bộ nhớ tạm", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Sao lưu JSON", color = Color.White, fontSize = 11.sp)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { showRestoreDialog = !showRestoreDialog },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Restore,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Khôi phục / Đặt lại", color = Color.White, fontSize = 11.sp)
+                                    }
+                                }
+
+                                AnimatedVisibility(visible = showRestoreDialog) {
+                                    Column(modifier = Modifier.padding(top = 8.dp)) {
+                                        OutlinedTextField(
+                                            value = restoreJsonInput,
+                                            onValueChange = { restoreJsonInput = it },
+                                            placeholder = { Text("Dán chuỗi JSON sao lưu vào đây...", fontSize = 11.sp) },
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = Color.White,
+                                                unfocusedTextColor = Color.White,
+                                                focusedBorderColor = accent.color,
+                                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                                            ),
+                                            modifier = Modifier.fillMaxWidth(),
+                                            maxLines = 3
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(
+                                                onClick = {
+                                                    coroutineScope.launch {
+                                                        val ok = onRestoreBackup(restoreJsonInput)
+                                                        if (ok) {
+                                                            Toast.makeText(context, "Đã khôi phục bố cục!", Toast.LENGTH_SHORT).show()
+                                                            onDismiss()
+                                                        } else {
+                                                            Toast.makeText(context, "JSON không hợp lệ", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = accent.color),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Nhập JSON", fontSize = 11.sp)
+                                            }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    onResetDefaults()
+                                                    Toast.makeText(context, "Đã khôi phục mặc định!", Toast.LENGTH_SHORT).show()
+                                                    onDismiss()
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Về Mặc định", color = Color(0xFFFF8A80), fontSize = 11.sp)
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                Text(
-                    text = if (allAppsViewMode == AllAppsViewMode.METRO_LIST) "Danh sách A-Z" else "Lưới One UI",
-                    color = Color(0xFF9E9EA8),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
+            }
             }
         }
     }
 }
 
+}
+
 @Composable
-private fun OneUiGroupCard(
+private fun MinimalGroupCard(
+    title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val glassStyle = LocalSettingsGlassStyle.current
+    val cardShape = RoundedCornerShape(18.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(Color(0xFF17171C)),
-        content = content
-    )
+            .clip(cardShape)
+            .then(
+                if (glassStyle != null) {
+                    Modifier
+                        .background(glassStyle.cardBackgroundBrush)
+                        .border(1.dp, glassStyle.cardBorderBrush, cardShape)
+                } else {
+                    Modifier
+                        .background(Color.White.copy(alpha = 0.045f))
+                        .border(1.dp, Color.White.copy(alpha = 0.07f), cardShape)
+                }
+            )
+            .padding(14.dp)
+    ) {
+        Text(
+            text = title,
+            color = Color.White.copy(alpha = 0.68f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        content()
+    }
 }
 
 @Composable
-private fun OneUiSectionLabel(text: String) {
-    Text(
-        text = text,
-        color = Color(0xFF9E9EA8),
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 0.8.sp,
-        modifier = Modifier.padding(horizontal = 14.dp)
-    )
+private fun LiveSliderRow(
+    label: String,
+    valueText: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    accentColor: Color,
+    onValueChange: (Float) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = valueText,
+                color = accentColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = accentColor,
+                inactiveTrackColor = Color.White.copy(alpha = 0.16f)
+            ),
+            modifier = Modifier.height(28.dp)
+        )
+    }
 }
 
 @Composable
-private fun OneUiDivider() {
-    HorizontalDivider(
-        modifier = Modifier.padding(horizontal = 18.dp),
-        thickness = 0.5.dp,
-        color = Color(0xFF2C2C34)
-    )
-}
-
-@Composable
-private fun OneUiSwitchRow(
+private fun MinimalSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
     accentColor: Color,
+    switchTag: String? = null,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .padding(vertical = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 12.dp)
-        ) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = subtitle,
-                color = Color(0xFF9E9EA8),
-                fontSize = 12.sp,
-                lineHeight = 16.sp
+                color = Color.White.copy(alpha = 0.58f),
+                fontSize = 10.sp
             )
         }
+        Spacer(modifier = Modifier.width(8.dp))
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = accentColor,
-                uncheckedThumbColor = Color(0xFF9E9EA8),
-                uncheckedTrackColor = Color(0xFF2B2B33)
-            )
+                checkedTrackColor = accentColor
+            ),
+            modifier = if (switchTag != null) Modifier.testTag(switchTag) else Modifier
         )
     }
 }
 
 @Composable
-private fun OneUiChoicePill(
-    label: String,
-    selected: Boolean,
-    accentColor: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+private fun StatMiniColumn(
+    title: String,
+    value: String,
+    valueColor: Color
 ) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) accentColor else Color(0xFF23232A))
-            .border(
-                width = if (selected) 1.dp else 0.dp,
-                color = if (selected) Color.White.copy(alpha = 0.35f) else Color.Transparent,
-                shape = RoundedCornerShape(14.dp)
-            )
-            .clickable { onClick() }
-            .padding(vertical = 9.dp, horizontal = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            text = label,
-            color = if (selected) Color.White else Color(0xFFD0D0D8),
-            fontSize = 11.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            text = title,
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 10.sp
         )
-    }
-}
-
-@Composable
-private fun OneUiMetricRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(text = label, color = Color(0xFF9E9EA8), fontSize = 12.sp)
-        Text(text = value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = value,
+            color = valueColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }

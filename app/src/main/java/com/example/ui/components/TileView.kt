@@ -42,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,13 +61,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.AppItem
 import com.example.data.model.LauncherSettings
+import com.example.data.model.SmartFolderItem
 import com.example.data.model.SystemTelemetry
 import com.example.data.model.TileEntity
 import com.example.data.model.TileSize
 import com.example.data.model.TileType
 import com.example.data.model.Wp10TileStyle
 import com.example.ui.theme.LumiaPalette
+
+private val AcrylicOverlayBrush = Brush.linearGradient(
+    colors = listOf(
+        Color.White.copy(alpha = 0.12f),
+        Color.Transparent,
+        Color.Black.copy(alpha = 0.10f)
+    )
+)
+
+private val ClearTileGradientBrush = Brush.verticalGradient(
+    listOf(
+        Color.White.copy(alpha = 0.04f),
+        Color.Black.copy(alpha = 0.14f)
+    )
+)
 
 @Composable
 fun TileView(
@@ -93,18 +111,36 @@ fun TileView(
     onMoveToPage: (() -> Unit)? = null,
     onCustomizeTile: (() -> Unit)? = null,
     onFinishSingleEdit: (() -> Unit)? = null,
+    installedApps: List<AppItem> = emptyList(),
+    onLaunchSmartFolderItem: (SmartFolderItem) -> Unit = {},
+    onOpenSmartFolder: () -> Unit = onClick,
+    onRequestBindWidgetPermission: (TileEntity) -> Unit = {},
+    onReplaceMissingWidget: (TileEntity) -> Unit = { onCustomizeTile?.invoke() },
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
-    val isPerTileClear = tile.colorOverrideHex.equals("TRANSPARENT", ignoreCase = true)
-    val themeAccent = LumiaPalette.resolveEffectiveAccent(settings)
-    val effectiveColorHex = if (isPerTileClear || tile.colorOverrideHex.isNullOrBlank()) {
-        themeAccent.hex
-    } else {
-        tile.colorOverrideHex
+    val isPerTileClear = remember(tile.colorOverrideHex) {
+        tile.colorOverrideHex.equals("TRANSPARENT", ignoreCase = true)
     }
-    val accent = LumiaPalette.getAccent(effectiveColorHex)
-    val cornerShape = RoundedCornerShape(settings.tileCornerRadiusDp.dp)
+    val accent = remember(
+        tile.colorOverrideHex,
+        settings.accentColorHex,
+        settings.autoWallpaperAccentEnabled,
+        settings.wallpaperGradientIndex,
+        settings.dynamicAccentMode,
+        settings.dynamicSwatchIndex
+    ) {
+        val themeAccent = LumiaPalette.resolveEffectiveAccent(settings)
+        val effectiveColorHex = if (isPerTileClear || tile.colorOverrideHex.isNullOrBlank()) {
+            themeAccent.hex
+        } else {
+            tile.colorOverrideHex
+        }
+        LumiaPalette.getAccent(effectiveColorHex)
+    }
+    val cornerShape = remember(settings.tileCornerRadiusDp) {
+        RoundedCornerShape(settings.tileCornerRadiusDp.dp)
+    }
 
     val effectiveOpacity = when {
         isPerTileClear -> 0f
@@ -117,103 +153,103 @@ fun TileView(
         settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR ||
         settings.wp10TileStyle == Wp10TileStyle.FLUENT_ACRYLIC
 
-    val tileBackgroundBrush: Brush = when {
-        isPerTileClear || settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR -> {
-            Brush.verticalGradient(
-                listOf(
-                    Color.White.copy(alpha = 0.04f),
-                    Color.Black.copy(alpha = 0.14f)
-                )
-            )
-        }
-        settings.wp10TileStyle == Wp10TileStyle.FLUENT_ACRYLIC -> {
-            val tintAlpha = effectiveOpacity.coerceIn(0.08f, 0.72f)
-            Brush.linearGradient(
-                colors = listOf(
-                    accent.color.copy(alpha = tintAlpha),
-                    Color(0xFF0A1424).copy(alpha = (tintAlpha * 0.65f).coerceIn(0.10f, 0.50f)),
-                    accent.color.copy(alpha = (tintAlpha * 0.85f).coerceIn(0.06f, 0.65f))
-                )
-            )
-        }
-        settings.wp10TileStyle == Wp10TileStyle.CLASSIC_METRO -> {
-            Brush.verticalGradient(
-                listOf(accent.color, accent.color)
-            )
-        }
-        else -> {
-            if (effectiveOpacity <= 0.02f) {
-                Brush.verticalGradient(
-                    listOf(
-                        Color.White.copy(alpha = 0.03f),
-                        Color.Black.copy(alpha = 0.12f)
+    val tileBackgroundBrush: Brush = remember(
+        isPerTileClear,
+        settings.wp10TileStyle,
+        effectiveOpacity,
+        accent.color
+    ) {
+        when {
+            isPerTileClear || settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR -> {
+                ClearTileGradientBrush
+            }
+            settings.wp10TileStyle == Wp10TileStyle.FLUENT_ACRYLIC -> {
+                val tintAlpha = effectiveOpacity.coerceIn(0.08f, 0.72f)
+                Brush.linearGradient(
+                    colors = listOf(
+                        accent.color.copy(alpha = tintAlpha),
+                        Color(0xFF0A1424).copy(alpha = (tintAlpha * 0.65f).coerceIn(0.10f, 0.50f)),
+                        accent.color.copy(alpha = (tintAlpha * 0.85f).coerceIn(0.06f, 0.65f))
                     )
                 )
-            } else {
+            }
+            settings.wp10TileStyle == Wp10TileStyle.CLASSIC_METRO -> {
                 Brush.verticalGradient(
-                    listOf(
-                        accent.color.copy(alpha = effectiveOpacity),
-                        accent.color.copy(alpha = (effectiveOpacity * 0.92f).coerceIn(0f, 1f))
-                    )
+                    listOf(accent.color, accent.color)
                 )
+            }
+            else -> {
+                if (effectiveOpacity <= 0.02f) {
+                    ClearTileGradientBrush
+                } else {
+                    Brush.verticalGradient(
+                        listOf(
+                            accent.color.copy(alpha = effectiveOpacity),
+                            accent.color.copy(alpha = (effectiveOpacity * 0.92f).coerceIn(0f, 1f))
+                        )
+                    )
+                }
             }
         }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "singleTileWiggle")
-    val wiggleAngle by infiniteTransition.animateFloat(
-        initialValue = -0.75f,
-        targetValue = 0.75f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(210),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "wiggleAngle"
-    )
+    val isBatterySaverActive = remember(
+        settings.batterySaverMode,
+        settings.batterySaverThresholdPct,
+        telemetry.batteryPct,
+        telemetry.isCharging,
+        telemetry.isSystemPowerSaveMode
+    ) {
+        settings.isBatterySaverActive(telemetry)
+    }
 
-    // Spring-based lift when a tile is selected for editing (One UI 9.0 / HyperOS physical pop-up)
-    val selectionScale by animateFloatAsState(
-        targetValue = when {
-            isResizingActive -> 1.01f
-            isTileSelected && !settings.lockHomeLayout -> 1.03f
-            isHomeEditMode -> 0.985f
-            else -> 1f
-        },
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "tileSelectionSpringScale"
-    )
-
-    val handlePillLength by animateDpAsState(
-        targetValue = when {
-            isResizingActive -> if (tile.size == TileSize.SMALL) 22.dp else 38.dp
-            else -> if (tile.size == TileSize.SMALL) 16.dp else 28.dp
-        },
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "resizeHandlePillLength"
-    )
-
-    val handlePillThickness by animateDpAsState(
-        targetValue = if (isResizingActive) 7.dp else 5.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "resizeHandlePillThickness"
-    )
-
-    val revealBorderBrush = Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = if (isHighlyTransparent) 0.36f else 0.26f),
-            Color.White.copy(alpha = 0.08f),
-            accent.color.copy(alpha = if (isHighlyTransparent) 0.42f else 0.18f)
+    val shouldWiggle = isTileSelected && !settings.lockHomeLayout && !isResizingActive && !isBatterySaverActive
+    val wiggleAngle = if (shouldWiggle) {
+        val infiniteTransition = rememberInfiniteTransition(label = "singleTileWiggle")
+        val animatedWiggle by infiniteTransition.animateFloat(
+            initialValue = -0.75f,
+            targetValue = 0.75f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(210),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "wiggleAngle"
         )
-    )
+        animatedWiggle
+    } else {
+        0f
+    }
+
+    val targetSelectionScale = when {
+        isResizingActive -> 1.01f
+        isTileSelected && !settings.lockHomeLayout -> 1.03f
+        isHomeEditMode -> 0.985f
+        else -> 1f
+    }
+
+    val selectionScale = if (isBatterySaverActive || (targetSelectionScale == 1f && !isTileSelected && !isHomeEditMode && !isResizingActive)) {
+        targetSelectionScale
+    } else {
+        val animatedScale by animateFloatAsState(
+            targetValue = targetSelectionScale,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessMedium
+            ),
+            label = "tileSelectionSpringScale"
+        )
+        animatedScale
+    }
+
+    val revealBorderBrush = remember(isHighlyTransparent, accent.color) {
+        Brush.linearGradient(
+            listOf(
+                Color.White.copy(alpha = if (isHighlyTransparent) 0.36f else 0.26f),
+                Color.White.copy(alpha = 0.08f),
+                accent.color.copy(alpha = if (isHighlyTransparent) 0.42f else 0.18f)
+            )
+        )
+    }
 
     Box(
         modifier = modifier
@@ -221,9 +257,7 @@ fun TileView(
             .graphicsLayer {
                 scaleX = selectionScale
                 scaleY = selectionScale
-                if (isTileSelected && !settings.lockHomeLayout && !isResizingActive) {
-                    rotationZ = wiggleAngle
-                }
+                rotationZ = wiggleAngle
             }
             .clip(cornerShape)
             .background(tileBackgroundBrush)
@@ -240,7 +274,7 @@ fun TileView(
                 }
             )
             .metroTilt(
-                enabled = settings.turnstileAnimationEnabled && !isTileSelected && !isHomeEditMode,
+                enabled = settings.turnstileAnimationEnabled && !isBatterySaverActive && !isTileSelected && !isHomeEditMode,
                 onLongClick = onLongClick,
                 onClick = {
                     if (isTileSelected) {
@@ -251,91 +285,52 @@ fun TileView(
                 }
             )
     ) {
-        if (settings.wp10TileStyle == Wp10TileStyle.FLUENT_ACRYLIC && !isTileSelected) {
+        if (settings.wp10TileStyle == Wp10TileStyle.FLUENT_ACRYLIC && !isTileSelected && !isBatterySaverActive) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.12f),
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.10f)
-                            )
-                        )
-                    )
+                    .background(AcrylicOverlayBrush)
             )
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            when (tile.tileType) {
-                TileType.CLOCK_CALENDAR -> ClockLiveTileContent(size = tile.size)
-                TileType.WEATHER -> WeatherLiveTileContent(size = tile.size)
-                TileType.BATTERY -> BatteryLiveTileContent(telemetry = telemetry, size = tile.size)
-                TileType.PERFORMANCE -> PerformanceLiveTileContent(telemetry = telemetry, size = tile.size)
-                TileType.PHOTOS -> PhotosLiveTileContent(size = tile.size)
-                TileType.NOTES -> NotesLiveTileContent(quickNote = settings.quickNotes, size = tile.size)
-                TileType.NEWS_QUOTE -> NewsQuoteLiveTileContent(size = tile.size)
-                TileType.APP -> {
-                    val appIconBitmap = if (settings.useRealAppIcons) {
-                        rememberAppIcon(tile.packageName)
-                    } else null
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(8.dp)
-                    ) {
-                        val iconSize = when (tile.size) {
-                            TileSize.SMALL -> 28.dp
-                            TileSize.MEDIUM -> 42.dp
-                            TileSize.WIDE -> 46.dp
-                            TileSize.LARGE -> 62.dp
+            when {
+                tile.tileType == TileType.SMART_FOLDER -> {
+                    SmartFolderLiveTileContent(
+                        tile = tile,
+                        settings = settings,
+                        installedApps = installedApps,
+                        interactiveSubSlots = !isTileSelected && !isHomeEditMode && !isResizingActive,
+                        isBatterySaverActive = isBatterySaverActive,
+                        onLaunchItem = onLaunchSmartFolderItem,
+                        onOpenFolder = onOpenSmartFolder
+                    )
+                }
+                tile.hasBoundOrLinkedWidget() -> {
+                    WidgetTileContent(
+                        tile = tile,
+                        accentColor = accent.color,
+                        isTileSelected = isTileSelected,
+                        isHomeEditMode = isHomeEditMode,
+                        useRealAppIcons = settings.useRealAppIcons,
+                        onLongClickTile = onLongClick,
+                        onRequestRebindWidget = { targetTile, _ ->
+                            onRequestBindWidgetPermission(targetTile)
+                        },
+                        onRemoveBrokenWidgetTile = { onUnpin() },
+                        onOpenWidgetPickerForTile = { targetTile ->
+                            onReplaceMissingWidget(targetTile)
                         }
-
-                        if (appIconBitmap != null) {
-                            Image(
-                                bitmap = appIconBitmap,
-                                contentDescription = tile.title,
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .size(iconSize)
-                                    .clip(RoundedCornerShape(8.dp))
-                            )
-                        } else {
-                            val iconVector = resolveIconForTile(tile.customIconName, tile.title)
-                            Icon(
-                                imageVector = iconVector,
-                                contentDescription = tile.title,
-                                tint = Color.White,
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .size(iconSize)
-                            )
-                        }
-
-                        if (tile.size != TileSize.SMALL) {
-                            Text(
-                                text = tile.title,
-                                color = Color.White,
-                                fontSize = if (tile.size == TileSize.WIDE) 13.sp else 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = TextStyle(
-                                    shadow = if (isHighlyTransparent) {
-                                        Shadow(
-                                            color = Color.Black.copy(alpha = 0.75f),
-                                            offset = Offset(0f, 1.5f),
-                                            blurRadius = 4f
-                                        )
-                                    } else null
-                                ),
-                                modifier = Modifier.align(Alignment.BottomStart)
-                            )
-                        }
-                    }
+                    )
+                }
+                else -> {
+                    AppDrivenLiveTileContent(
+                        tile = tile,
+                        installedApps = installedApps,
+                        telemetry = telemetry,
+                        useRealAppIcons = settings.useRealAppIcons,
+                        isHighlyTransparent = isHighlyTransparent
+                    )
                 }
             }
 
@@ -505,6 +500,27 @@ fun TileView(
                     }
 
                     // Interactive Border/Edge Drag Handles (One UI style resize handles along borders)
+                    val handlePillLength by animateDpAsState(
+                        targetValue = when {
+                            isResizingActive -> if (tile.size == TileSize.SMALL) 22.dp else 38.dp
+                            else -> if (tile.size == TileSize.SMALL) 16.dp else 28.dp
+                        },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "resizeHandlePillLength"
+                    )
+
+                    val handlePillThickness by animateDpAsState(
+                        targetValue = if (isResizingActive) 7.dp else 5.dp,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "resizeHandlePillThickness"
+                    )
+
                     // 1. Right Border Drag Handle
                     Box(
                         modifier = Modifier
@@ -607,8 +623,12 @@ fun TileView(
                     }
 
                     // Bottom-right: Combined `-` / `+` Resize Stepper Buttons + Corner Border Drag Handle
-                    val canShrink = tile.size != TileSize.SMALL
-                    val canGrow = tile.size != TileSize.LARGE
+                    val allowedSizes = remember(tile.tileType, tile.widgetProvider, tile.widgetMinSpanX, tile.widgetMinSpanY, tile.widgetResizeMode) {
+                        tile.allowedSizesForTile()
+                    }
+                    val currentAllowedIdx = allowedSizes.indexOf(tile.size)
+                    val canShrink = if (currentAllowedIdx != -1) currentAllowedIdx > 0 else tile.size != TileSize.SMALL
+                    val canGrow = if (currentAllowedIdx != -1) currentAllowedIdx < allowedSizes.lastIndex else tile.size != TileSize.LARGE
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)

@@ -19,12 +19,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 object AppIconMemoryCache {
-    private val cache = object : LruCache<String, ImageBitmap>(120) {}
+    private val cache = object : LruCache<String, ImageBitmap>(160) {}
 
-    fun get(packageName: String): ImageBitmap? = cache.get(packageName)
+    fun get(packageName: String): ImageBitmap? = synchronized(cache) {
+        cache.get(packageName)
+    }
 
     fun put(packageName: String, bitmap: ImageBitmap) {
-        cache.put(packageName, bitmap)
+        synchronized(cache) {
+            cache.put(packageName, bitmap)
+        }
+    }
+
+    fun clearCache() {
+        synchronized(cache) {
+            cache.evictAll()
+        }
     }
 
     fun loadAppIcon(context: Context, packageName: String): ImageBitmap? {
@@ -43,7 +53,11 @@ object AppIconMemoryCache {
 
     private fun drawableToBitmap(drawable: Drawable, maxSizePx: Int): Bitmap {
         if (drawable is BitmapDrawable && drawable.bitmap != null) {
-            return drawable.bitmap
+            val src = drawable.bitmap
+            if (src.width <= maxSizePx && src.height <= maxSizePx) {
+                return src
+            }
+            return Bitmap.createScaledBitmap(src, maxSizePx, maxSizePx, true)
         }
         val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth.coerceAtMost(maxSizePx) else 96
         val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight.coerceAtMost(maxSizePx) else 96

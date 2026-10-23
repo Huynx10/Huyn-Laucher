@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -128,6 +129,7 @@ import com.example.data.model.AppFolder
 import com.example.data.model.AppItem
 import com.example.data.model.LauncherPage
 import com.example.data.model.LauncherSettings
+import com.example.data.model.WidgetProviderItem
 import com.example.ui.theme.LumiaPalette
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -167,6 +169,8 @@ fun AppDrawer(
     isEditMode: Boolean = false,
     onLaunchApp: (String) -> Unit,
     onPinAppToPage: (AppItem, String) -> Unit,
+    installedWidgets: List<WidgetProviderItem> = emptyList(),
+    onPinWidgetToPage: (WidgetProviderItem, String) -> Unit = { _, _ -> },
     onUpdateSettings: (LauncherSettings) -> Unit,
     onEnterEditMode: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -188,10 +192,10 @@ fun AppDrawer(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    // Bounds tracking for Grid View drag-and-drop grouping & reordering
+    // Bounds tracking for Grid View drag-and-drop grouping & reordering (plain maps so scrolling never triggers snapshot state writes)
     var rootBoxPosition by remember { mutableStateOf(Offset.Zero) }
-    val gridItemBounds = remember { mutableStateMapOf<String, Rect>() }
-    val categoryTabBounds = remember { mutableStateMapOf<AppCategory, Rect>() }
+    val gridItemBounds = remember { mutableMapOf<String, Rect>() }
+    val categoryTabBounds = remember { mutableMapOf<AppCategory, Rect>() }
 
     var draggingEntry by remember { mutableStateOf<GridDrawerEntry?>(null) }
     var dragFingerRootPos by remember { mutableStateOf(Offset.Zero) }
@@ -529,55 +533,46 @@ fun AppDrawer(
             Spacer(modifier = Modifier.height(6.dp))
 
             // Single Clean Top Bar: Either Android Default Search Mode OR [Category Filter Pills + Listing/Grid + Search]
-            AnimatedContent(
-                targetState = isAndroidSearchMode,
-                transitionSpec = {
-                    fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMedium)) togetherWith
-                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMedium))
-                },
-                label = "appDrawerTopBarMode"
-            ) { searchActive ->
-                if (searchActive) {
-                    AndroidDefaultSearchBar(
-                        query = searchQuery,
-                        onQueryChange = { searchQuery = it },
-                        accentColor = accent.color,
-                        focusRequester = searchFocusRequester,
-                        onCloseSearch = {
-                            isAndroidSearchMode = false
-                            searchQuery = ""
-                            keyboardController?.hide()
-                        },
-                        onTriggerAndroidSystemSearch = {
-                            launchAndroidDefaultSearch(searchQuery)
+            if (isAndroidSearchMode) {
+                AndroidDefaultSearchBar(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    accentColor = accent.color,
+                    focusRequester = searchFocusRequester,
+                    onCloseSearch = {
+                        isAndroidSearchMode = false
+                        searchQuery = ""
+                        keyboardController?.hide()
+                    },
+                    onTriggerAndroidSystemSearch = {
+                        launchAndroidDefaultSearch(searchQuery)
+                    }
+                )
+            } else {
+                CleanAppDrawerHeaderBar(
+                    selectedCategory = selectedCategory,
+                    categorizedEnabled = settings.allAppsCategorizedEnabled,
+                    viewMode = settings.allAppsViewMode,
+                    accentColor = accent.color,
+                    hoveredCategoryTab = hoveredCategoryTab,
+                    showAzButton = settings.allAppsViewMode == AllAppsViewMode.METRO_LIST,
+                    onSelectCategory = { cat -> selectedCategory = cat },
+                    onCategoryTabPositioned = { cat, rect ->
+                        categoryTabBounds[cat] = rect
+                    },
+                    onOpenAzJump = { showJumpList = true },
+                    onToggleViewMode = {
+                        val nextMode = if (settings.allAppsViewMode == AllAppsViewMode.METRO_LIST) {
+                            AllAppsViewMode.ONE_UI_GRID
+                        } else {
+                            AllAppsViewMode.METRO_LIST
                         }
-                    )
-                } else {
-                    CleanAppDrawerHeaderBar(
-                        selectedCategory = selectedCategory,
-                        categorizedEnabled = settings.allAppsCategorizedEnabled,
-                        viewMode = settings.allAppsViewMode,
-                        accentColor = accent.color,
-                        hoveredCategoryTab = hoveredCategoryTab,
-                        showAzButton = settings.allAppsViewMode == AllAppsViewMode.METRO_LIST,
-                        onSelectCategory = { cat -> selectedCategory = cat },
-                        onCategoryTabPositioned = { cat, rect ->
-                            categoryTabBounds[cat] = rect
-                        },
-                        onOpenAzJump = { showJumpList = true },
-                        onToggleViewMode = {
-                            val nextMode = if (settings.allAppsViewMode == AllAppsViewMode.METRO_LIST) {
-                                AllAppsViewMode.ONE_UI_GRID
-                            } else {
-                                AllAppsViewMode.METRO_LIST
-                            }
-                            onUpdateSettings(settings.copy(allAppsViewMode = nextMode))
-                        },
-                        onOpenSearchMode = {
-                            isAndroidSearchMode = true
-                        }
-                    )
-                }
+                        onUpdateSettings(settings.copy(allAppsViewMode = nextMode))
+                    },
+                    onOpenSearchMode = {
+                        isAndroidSearchMode = true
+                    }
+                )
             }
 
             // Live Drag-and-Drop Action Banner when dragging an app in Grid View
@@ -619,16 +614,11 @@ fun AppDrawer(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Main Content: Listing (METRO_LIST) or Grid (ONE_UI_GRID)
-            AnimatedContent(
-                targetState = Triple(selectedCategory, settings.allAppsViewMode, isAndroidSearchMode),
-                transitionSpec = {
-                    fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) togetherWith
-                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMedium))
-                },
-                label = "appDrawerMainListGrid",
-                modifier = Modifier.fillMaxSize()
-            ) { (activeCat, viewMode, inSearch) ->
+            // Main Content: Listing (METRO_LIST) or Grid (ONE_UI_GRID) — direct rendering without heavy crossfade cloning
+            val activeCat = selectedCategory
+            val viewMode = settings.allAppsViewMode
+            val inSearch = isAndroidSearchMode
+            Box(modifier = Modifier.fillMaxSize()) {
                 if (processedApps.isEmpty() && gridEntries.isEmpty()) {
                     EmptyCategoryPlaceholder(
                         category = activeCat,
@@ -675,33 +665,21 @@ fun AppDrawer(
                                 prevChar != currentGroupChar
 
                             if (showHeader) {
-                                Row(
+                                Text(
+                                    text = currentGroupChar.toString(),
+                                    color = Color.White.copy(alpha = 0.88f),
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 5.dp)
-                                        .clickable { showJumpList = true },
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(30.dp)
-                                            .clip(RoundedCornerShape(settings.tileCornerRadiusDp.dp))
-                                            .background(accent.color),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = currentGroupChar.toString(),
-                                            color = Color.White,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold
+                                        .padding(
+                                            top = if (index == 0) 6.dp else 22.dp,
+                                            bottom = 6.dp,
+                                            start = 10.dp
                                         )
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    HorizontalDivider(
-                                        color = Color.White.copy(alpha = 0.08f),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
+                                        .clickable { showJumpList = true }
+                                        .testTag("letter_header_$currentGroupChar")
+                                )
                             }
 
                             AppItemRow(
@@ -765,19 +743,24 @@ fun AppDrawer(
                             val isFolderMergeTarget = isHoverTarget && activeDropIntent == GridDropIntent.GROUP_INTO_FOLDER
                             val isReorderTarget = isHoverTarget && activeDropIntent == GridDropIntent.REORDER_SLOT
 
-                            val targetScale by animateFloatAsState(
-                                targetValue = when {
-                                    isBeingDragged -> 0.9f
-                                    isFolderMergeTarget -> 1.10f
-                                    isReorderTarget -> 0.95f
-                                    else -> 1f
-                                },
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness = Spring.StiffnessMedium
-                                ),
-                                label = "gridEntryHoverScale"
-                            )
+                            val targetScale = if (draggingEntry == null) {
+                                1f
+                            } else {
+                                val animatedScale by animateFloatAsState(
+                                    targetValue = when {
+                                        isBeingDragged -> 0.9f
+                                        isFolderMergeTarget -> 1.10f
+                                        isReorderTarget -> 0.95f
+                                        else -> 1f
+                                    },
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    ),
+                                    label = "gridEntryHoverScale"
+                                )
+                                animatedScale
+                            }
 
                             Box(
                                 modifier = Modifier
@@ -1361,6 +1344,25 @@ fun AppDrawer(
                     HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    val appWidgets = remember(installedWidgets, app.packageName) {
+                        installedWidgets.filter { it.packageName == app.packageName }
+                    }
+                    if (appWidgets.isNotEmpty()) {
+                        val defaultHomeId = homePages.firstOrNull { it.id == settings.defaultHomePageId }?.id
+                            ?: homePages.firstOrNull()?.id ?: "page_home_1"
+                        appWidgets.take(3).forEach { wItem ->
+                            MenuActionRow(
+                                icon = Icons.Default.Widgets,
+                                label = "Ghim Widget \"${wItem.label}\" (${wItem.targetCellWidth}x${wItem.targetCellHeight})",
+                                tint = accent.color,
+                                onClick = {
+                                    onPinWidgetToPage(wItem, defaultHomeId)
+                                    selectedAppForMenu = null
+                                }
+                            )
+                        }
+                    }
+
                     homePages.forEach { homePage ->
                         MenuActionRow(
                             icon = Icons.Default.PushPin,
@@ -1459,15 +1461,7 @@ private fun CleanAppDrawerHeaderBar(
                 items(AppCategory.entries, key = { it.name }) { category ->
                     val isSelected = selectedCategory == category
                     val isDragHovered = hoveredCategoryTab == category
-                    val scale by animateFloatAsState(
-                        targetValue = when {
-                            isDragHovered -> 1.12f
-                            isSelected -> 1.02f
-                            else -> 1f
-                        },
-                        animationSpec = spring(dampingRatio = 0.7f, stiffness = 450f),
-                        label = "catFilterPillScale"
-                    )
+                    val scale = if (isDragHovered) 1.08f else 1f
                     val catAccent = if (category == AppCategory.ALL) {
                         accentColor
                     } else {
