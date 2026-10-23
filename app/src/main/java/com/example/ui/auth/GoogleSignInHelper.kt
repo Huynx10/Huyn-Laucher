@@ -8,7 +8,6 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.NoCredentialException
-import com.example.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -27,10 +26,8 @@ object GoogleSignInHelper {
         onError: (String) -> Unit
     ) {
         val credentialManager = CredentialManager.create(activityContext)
-        val webClientId = try {
-            activityContext.getString(R.string.default_web_client_id)
-        } catch (e: Exception) {
-            Log.e(TAG, "Missing default_web_client_id string resource", e)
+        val webClientId = configuredWebClientId(activityContext) ?: run {
+            Log.e(TAG, "Missing default_web_client_id string resource")
             onError("Chưa cấu hình OAuth Web Client ID cho Google Sign-In.")
             return
         }
@@ -72,11 +69,7 @@ object GoogleSignInHelper {
         onIdTokenReceived: (String) -> Unit
     ) {
         val credentialManager = CredentialManager.create(activityContext)
-        val webClientId = try {
-            activityContext.getString(R.string.default_web_client_id)
-        } catch (_: Exception) {
-            return
-        }
+        val webClientId = configuredWebClientId(activityContext) ?: return
 
         val googleIdOption = GetGoogleIdOption.Builder()
             .setServerClientId(webClientId)
@@ -117,5 +110,13 @@ object GoogleSignInHelper {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to clear credential manager state", e)
         }
+    }
+
+    private fun configuredWebClientId(context: Context): String? {
+        val resourceId = context.resources.getIdentifier(
+            "default_web_client_id", "string", context.packageName
+        )
+        if (resourceId == 0) return null
+        return runCatching { context.getString(resourceId).takeIf(String::isNotBlank) }.getOrNull()
     }
 }
