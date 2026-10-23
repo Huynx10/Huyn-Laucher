@@ -45,6 +45,7 @@ import com.example.data.model.TileSize
 import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import com.example.data.model.Wp10TileStyle
+import com.example.data.model.WallpaperSource
 import com.example.ui.components.AppIconMemoryCache
 import com.example.ui.theme.DynamicAccentEngine
 import com.example.ui.widget.LumiaWidgetHostManager
@@ -1568,7 +1569,10 @@ class LauncherRepository(
             pageTransitionEffect = try { PageTransitionEffect.valueOf(transitionStr) } catch (_: Exception) { PageTransitionEffect.TURNSTILE_3D },
             doubleTapToGlance = prefs.getBoolean("double_tap_to_glance", true),
             lockHomeLayout = prefs.getBoolean("lock_home_layout", false),
+            autoArrangeTiles = prefs.getBoolean("auto_arrange_tiles", false),
             fullWallpaperEnabled = prefs.getBoolean("full_wallpaper_enabled", true),
+            wallpaperSource = runCatching { WallpaperSource.valueOf(prefs.getString("wallpaper_source", "") ?: "") }
+                .getOrElse { if (!prefs.getString("custom_wallpaper_uri", "").isNullOrBlank()) WallpaperSource.CUSTOM else if (prefs.contains("wallpaper_gradient_index")) WallpaperSource.LUMIA else WallpaperSource.SYSTEM },
             wallpaperGradientIndex = wallpaperIdx,
             customWallpaperUri = prefs.getString("custom_wallpaper_uri", "") ?: "",
             wallpaperDimAlpha = prefs.getFloat("wallpaper_dim_alpha", 0.18f).coerceIn(0f, 0.75f),
@@ -1622,7 +1626,9 @@ class LauncherRepository(
             .putString("page_transition_effect", settings.pageTransitionEffect.name)
             .putBoolean("double_tap_to_glance", settings.doubleTapToGlance)
             .putBoolean("lock_home_layout", settings.lockHomeLayout)
+            .putBoolean("auto_arrange_tiles", settings.autoArrangeTiles)
             .putBoolean("full_wallpaper_enabled", settings.fullWallpaperEnabled)
+            .putString("wallpaper_source", settings.wallpaperSource.name)
             .putInt("wallpaper_gradient_index", settings.wallpaperGradientIndex)
             .putString("custom_wallpaper_uri", settings.customWallpaperUri)
             .putFloat("wallpaper_dim_alpha", settings.wallpaperDimAlpha.coerceIn(0f, 0.75f))
@@ -1680,11 +1686,13 @@ class LauncherRepository(
             put("pageTransitionEffect", settings.pageTransitionEffect.name)
             put("doubleTapToGlance", settings.doubleTapToGlance)
             put("lockHomeLayout", settings.lockHomeLayout)
+            put("autoArrangeTiles", settings.autoArrangeTiles)
             put("fullWallpaperEnabled", settings.fullWallpaperEnabled)
             put("turnstileAnimationEnabled", settings.turnstileAnimationEnabled)
             put("glanceScreenEnabled", settings.glanceScreenEnabled)
             put("batterySaverMode", settings.batterySaverMode.name)
             put("batterySaverThresholdPct", settings.batterySaverThresholdPct)
+            put("wallpaperSource", settings.wallpaperSource.name)
             put("wallpaperGradientIndex", settings.wallpaperGradientIndex)
             put("wallpaperDimAlpha", settings.wallpaperDimAlpha.toDouble())
             put("autoOptimizeBackgroundApps", settings.autoOptimizeBackgroundApps)
@@ -1797,11 +1805,13 @@ class LauncherRepository(
                     pageTransitionEffect = try { PageTransitionEffect.valueOf(s.optString("pageTransitionEffect", cur.pageTransitionEffect.name)) } catch (_: Exception) { cur.pageTransitionEffect },
                     doubleTapToGlance = s.optBoolean("doubleTapToGlance", cur.doubleTapToGlance),
                     lockHomeLayout = s.optBoolean("lockHomeLayout", s.optBoolean("lock_home_layout", cur.lockHomeLayout)),
+                    autoArrangeTiles = s.optBoolean("autoArrangeTiles", cur.autoArrangeTiles),
                     fullWallpaperEnabled = s.optBoolean("fullWallpaperEnabled", cur.fullWallpaperEnabled),
                     turnstileAnimationEnabled = s.optBoolean("turnstileAnimationEnabled", cur.turnstileAnimationEnabled),
                     glanceScreenEnabled = s.optBoolean("glanceScreenEnabled", cur.glanceScreenEnabled),
                     batterySaverMode = BatterySaverMode.valueOf(s.optString("batterySaverMode", cur.batterySaverMode.name)),
                     batterySaverThresholdPct = s.optInt("batterySaverThresholdPct", cur.batterySaverThresholdPct).coerceIn(10, 50),
+                    wallpaperSource = runCatching { WallpaperSource.valueOf(s.optString("wallpaperSource", cur.wallpaperSource.name)) }.getOrDefault(cur.wallpaperSource),
                     wallpaperGradientIndex = s.optInt("wallpaperGradientIndex", cur.wallpaperGradientIndex),
                     wallpaperDimAlpha = s.optDouble("wallpaperDimAlpha", cur.wallpaperDimAlpha.toDouble()).toFloat().coerceIn(0f, 0.75f),
                     autoOptimizeBackgroundApps = s.optBoolean("autoOptimizeBackgroundApps", cur.autoOptimizeBackgroundApps),
