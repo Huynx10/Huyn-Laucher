@@ -65,6 +65,7 @@ class LumiaAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
     private var downX = 0f
     private var downY = 0f
     private var longPressTriggered = false
+    private var gestureHasScrollableChild = false
 
     private val longPressRunnable = Runnable {
         if (!isEditOverlayActive) {
@@ -89,11 +90,12 @@ class LumiaAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
             MotionEvent.ACTION_DOWN -> {
                 downX = ev.x
                 downY = ev.y
+                gestureHasScrollableChild = hasScrollableChild(this)
                 longPressTriggered = false
                 mainHandler.removeCallbacks(longPressRunnable)
                 mainHandler.postDelayed(longPressRunnable, longPressTimeout)
 
-                if (hasScrollableChild(this)) {
+                if (gestureHasScrollableChild) {
                     parent?.requestDisallowInterceptTouchEvent(true)
                 }
             }
@@ -102,7 +104,7 @@ class LumiaAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
                 val dy = abs(ev.y - downY)
                 if (dx > touchSlop || dy > touchSlop) {
                     mainHandler.removeCallbacks(longPressRunnable)
-                    if (hasScrollableChild(this) && dy >= dx) {
+                    if (gestureHasScrollableChild && dy >= dx) {
                         parent?.requestDisallowInterceptTouchEvent(true)
                     } else if (dx > dy * 1.3f) {
                         // Horizontal swipe across pages: allow HorizontalPager to intercept
@@ -112,6 +114,7 @@ class LumiaAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 mainHandler.removeCallbacks(longPressRunnable)
+                gestureHasScrollableChild = false
                 parent?.requestDisallowInterceptTouchEvent(false)
                 if (longPressTriggered) {
                     longPressTriggered = false
@@ -131,6 +134,7 @@ class LumiaAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
 
     override fun onDetachedFromWindow() {
         mainHandler.removeCallbacks(longPressRunnable)
+        gestureHasScrollableChild = false
         super.onDetachedFromWindow()
     }
 
