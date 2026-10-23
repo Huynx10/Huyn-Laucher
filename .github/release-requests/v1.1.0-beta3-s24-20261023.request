@@ -1,0 +1,21 @@
+# Lumia Launcher 1.1.0 beta 3 — S24 Ultra test
+
+Bản **pre-release Debug APK** dành cho kiểm thử trên Samsung Galaxy S24 Ultra; không phải bản ổn định hay đã nghiệm thu trên thiết bị.
+
+## Thay đổi
+- Giao diện Cài đặt tối giản kiểu One UI, các mục nâng cao tách riêng
+- Lưu cấu hình tuần tự và chỉ lưu slider khi nhả tay để giảm nguy cơ crash/reflow chồng nhau
+- Có hướng dẫn khi mở lần đầu về Home mặc định, widget thật và cấp quyền theo Android
+- Tự đề xuất liên kết Samsung/Google widget phù hợp, với xác nhận và cấu hình của Android
+- App Drawer Metro A–Z có icon và tên không bọc khung màu, thanh công cụ gọn, tăng độ tương phản
+- Hình nền hệ thống, chế độ Tile tự do/tự dồn ô, sao lưu và khôi phục
+- Loại bỏ AI Code Review tự động; Android CI build/test vẫn được giữ lại
+
+## Kiểm thử và giới hạn
+- Bản Release chỉ được tạo nếu GitHub Actions `testDebugUnitTest` và `assembleDebug` thành công cho chính commit phát hành
+- Kiểm thử trên S24 Ultra qua ADB, widget thật, kéo thả, thay đổi cài đặt liên tục và pin **chưa được xác nhận**
+- Bản APK dùng **debug signing key tạm cho từng lượt build**; chữ ký có thể khác APK cũ. Nếu báo không thể cập nhật, **sao lưu bố cục trước khi gỡ ứng dụng cũ**, vì gỡ có thể xóa dữ liệu
+- Cài đặt thủ công sau khi tải file APK qua GitHub Releases hoặc bằng ADB; launcher không tự được đặt làm Home mặc định
+
+## Mã nguồn
+Nhánh main tại commit được ghi trên tag `v1.1.0-beta3`; có file SHA-256 cạnh APK để đối chiếu tính toàn vẹn.
