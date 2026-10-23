@@ -113,6 +113,7 @@ import com.example.ui.components.AppDrawer
 import com.example.ui.components.GlanceScreenOverlay
 import com.example.ui.components.LumiaStartGrid
 import com.example.ui.components.SettingsSheet
+import com.example.ui.components.CleanSettingsScreen
 import com.example.ui.components.SmartFolderExpandedOverlay
 import com.example.ui.components.resolveLinkedAppForTile
 import com.example.ui.theme.LumiaPalette
@@ -193,6 +194,14 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     val cloudBackups by viewModel.cloudBackups.collectAsStateWithLifecycle()
     val isCloudSyncing by viewModel.isCloudSyncing.collectAsStateWithLifecycle()
     val cloudSyncMessage by viewModel.cloudSyncMessage.collectAsStateWithLifecycle()
+    val isSavingSettings by viewModel.isSettingsBusy.collectAsStateWithLifecycle()
+    var advancedSettingsOpen by rememberSaveable { mutableStateOf(false) }
+    val firstRunPrefs = remember(context) {
+        context.getSharedPreferences("lumia_first_run", Context.MODE_PRIVATE)
+    }
+    var showFirstRunGuide by rememberSaveable {
+        mutableStateOf(!firstRunPrefs.getBoolean("guided_v1", false))
+    }
 
     val coroutineScope = rememberCoroutineScope()
     val requestSaver = remember(widgetHostManager) {
@@ -350,8 +359,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     val suggestedDefaultWidgets = remember(tiles, installedWidgets) {
         DefaultWidgetMatcher.suggestions(tiles, installedWidgets)
     }
-    LaunchedEffect(suggestedDefaultWidgets, isSettingsOpen, isEditMode) {
-        if (!widgetSetupPrefs.getBoolean("offered_v1", false) &&
+    LaunchedEffect(suggestedDefaultWidgets, isSettingsOpen, isEditMode, showFirstRunGuide) {
+        if (!showFirstRunGuide && !widgetSetupPrefs.getBoolean("offered_v1", false) &&
             suggestedDefaultWidgets.isNotEmpty() && !isSettingsOpen && !isEditMode
         ) {
             showDefaultWidgetOffer = true
@@ -1094,9 +1103,70 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             )
         }
 
-        // One UI Home Screen Settings Sheet ("Cài đặt Màn hình chờ") — auto-saves every change
+        if (showFirstRunGuide && pages.isNotEmpty() && tiles.isNotEmpty() &&
+            !isSettingsOpen && !isEditMode) {
+            AlertDialog(
+                onDismissRequest = {
+                    firstRunPrefs.edit().putBoolean("guided_v1", true).apply()
+                    showFirstRunGuide = false
+                },
+                title = { Text("Bắt đầu với Lumia") },
+                text = {
+                    Text(
+                        "Đặt Lumia làm màn hình chính nếu muốn sử dụng hằng ngày.\n\n" +
+                        "Widget lấy dữ liệu từ ứng dụng đã cài. Android có thể yêu cầu xác nhận hoặc chọn nội dung khi kết nối.\n\n" +
+                        "Lumia dùng hình nền hiện tại. Chỉ cần chọn ảnh nếu muốn thay bằng ảnh riêng."
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        firstRunPrefs.edit().putBoolean("guided_v1", true).apply()
+                        showFirstRunGuide = false
+                    }) { Text("Tiếp tục") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        firstRunPrefs.edit().putBoolean("guided_v1", true).apply()
+                        showFirstRunGuide = false
+                    }) { Text("Để sau") }
+                }
+            )
+        }
+
+        // Main settings: clean One UI-style list. Rare controls remain under Advanced.
         if (isSettingsOpen) {
-            SettingsSheet(
+            if (!advancedSettingsOpen) {
+                CleanSettingsScreen(
+                    settings = settings,
+                    cloudAuthState = cloudAuthState,
+                    cloudBackups = cloudBackups,
+                    isCloudSyncing = isCloudSyncing,
+                    isSavingSettings = isSavingSettings,
+                    onSaveSettings = { viewModel.updateSettings(it) },
+                    onPickCustomWallpaper = { uri -> viewModel.setCustomWallpaper(uri) },
+                    onExportBackup = { viewModel.exportBackup() },
+                    onRestoreBackup = { viewModel.restoreBackup(it) },
+                    onResetDefaults = { viewModel.resetDefaultsAwait() },
+                    onSignInWithGoogle = {
+                        coroutineScope.launch {
+                            GoogleSignInHelper.signInInteractive(
+                                activityContext = context,
+                                onIdTokenReceived = { token -> viewModel.signInWithGoogleIdToken(token) },
+                                onError = { error -> viewModel.onGoogleSignInError(error) }
+                            )
+                        }
+                    },
+                    onSignOutCloud = { viewModel.signOutFromCloud(context) },
+                    onSyncToCloudNow = { viewModel.syncToCloudNow(it) },
+                    onRestoreCloudBackup = { backup ->
+                        viewModel.restoreFromCloudBackup(backup) { ok ->
+                            if (ok) viewModel.closeSettings()
+                        }
+                    },
+                    onOpenAdvanced = { advancedSettingsOpen = true },
+                    onDismiss = { viewModel.closeSettings() }
+                )
+            } else SettingsSheet(
                 settings = settings,
                 telemetry = telemetry,
                 customWallpaperBitmap = customWallpaperBitmap,
@@ -1138,7 +1208,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 onResetDefaults = { viewModel.resetDefaults() },
                 onOptimizeMemory = { viewModel.optimizeMemory() },
                 onRefreshTelemetry = { viewModel.refreshTelemetry() },
-                onDismiss = { viewModel.closeSettings() }
+                onDismiss = { advancedSettingsOpen = false }
             )
         }
     }
