@@ -20,6 +20,7 @@ import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
 import android.os.SystemClock
+import android.util.Log
 import android.provider.MediaStore
 import android.provider.Settings
 import java.io.File
@@ -73,7 +74,12 @@ class LauncherRepository(
 
     suspend fun ensureDefaultTiles() = withContext(Dispatchers.IO) {
         prefs.getString("pending_restore_json", null)?.let { pending ->
-            check(restoreFromJson(pending)) { "Pending restore could not be completed" }
+            if (!restoreFromJson(pending)) {
+                // A failed restore must not crash the default HOME launcher at every startup.
+                // Keep the journal for a later retry; never replace existing user tiles here.
+                Log.w("LauncherRepository", "Pending restore failed; keeping journal for retry")
+                return@withContext
+            }
         }
         if (tileDao.getCount() == 0 && !prefs.getBoolean("home_initialized", false)) {
             val defaults = createDefaultTiles()
