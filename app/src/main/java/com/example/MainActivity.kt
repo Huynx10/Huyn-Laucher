@@ -613,10 +613,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     viewModel.launchApp(tile.packageName)
                                 }
                                 tile.tileType == TileType.PERFORMANCE -> {
-                                    val fresh = viewModel.optimizeMemory()
+                                    viewModel.optimizeMemory()
                                     Toast.makeText(
                                         context,
-                                        "Đã đóng ${fresh.lastStoppedAppsCount} app chạy ngầm • Giải phóng +${fresh.lastFreedRamMb} MB RAM (Trống: ${fresh.availableRamMb} MB)",
+                                        "Đã xóa bộ nhớ đệm của launcher",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
@@ -719,10 +719,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     val launched = viewModel.launchApp(item.packageName)
                                 }
                                 item.tileType == TileType.PERFORMANCE -> {
-                                    val fresh = viewModel.optimizeMemory()
+                                    viewModel.optimizeMemory()
                                     Toast.makeText(
                                         context,
-                                        "Đã tối ưu hệ thống! RAM trống: ${fresh.availableRamMb} MB",
+                                        "Đã xóa bộ nhớ đệm của launcher",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
@@ -752,7 +752,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     viewModel.openSettings()
                                 }
                                 else -> {
-                                    Toast.makeText(context, "Đang mở: ${item.title}", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Không thể mở mục này", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
