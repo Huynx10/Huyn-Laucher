@@ -27,7 +27,7 @@ jobs:
       SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
       CI_RUN_ID: ${{ github.event.workflow_run.id }}
       CI_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
-      KEYSTORE_PATH: ${{ runner.temp }}/lumia-beta-upload.jks
+      KEYSTORE_PATH: /tmp/lumia-beta-upload.jks
     steps:
       - name: Checkout exact CI-tested main commit
         uses: actions/checkout@v4
