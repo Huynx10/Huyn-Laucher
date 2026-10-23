@@ -35,7 +35,7 @@ class ExampleRobolectricTest {
     val tiles = db.tileDao().getAllTiles()
     assertTrue(tiles.isNotEmpty())
     assertTrue(tiles.any { it.tileType == TileType.CLOCK_CALENDAR && it.pageId == "page_home_1" })
-    assertTrue(tiles.any { it.tileType == TileType.PHOTOS && it.pageId == "page_home_2" })
+    assertFalse(tiles.any { it.tileType == TileType.WEATHER || it.tileType == TileType.NEWS_QUOTE || it.tileType == TileType.NOTES })
 
     val pages = repo.loadPages()
     assertEquals(3, pages.size)
@@ -43,9 +43,9 @@ class ExampleRobolectricTest {
     assertEquals(PageType.ALL_APPS, pages[2].pageType)
 
     // Move a tile from page_home_1 to page_home_2
-    repo.moveTileToPage("tile_weather", "page_home_2")
-    val updatedWeather = db.tileDao().getAllTiles().find { it.id == "tile_weather" }
-    assertEquals("page_home_2", updatedWeather?.pageId)
+    repo.moveTileToPage("tile_store", "page_home_2")
+    val movedStore = db.tileDao().getAllTiles().find { it.id == "tile_store" }
+    assertEquals("page_home_2", movedStore?.pageId)
 
     // Move a tile to a free 2D grid coordinate (e.g. gridX = 2, gridY = 14) leaving empty rows above it
     repo.moveTileToGridPosition("tile_phone", targetGridX = 2, targetGridY = 14, totalCols = 4)
