@@ -2,9 +2,12 @@ package com.example
 
 import android.app.Activity
 import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.os.Build
+import android.content.Context
 import android.os.Bundle
 import android.provider.AlarmClock
 import android.provider.Settings
@@ -57,7 +60,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -115,6 +120,7 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.CloudAuthState
 import com.example.ui.viewmodel.LauncherViewModel
 import com.example.ui.widget.LumiaWidgetHostManager
+import com.example.ui.widget.DefaultWidgetMatcher
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -200,6 +206,11 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         )
     }
     var pendingWidgetRequest by rememberSaveable(stateSaver = requestSaver) { mutableStateOf<PendingWidgetBindRequest?>(null) }
+    val widgetSetupPrefs = remember(context) {
+        context.getSharedPreferences("lumia_default_widget_setup", Context.MODE_PRIVATE)
+    }
+    var showDefaultWidgetOffer by rememberSaveable { mutableStateOf(false) }
+    var defaultWidgetQueue by remember { mutableStateOf<List<Pair<String, WidgetProviderItem>>>(emptyList()) }
 
     fun cancelWidgetRequest(req: PendingWidgetBindRequest, message: String) {
         pendingWidgetRequest = null
@@ -248,6 +259,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 finalizeWidgetPinOrLink(req)
             } else {
                 widgetHostManager.releaseWidgetId(req.appWidgetId)
+                defaultWidgetQueue = emptyList()
             }
         }
     }
@@ -257,7 +269,13 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         val configureComponent = providerInfo?.configure ?: req.widgetItem.configureComponent.takeIf { it.isNotBlank() }?.let {
             ComponentName.unflattenFromString(it)
         }
-        if (configureComponent != null) {
+        // Android 12+ providers may explicitly allow using their default configuration.
+        // Configuration is skipped ONLY when optional AND reconfigurable flags are set.
+        val optionalConfiguration = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            providerInfo != null &&
+            (providerInfo.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_CONFIGURATION_OPTIONAL) != 0 &&
+            (providerInfo.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_RECONFIGURABLE) != 0
+        if (configureComponent != null && !optionalConfiguration) {
             try {
                 pendingWidgetRequest = req
                 val configIntent = Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE).apply {
@@ -284,7 +302,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             } else {
                 pendingWidgetRequest = null
                 widgetHostManager.releaseWidgetId(req.appWidgetId)
-                Toast.makeText(context, "Đã hủy cấp quyền gắn Widget.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Đã hủy liên kết widget.", Toast.LENGTH_SHORT).show()
+                defaultWidgetQueue = emptyList()
             }
         }
     }
@@ -322,6 +341,30 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 }
             } else {
                 cancelWidgetRequest(req, "Nhà cung cấp Widget không hợp lệ.")
+            }
+        }
+    }
+
+    // Offer one initial setup for factory tiles only. Never replace user-linked widgets
+    // or modify an existing layout until the user explicitly agrees.
+    val suggestedDefaultWidgets = remember(tiles, installedWidgets) {
+        DefaultWidgetMatcher.suggestions(tiles, installedWidgets)
+    }
+    LaunchedEffect(suggestedDefaultWidgets, isSettingsOpen, isEditMode) {
+        if (!widgetSetupPrefs.getBoolean("offered_v1", false) &&
+            suggestedDefaultWidgets.isNotEmpty() && !isSettingsOpen && !isEditMode
+        ) {
+            showDefaultWidgetOffer = true
+        }
+    }
+    LaunchedEffect(defaultWidgetQueue, pendingWidgetRequest) {
+        if (pendingWidgetRequest == null && defaultWidgetQueue.isNotEmpty()) {
+            val (tileId, provider) = defaultWidgetQueue.first()
+            defaultWidgetQueue = defaultWidgetQueue.drop(1)
+            // Confirm the tile still exists and has not already been linked.
+            val tile = tiles.firstOrNull { it.id == tileId && !it.hasBoundOrLinkedWidget() }
+            if (tile != null) {
+                startBindAndPinWidgetFlow(provider, tile.pageId, linkToTileId = tile.id)
             }
         }
     }
@@ -999,6 +1042,32 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     onDismiss = { viewModel.closeSmartFolder() }
                 )
             }
+        }
+
+        if (showDefaultWidgetOffer && suggestedDefaultWidgets.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = {
+                    widgetSetupPrefs.edit().putBoolean("offered_v1", true).apply()
+                    showDefaultWidgetOffer = false
+                },
+                title = { Text("Kết nối widget có sẵn") },
+                text = {
+                    Text("Lumia tìm thấy ${suggestedDefaultWidgets.size} widget phù hợp cho các ô mặc định. Kết nối để hiển thị dữ liệu từ ứng dụng trên máy. Android có thể yêu cầu cấp quyền.")
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        widgetSetupPrefs.edit().putBoolean("offered_v1", true).apply()
+                        showDefaultWidgetOffer = false
+                        defaultWidgetQueue = suggestedDefaultWidgets.map { it.first.id to it.second }
+                    }) { Text("Kết nối") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        widgetSetupPrefs.edit().putBoolean("offered_v1", true).apply()
+                        showDefaultWidgetOffer = false
+                    }) { Text("Để sau") }
+                }
+            )
         }
 
         // Action Center is launched from the App Drawer header, not a floating Home pill.
