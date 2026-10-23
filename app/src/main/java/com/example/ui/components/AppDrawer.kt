@@ -173,6 +173,7 @@ fun AppDrawer(
     onPinWidgetToPage: (WidgetProviderItem, String) -> Unit = { _, _ -> },
     onUpdateSettings: (LauncherSettings) -> Unit,
     onEnterEditMode: () -> Unit = {},
+    onOpenActionCenter: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -532,7 +533,7 @@ fun AppDrawer(
         ) {
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Single Clean Top Bar: Either Android Default Search Mode OR [Category Filter Pills + Listing/Grid + Search]
+            // Actions first, category filters second. Preserve native Metro list as the default.
             if (isAndroidSearchMode) {
                 AndroidDefaultSearchBar(
                     query = searchQuery,
@@ -561,6 +562,7 @@ fun AppDrawer(
                         categoryTabBounds[cat] = rect
                     },
                     onOpenAzJump = { showJumpList = true },
+                    onOpenActionCenter = onOpenActionCenter,
                     onToggleViewMode = {
                         val nextMode = if (settings.allAppsViewMode == AllAppsViewMode.METRO_LIST) {
                             AllAppsViewMode.ONE_UI_GRID
@@ -1427,9 +1429,8 @@ fun AppDrawer(
 }
 
 /**
- * Clean single-row header bar:
- * Left: Category Filter Pills (bộ lọc phân loại)
- * Right: ONLY Listing/Grid toggle + Search button (which enters Android Default Search Mode)
+ * Metro app list controls: Action Center, A-Z, layout toggle and Search on the FIRST row.
+ * Optional category filter chips sit BELOW. Keep their measured bounds for grid drag grouping.
  */
 @Composable
 private fun CleanAppDrawerHeaderBar(
@@ -1442,144 +1443,98 @@ private fun CleanAppDrawerHeaderBar(
     onSelectCategory: (AppCategory) -> Unit,
     onCategoryTabPositioned: (AppCategory, Rect) -> Unit,
     onOpenAzJump: () -> Unit,
+    onOpenActionCenter: () -> Unit,
     onToggleViewMode: () -> Unit,
     onOpenSearchMode: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .testTag("app_drawer_category_bar"),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (categorizedEnabled) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(end = 6.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                items(AppCategory.entries, key = { it.name }) { category ->
-                    val isSelected = selectedCategory == category
-                    val isDragHovered = hoveredCategoryTab == category
-                    val scale = if (isDragHovered) 1.08f else 1f
-                    val catAccent = if (category == AppCategory.ALL) {
-                        accentColor
-                    } else {
-                        parseHexColor(category.badgeColorHex, accentColor)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .scale(scale)
-                            .onGloballyPositioned { coords ->
-                                onCategoryTabPositioned(category, coords.boundsInRoot())
-                            }
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(
-                                when {
-                                    isDragHovered -> catAccent
-                                    isSelected -> catAccent
-                                    else -> Color.White.copy(alpha = 0.08f)
-                                }
-                            )
-                            .border(
-                                width = if (isSelected || isDragHovered) 1.dp else 0.5.dp,
-                                color = if (isSelected || isDragHovered) Color.White.copy(alpha = 0.4f)
-                                else Color.White.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            .clickable { onSelectCategory(category) }
-                            .padding(horizontal = 11.dp, vertical = 6.dp)
-                            .testTag("app_category_tab_${category.name.lowercase()}")
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = categoryIcon(category),
-                                contentDescription = category.label,
-                                tint = if (isSelected || isDragHovered) Color.White else catAccent,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = category.shortLabel,
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected || isDragHovered) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            Spacer(modifier = Modifier.weight(1f))
-        }
-
-        Spacer(modifier = Modifier.width(6.dp))
-
-        // Right controls: ONLY Listing/Grid + Search (and A-Z jump when in Listing mode)
+    Column(modifier = Modifier.fillMaxWidth().testTag("app_drawer_header")) {
         Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onOpenActionCenter() }
+                    .padding(horizontal = 8.dp, vertical = 10.dp)
+                    .testTag("app_drawer_action_center"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = null, tint = accentColor, modifier = Modifier.size(19.dp))
+                Text("Action Center", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
             if (showAzButton) {
                 Box(
-                    modifier = Modifier
-                        .height(32.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White.copy(alpha = 0.1f))
+                    modifier = Modifier.size(44.dp)
+                        .clip(CircleShape)
                         .clickable { onOpenAzJump() }
-                        .padding(horizontal = 9.dp),
+                        .testTag("app_drawer_az_button"),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "A-Z",
-                        color = accentColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("A-Z", color = accentColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-
-            // Listing / Grid Toggle Button
             Box(
-                modifier = Modifier
-                    .size(32.dp)
+                modifier = Modifier.size(44.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.1f))
                     .clickable { onToggleViewMode() }
                     .testTag("toggle_all_apps_view_mode_button"),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = if (viewMode == AllAppsViewMode.METRO_LIST) {
-                        Icons.Default.GridView
-                    } else {
-                        Icons.AutoMirrored.Filled.ViewList
-                    },
-                    contentDescription = "Chuyển đổi Danh sách / Lưới",
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
+                    imageVector = if (viewMode == AllAppsViewMode.METRO_LIST) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                    contentDescription = if (viewMode == AllAppsViewMode.METRO_LIST) "Chuyển sang dạng lưới" else "Chuyển sang danh sách",
+                    tint = Color.White, modifier = Modifier.size(22.dp)
                 )
             }
-
-            // Search Button -> Enters Android Default Search Mode
             Box(
-                modifier = Modifier
-                    .size(32.dp)
+                modifier = Modifier.size(44.dp)
                     .clip(CircleShape)
-                    .background(accentColor.copy(alpha = 0.85f))
                     .clickable { onOpenSearchMode() }
                     .testTag("app_search_button"),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Tìm kiếm mặc định Android",
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
+                Icon(Icons.Default.Search, contentDescription = "Tìm ứng dụng", tint = Color.White, modifier = Modifier.size(22.dp))
+            }
+        }
+
+        if (categorizedEnabled) {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 5.dp)
+                    .testTag("app_drawer_category_bar"),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(end = 6.dp)
+            ) {
+                items(AppCategory.entries, key = { it.name }) { category ->
+                    val selected = selectedCategory == category
+                    val dragHovered = hoveredCategoryTab == category
+                    val active = selected || dragHovered
+                    val color = if (category == AppCategory.ALL) accentColor else parseHexColor(category.badgeColorHex, accentColor)
+                    Row(
+                        modifier = Modifier
+                            .onGloballyPositioned { coords -> onCategoryTabPositioned(category, coords.boundsInRoot()) }
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(if (active) color.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.06f))
+                            .clickable { onSelectCategory(category) }
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                            .testTag("app_category_tab_${category.name.lowercase()}"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            text = category.shortLabel,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
             }
         }
     }
@@ -1834,28 +1789,19 @@ private fun AppItemRow(
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(cornerRadiusDp.dp))
-                .background(accentColor.copy(alpha = 0.85f)),
-            contentAlignment = Alignment.Center
-        ) {
+        // Real app icon only: no tinted square behind it.
+        Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
             if (iconBitmap != null) {
                 Image(
                     bitmap = iconBitmap,
-                    contentDescription = app.label,
+                    contentDescription = null,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                    modifier = Modifier.size(36.dp)
                 )
             } else {
                 Text(
                     text = (app.label.firstOrNull() ?: '?').uppercaseChar().toString(),
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
+                    color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -1908,32 +1854,14 @@ private fun AppGridCell(
             .padding(vertical = 6.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(cornerRadiusDp.coerceAtLeast(8).dp))
-                .background(
-                    if (isBeingDragged) accentColor.copy(alpha = 0.35f)
-                    else accentColor.copy(alpha = 0.85f)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
+        // Keep drag highlight on the CELL only. Never frame individual app logos.
+        Box(modifier = Modifier.size(54.dp), contentAlignment = Alignment.Center) {
             if (iconBitmap != null) {
-                Image(
-                    bitmap = iconBitmap,
-                    contentDescription = app.label,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
+                Image(bitmap = iconBitmap, contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(44.dp))
             } else {
-                Text(
-                    text = (app.label.firstOrNull() ?: '?').uppercaseChar().toString(),
-                    color = Color.White,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(text = (app.label.firstOrNull() ?: '?').uppercaseChar().toString(),
+                    color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
