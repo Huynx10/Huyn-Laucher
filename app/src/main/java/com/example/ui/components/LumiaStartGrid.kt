@@ -1383,7 +1383,7 @@ fun LumiaStartGrid(
                         onValueChange = { pickerSearchQuery = it },
                         placeholder = {
                             Text(
-                                text = "Tìm kiếm Widget Android hoặc Ứng dụng...",
+                                text = "Tìm ứng dụng hoặc widget",
                                 color = Color.White.copy(alpha = 0.55f),
                                 fontSize = 13.sp
                             )
@@ -1438,12 +1438,6 @@ fun LumiaStartGrid(
                             letterSpacing = 0.8.sp
                         )
                     }
-                    Text(
-                        text = "Chọn ứng dụng để xem và ghim widget",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp
-                    )
-
                     Spacer(modifier = Modifier.height(10.dp))
 
                     val groupedWidgetApps = remember(installedWidgets, pickerSearchQuery) {
@@ -1463,7 +1457,7 @@ fun LumiaStartGrid(
                                 text = if (pickerSearchQuery.isBlank()) {
                                     "Chưa có widget từ ứng dụng đã cài."
                                 } else {
-                                    "Không tìm thấy Widget nào khớp với \"$pickerSearchQuery\"."
+                                    "Không tìm thấy widget phù hợp."
                                 },
                                 color = Color.White.copy(alpha = 0.65f),
                                 fontSize = 12.sp
