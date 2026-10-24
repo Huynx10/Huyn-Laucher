@@ -19,7 +19,7 @@ MOCK
 chmod +x "$TMP/apksigner"
 ZERO="$(printf '%064d' 0)"
 ONE="$(printf '1%.0s' {1..64})"
-${needle}
+MOCK_DIGEST="$ZERO" bash "$ROOT/scripts/verify-beta-signature.sh" "$TMP/sample.apk" "$ZERO" "$TMP/apksigner"
 for prefix in "V2 Signer:" "V3.0 Signer:" "V3.1 Signer:"; do
   MOCK_PREFIX="$prefix" MOCK_DIGEST="$ZERO" bash "$ROOT/scripts/verify-beta-signature.sh" "$TMP/sample.apk" "$ZERO" "$TMP/apksigner"
 done
