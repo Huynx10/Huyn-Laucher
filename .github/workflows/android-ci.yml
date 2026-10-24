@@ -31,6 +31,7 @@ jobs:
           bash scripts/test-verify-beta-keystore.sh
           bash scripts/test-beta-release-source-status.sh
           bash scripts/test-page-persistence-guard.sh
+          bash scripts/test-tile-style-atomic-save.sh
 
       - name: Run Unit & Robolectric Tests
         run: gradle :app:testDebugUnitTest
