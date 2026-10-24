@@ -135,10 +135,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git ls-remote --heads origin main | cut -f1)" = "$SOURCE_SHA" || {
-            echo "::error::main advanced; refusing stale release."
-            exit 1
-          }
+          MAIN_SHA="$(git ls-remote --heads origin main | cut -f1)"
+          SOURCE_STATUS="$(bash scripts/beta-release-source-status.sh "$SOURCE_SHA" "$(git rev-parse HEAD)" "$MAIN_SHA")"
+          if [ "$SOURCE_STATUS" = stale ]; then
+            echo "::notice::main advanced during build; safely skipping superseded beta publishing."
+            exit 0
+          fi
           if git ls-remote --exit-code --tags origin "refs/tags/$BETA_TAG" >/dev/null 2>&1 || gh release view "$BETA_TAG" >/dev/null 2>&1; then
             echo "::error::Release already exists; refusing overwrite."
             exit 1
