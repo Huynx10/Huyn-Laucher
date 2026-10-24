@@ -11,6 +11,8 @@ permissions:
 
 concurrency:
   group: beta-release-main
+  # CI runs can complete out of commit order; keep pending releases for the SHA guard.
+  queue: max
   cancel-in-progress: false
 
 jobs:
