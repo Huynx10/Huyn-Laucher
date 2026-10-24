@@ -118,6 +118,31 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(widget), db.tileDao().getAllTiles())
     }
 
+    @Test fun wrongTypeTileAppearanceFlagsDoNotAbortStyleSaveOrChangeWidgetRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "appearance_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 128, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("wp10_reveal_border", "false")
+            .putInt("use_real_app_icons", 0)
+            .putString("miui_glass_border", "false").commit())
+
+        val recovered = repo.loadSettings()
+        assertTrue(recovered.wp10RevealBorder)
+        assertTrue(recovered.useRealAppIcons)
+        assertTrue(recovered.miuiGlassBorder)
+        assertEquals("false", prefs.getString("wp10_reveal_border", null))
+        assertEquals(0, prefs.getInt("use_real_app_icons", -1))
+        assertEquals("false", prefs.getString("miui_glass_border", null))
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
     @Test fun wrongTypeDefaultHomePageIdFallsBackWithoutRewritingOriginalValue() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
