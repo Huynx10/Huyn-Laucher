@@ -101,6 +101,7 @@ import com.example.data.model.TileSize
 import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import com.example.ui.theme.LumiaPalette
+import com.example.ui.widget.WidgetPickerGrouping
 import com.example.ui.widget.DefaultWidgetMatcher
 import kotlin.math.roundToInt
 
@@ -1324,6 +1325,7 @@ fun LumiaStartGrid(
             var absorbExistingTiles by remember { mutableStateOf(false) }
             var activePickerTab by remember { mutableIntStateOf(0) } // 0 = Widgets & Apps, 1 = Smart Folders
             var pickerSearchQuery by remember { mutableStateOf("") }
+            var expandedWidgetApp by remember { mutableStateOf<String?>(null) }
             var selectedNewAppTileSize by remember { mutableStateOf(TileSize.MEDIUM) }
 
             ModalBottomSheet(
@@ -1381,7 +1383,7 @@ fun LumiaStartGrid(
                         onValueChange = { pickerSearchQuery = it },
                         placeholder = {
                             Text(
-                                text = "Tìm kiếm Widget Android hoặc Ứng dụng...",
+                                text = "Tìm ứng dụng hoặc widget",
                                 color = Color.White.copy(alpha = 0.55f),
                                 fontSize = 13.sp
                             )
@@ -1429,32 +1431,20 @@ fun LumiaStartGrid(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "ANDROID APP WIDGETS TRÊN MÁY (${installedWidgets.size})",
+                            text = "Widget theo ứng dụng",
                             color = accent.color,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.8.sp
                         )
                     }
-                    Text(
-                        text = "Nhúng trực tiếp Widget gốc của ứng dụng vào Metro Tile — giữ nguyên tương tác & cập nhật chuẩn Android",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp
-                    )
-
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    val filteredWidgets = remember(installedWidgets, pickerSearchQuery) {
-                        val q = pickerSearchQuery.trim().lowercase()
-                        if (q.isEmpty()) installedWidgets
-                        else installedWidgets.filter {
-                            it.label.lowercase().contains(q) ||
-                                it.appName.lowercase().contains(q) ||
-                                it.packageName.lowercase().contains(q)
-                        }
+                    val groupedWidgetApps = remember(installedWidgets, pickerSearchQuery) {
+                        WidgetPickerGrouping.group(installedWidgets, pickerSearchQuery)
                     }
 
-                    if (filteredWidgets.isEmpty()) {
+                    if (groupedWidgetApps.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1465,9 +1455,9 @@ fun LumiaStartGrid(
                         ) {
                             Text(
                                 text = if (pickerSearchQuery.isBlank()) {
-                                    "Chưa phát hiện AppWidgetProvider nào trên thiết bị hoặc trình giả lập hiện tại. Bạn có thể ghim App Tile hoặc الترا System Tile bên dưới."
+                                    "Chưa có widget từ ứng dụng đã cài."
                                 } else {
-                                    "Không tìm thấy Widget nào khớp với \"$pickerSearchQuery\"."
+                                    "Không tìm thấy widget phù hợp."
                                 },
                                 color = Color.White.copy(alpha = 0.65f),
                                 fontSize = 12.sp
@@ -1478,8 +1468,36 @@ fun LumiaStartGrid(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            filteredWidgets.take(20).forEach { wItem ->
-                                val recSize = wItem.recommendedTileSize
+                            groupedWidgetApps.forEach { (packageName, widgets) ->
+                                val searching = pickerSearchQuery.isNotBlank()
+                                val expanded = searching || expandedWidgetApp == packageName
+                                Row(
+                                    modifier = Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.07f))
+                                        .clickable(enabled = !searching) {
+                                            expandedWidgetApp = if (expandedWidgetApp == packageName) null else packageName
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                                        .testTag("widget_app_group_$packageName"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    val appIcon = rememberAppIcon(packageName)
+                                    if (appIcon != null) {
+                                        androidx.compose.foundation.Image(bitmap = appIcon, contentDescription = null, modifier = Modifier.size(32.dp))
+                                    } else {
+                                        Icon(Icons.Default.Widgets, contentDescription = null, tint = accent.color)
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(widgets.first().appName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                        Text("${widgets.size} widget", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                                    }
+                                    if (!searching) {
+                                        Text(if (expanded) "Thu gọn" else "Xem", color = accent.color, fontSize = 12.sp)
+                                    }
+                                }
+                                if (expanded) widgets.forEach { wItem ->
                                 val resizeLabel = when {
                                     wItem.resizeMode == 3 -> "Co giãn 2 chiều"
                                     wItem.resizeMode == 1 -> "Co giãn ngang"
@@ -1506,29 +1524,6 @@ fun LumiaStartGrid(
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        val iconBmp = rememberAppIcon(wItem.packageName)
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .clip(RoundedCornerShape(9.dp))
-                                                .background(accent.color.copy(alpha = 0.22f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (iconBmp != null) {
-                                                androidx.compose.foundation.Image(
-                                                    bitmap = iconBmp,
-                                                    contentDescription = wItem.appName,
-                                                    modifier = Modifier.size(26.dp)
-                                                )
-                                            } else {
-                                                Icon(
-                                                    imageVector = Icons.Default.Widgets,
-                                                    contentDescription = null,
-                                                    tint = accent.color,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            }
-                                        }
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = wItem.label,
@@ -1539,7 +1534,7 @@ fun LumiaStartGrid(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
-                                                text = "${wItem.appName} • Tối thiểu ${wItem.targetCellWidth}x${wItem.targetCellHeight} (${recSize.spanX}x${recSize.spanY}) • $resizeLabel",
+                                                text = "Tối thiểu ${wItem.targetCellWidth}×${wItem.targetCellHeight} • $resizeLabel",
                                                 color = Color.White.copy(alpha = 0.65f),
                                                 fontSize = 11.sp,
                                                 maxLines = 1,
@@ -1563,12 +1558,13 @@ fun LumiaStartGrid(
                                             .padding(horizontal = 10.dp, vertical = 6.dp)
                                     ) {
                                         Text(
-                                            text = "+ Ghim",
+                                            text = "Ghim",
                                             color = Color.White,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
+                                }
                                 }
                             }
                         }
