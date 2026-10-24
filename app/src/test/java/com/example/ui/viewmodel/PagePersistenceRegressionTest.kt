@@ -2,7 +2,6 @@ package com.example.ui.viewmodel
 
 import android.content.Context
 import androidx.lifecycle.ViewModelStore
-import androidx.lifecycle.viewModelScope
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.LumiaDatabase
@@ -74,6 +73,19 @@ class PagePersistenceRegressionTest {
         assertEquals(expected, repo.loadPages())
         assertEquals(expected.size, expected.map { it.id }.distinct().size)
         assertEquals(1, expected.count { it.pageType == PageType.ALL_APPS })
+    }
+
+    @Test fun resetDropsStalePageWriteAndRepairsDefaultHomeForBackup() = runBlocking {
+        vm.addHomePage("Temporary default")
+        val custom = vm.pages.value.last { it.pageType == PageType.HOME }
+        repo.saveSettings(repo.loadSettings().copy(defaultHomePageId = custom.id))
+        vm.resetDefaultsAwait()
+        pageScheduler.runCurrent()
+        val pages = repo.loadPages()
+        assertFalse(pages.any { it.id == custom.id })
+        assertTrue(pages.any { it.id == repo.loadSettings().defaultHomePageId && it.pageType == PageType.HOME })
+        assertEquals(repo.loadSettings(), vm.settings.value)
+        assertTrue(repo.restoreFromJson(repo.exportBackupJson()))
     }
 
     @Test fun deletingAllAppsOrUnknownPageDoesNotChangeLayout() {
