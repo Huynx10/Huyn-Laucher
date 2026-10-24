@@ -1622,11 +1622,28 @@ class LauncherRepository(
         )
     }
 
+    // Legacy/debug builds may have stored a different preference type. Recover the
+    // visual setting without clearing user layout, pages or widget bindings.
+    private fun loadTileOpacity(): Float {
+        val stored = try {
+            prefs.getFloat("tile_opacity", 0.45f)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved tile opacity type", wrongType)
+            (prefs.all["tile_opacity"] as? String)?.toFloatOrNull() ?: 0.45f
+        }
+        return stored.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0.45f
+    }
+
     fun loadSettings(): LauncherSettings {
         val viewModeStr = prefs.getString("all_apps_view_mode", AllAppsViewMode.METRO_LIST.name) ?: AllAppsViewMode.METRO_LIST.name
         val sortOrderStr = prefs.getString("all_apps_sort_order", AllAppsSortOrder.NAME_ASC.name) ?: AllAppsSortOrder.NAME_ASC.name
         val transitionStr = prefs.getString("page_transition_effect", PageTransitionEffect.TURNSTILE_3D.name) ?: PageTransitionEffect.TURNSTILE_3D.name
-        val wp10StyleStr = prefs.getString("wp10_tile_style", Wp10TileStyle.TINTED_TRANSLUCENT.name) ?: Wp10TileStyle.TINTED_TRANSLUCENT.name
+        val wp10StyleStr = try {
+            prefs.getString("wp10_tile_style", Wp10TileStyle.TINTED_TRANSLUCENT.name)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved tile style type", wrongType)
+            null
+        } ?: Wp10TileStyle.TINTED_TRANSLUCENT.name
         val dynamicModeStr = prefs.getString("dynamic_accent_mode", DynamicAccentMode.WP10_VIBRANT.name) ?: DynamicAccentMode.WP10_VIBRANT.name
         val batterySaverModeStr = prefs.getString("battery_saver_mode", BatterySaverMode.AUTO.name) ?: BatterySaverMode.AUTO.name
 
@@ -1648,7 +1665,7 @@ class LauncherRepository(
             dynamicSwatchIndex = swatchIndex,
             isDarkTheme = prefs.getBoolean("is_dark_theme", true),
             wp10TileStyle = try { Wp10TileStyle.valueOf(wp10StyleStr) } catch (_: Exception) { Wp10TileStyle.TINTED_TRANSLUCENT },
-            tileOpacity = prefs.getFloat("tile_opacity", 0.45f).coerceIn(0f, 1f),
+            tileOpacity = loadTileOpacity(),
             wp10RevealBorder = prefs.getBoolean("wp10_reveal_border", true),
             showMoreTiles = prefs.getBoolean("show_more_tiles", false),
             tileCornerRadiusDp = prefs.getInt("tile_corner_radius", 2),
@@ -1705,7 +1722,7 @@ class LauncherRepository(
             .putInt("dynamic_swatch_index", settings.dynamicSwatchIndex.coerceIn(0, 3))
             .putBoolean("is_dark_theme", settings.isDarkTheme)
             .putString("wp10_tile_style", settings.wp10TileStyle.name)
-            .putFloat("tile_opacity", settings.tileOpacity.coerceIn(0f, 1f))
+            .putFloat("tile_opacity", settings.tileOpacity.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0.45f)
             .putBoolean("wp10_reveal_border", settings.wp10RevealBorder)
             .putBoolean("show_more_tiles", settings.showMoreTiles)
             .putInt("tile_corner_radius", settings.tileCornerRadiusDp)
