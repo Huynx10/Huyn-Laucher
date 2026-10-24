@@ -1661,6 +1661,14 @@ class LauncherRepository(
             fallback
         }
 
+    private fun readHomeString(key: String, fallback: String): String =
+        try {
+            prefs.getString(key, fallback) ?: fallback
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home string type: $key", wrongType)
+            fallback
+        }
+
     private fun readHomePageId(): String =
         try {
             prefs.getString("default_home_page_id", "page_home_1") ?: "page_home_1"
@@ -1672,7 +1680,7 @@ class LauncherRepository(
     fun loadSettings(): LauncherSettings {
         val viewModeStr = prefs.getString("all_apps_view_mode", AllAppsViewMode.METRO_LIST.name) ?: AllAppsViewMode.METRO_LIST.name
         val sortOrderStr = prefs.getString("all_apps_sort_order", AllAppsSortOrder.NAME_ASC.name) ?: AllAppsSortOrder.NAME_ASC.name
-        val transitionStr = prefs.getString("page_transition_effect", PageTransitionEffect.TURNSTILE_3D.name) ?: PageTransitionEffect.TURNSTILE_3D.name
+        val transitionStr = readHomeString("page_transition_effect", PageTransitionEffect.TURNSTILE_3D.name)
         val wp10StyleStr = try {
             prefs.getString("wp10_tile_style", Wp10TileStyle.TINTED_TRANSLUCENT.name)
         } catch (wrongType: ClassCastException) {
@@ -1709,7 +1717,7 @@ class LauncherRepository(
             miuiGlassBorder = readHomeBoolean("miui_glass_border", true),
             pageTransitionEffect = try { PageTransitionEffect.valueOf(transitionStr) } catch (_: Exception) { PageTransitionEffect.TURNSTILE_3D },
             doubleTapToGlance = prefs.getBoolean("double_tap_to_glance", true),
-            lockHomeLayout = prefs.getBoolean("lock_home_layout", false),
+            lockHomeLayout = readHomeBoolean("lock_home_layout", false),
             autoArrangeTiles = readHomeBoolean("auto_arrange_tiles", false),
             fullWallpaperEnabled = prefs.getBoolean("full_wallpaper_enabled", true),
             wallpaperSource = runCatching { WallpaperSource.valueOf(prefs.getString("wallpaper_source", "") ?: "") }
@@ -1725,7 +1733,7 @@ class LauncherRepository(
             quickNotes = prefs.getString("quick_notes", "Chào mừng trở lại Windows 10 Mobile! Ô Tile hỗ trợ tuỳ chỉnh trong suốt xuyên thấu từ 0% đến 100%.") ?: "",
             cloudSyncState = prefs.getString("cloud_sync_state", "Đã đồng bộ cục bộ") ?: "Đã đồng bộ cục bộ",
             defaultHomePageId = readHomePageId(),
-            showPageHeaderTitle = prefs.getBoolean("show_page_header_title", false),
+            showPageHeaderTitle = readHomeBoolean("show_page_header_title", false),
             allAppsViewMode = try { AllAppsViewMode.valueOf(viewModeStr) } catch (_: Exception) { AllAppsViewMode.METRO_LIST },
             allAppsGridColumns = prefs.getInt("all_apps_grid_columns", 4),
             allAppsSortOrder = try { AllAppsSortOrder.valueOf(sortOrderStr) } catch (_: Exception) { AllAppsSortOrder.NAME_ASC },
