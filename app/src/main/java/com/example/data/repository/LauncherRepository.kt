@@ -904,7 +904,12 @@ class LauncherRepository(
             tileDao.clearAll()
             tileDao.insertAll(createDefaultTiles())
         }
-        savePages(getDefaultPages())
+        val defaultPages = getDefaultPages()
+        savePages(defaultPages)
+        val currentSettings = loadSettings()
+        if (defaultPages.none { it.id == currentSettings.defaultHomePageId && it.pageType == PageType.HOME }) {
+            saveSettings(currentSettings.copy(defaultHomePageId = defaultPages.first { it.pageType == PageType.HOME }.id))
+        }
         prefs.edit().putBoolean("smart_folder_default_seeded_v1", true).putBoolean("home_initialized", true).commit()
         oldIds.forEach { id -> runCatching { LumiaWidgetHostManager.getInstance(context).releaseWidgetId(id) } }
     }
