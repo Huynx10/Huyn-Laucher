@@ -13,8 +13,12 @@ chmod +x "$TMP/apksigner"
 ZERO="$(printf '%064d' 0)"
 ONE="$(printf '1%.0s' {1..64})"
 MOCK_DIGEST="$ZERO" bash "$ROOT/scripts/verify-beta-signature.sh" "$TMP/sample.apk" "$ZERO" "$TMP/apksigner"
-if MOCK_DIGEST="$ONE" bash "$ROOT/scripts/verify-beta-signature.sh" "$TMP/sample.apk" "$ZERO" "$TMP/apksigner"; then
+if MOCK_DIGEST="$ONE" bash "$ROOT/scripts/verify-beta-signature.sh" "$TMP/sample.apk" "$ZERO" "$TMP/apksigner" 2>"$TMP/mismatch.log"; then
   echo "Mismatch was not rejected" >&2
+  exit 1
+fi
+if ! grep -Fq "Actual APK signing certificate SHA-256: $ONE" "$TMP/mismatch.log"; then
+  echo "Mismatch diagnostics did not show actual public certificate fingerprint" >&2
   exit 1
 fi
 if MOCK_DIGEST="$ZERO" bash "$ROOT/scripts/verify-beta-signature.sh" "$TMP/sample.apk" "invalid" "$TMP/apksigner"; then
