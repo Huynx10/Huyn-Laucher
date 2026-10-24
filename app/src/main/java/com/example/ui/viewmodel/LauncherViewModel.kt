@@ -186,13 +186,17 @@ class LauncherViewModel(
             for (candidate in pendingSettings) {
                 settingsMutationMutex.withLock {
                     if (candidate != _settings.value) return@withLock
-                    val heavy = candidate.showMoreTiles != repository.loadSettings().showMoreTiles ||
-                        (candidate.autoArrangeTiles && !repository.loadSettings().autoArrangeTiles)
-                    if (heavy) _isSettingsBusy.value = true
+                    var heavy = false
                     try {
+                        val saved = repository.loadSettings()
+                        heavy = candidate.showMoreTiles != saved.showMoreTiles ||
+                            (candidate.autoArrangeTiles && !saved.autoArrangeTiles)
+                        if (heavy) _isSettingsBusy.value = true
                         repository.saveSettingsWithReflow(candidate)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Settings save failed", e)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Log.e(TAG, "Settings save failed", error)
                         _cloudSyncMessage.value = "Không lưu được cài đặt. Hãy thử lại."
                     } finally {
                         if (heavy) _isSettingsBusy.value = false
@@ -201,7 +205,14 @@ class LauncherViewModel(
             }
         }
         viewModelScope.launch {
-            repository.ensureDefaultTiles()
+            // A corrupt provider/database must not take down the default HOME process.
+            runLauncherBackgroundRead(onError = { error ->
+                Log.e(TAG, "Home initialization failed", error)
+                _cloudSyncMessage.value = "Không tải được dữ liệu Home. Hãy thử mở lại ứng dụng."
+            }) {
+                repository.ensureDefaultTiles()
+                Unit
+            }
             refreshApps()
         }
 
@@ -767,17 +778,27 @@ class LauncherViewModel(
             ) return
         }
         lastAppRefreshAtMs = SystemClock.elapsedRealtime()
+        // Explicit refresh replaces any stale in-flight scan instead of racing to publish old data.
+        appRefreshJob?.cancel()
         appRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             val pinned = tiles.value.map { it.packageName }.filter { it.isNotEmpty() }.toSet()
-            _apps.value = repository.getInstalledApps(pinned)
-            _installedWidgets.value = repository.discoverInstalledWidgets()
-            _telemetry.value = repository.getSystemTelemetry()
+            runLauncherBackgroundRead(onError = { Log.e(TAG, "App catalog scan failed", it) }) {
+                repository.getInstalledApps(pinned)
+            }?.let { _apps.value = it }
+            runLauncherBackgroundRead(onError = { Log.e(TAG, "Widget provider scan failed", it) }) {
+                repository.discoverInstalledWidgets()
+            }?.let { _installedWidgets.value = it }
+            runLauncherBackgroundRead(onError = { Log.e(TAG, "System telemetry read failed", it) }) {
+                repository.getSystemTelemetry()
+            }?.let { _telemetry.value = it }
         }
     }
 
     fun refreshWidgets() {
         viewModelScope.launch(Dispatchers.IO) {
-            _installedWidgets.value = repository.discoverInstalledWidgets()
+            runLauncherBackgroundRead(onError = { Log.e(TAG, "Widget refresh failed", it) }) {
+                repository.discoverInstalledWidgets()
+            }?.let { _installedWidgets.value = it }
         }
     }
 

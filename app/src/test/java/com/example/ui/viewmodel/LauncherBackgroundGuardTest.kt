@@ -1,0 +1,89 @@
+package com.example.ui.viewmodel
+
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
+import org.junit.Test
+
+class LauncherBackgroundGuardTest {
+    @Test fun failingScanRetainsLastKnownCatalogAndReportsError() = runBlocking {
+        var apps = listOf("Existing app")
+        var errorCount = 0
+        val result = runLauncherBackgroundRead<List<String>>(
+            onError = { error ->
+                assertEquals("Package manager unavailable", error.message)
+                errorCount++
+            }
+        ) { throw IllegalStateException("Package manager unavailable") }
+        result?.let { apps = it }
+        assertEquals(listOf("Existing app"), apps)
+        assertEquals(1, errorCount)
+    }
+
+    @Test fun oneFailedStageDoesNotPreventFollowingStages() = runBlocking {
+        val completed = mutableListOf<String>()
+        val failures = mutableListOf<String>()
+        runLauncherBackgroundRead<Unit>(onError = { failures.add(it.message.orEmpty()) }) {
+            completed.add("apps")
+            throw IllegalArgumentException("apps failed")
+        }
+        val widgets = runLauncherBackgroundRead(onError = { failures.add(it.message.orEmpty()) }) {
+            completed.add("widgets")
+            listOf("Real widget")
+        }
+        val telemetry = runLauncherBackgroundRead(onError = { failures.add(it.message.orEmpty()) }) {
+            completed.add("telemetry")
+            42
+        }
+        assertEquals(listOf("apps", "widgets", "telemetry"), completed)
+        assertEquals(listOf("apps failed"), failures)
+        assertEquals(listOf("Real widget"), widgets)
+        assertEquals(42, telemetry)
+    }
+
+    @Test fun cancellationIsNotSwallowedOrReportedAsFailure() = runBlocking {
+        var reported = false
+        try {
+            runLauncherBackgroundRead<Unit>(onError = { reported = true }) {
+                throw CancellationException("superseded refresh")
+            }
+            fail("Cancellation must propagate")
+        } catch (cancelled: CancellationException) {
+            assertEquals("superseded refresh", cancelled.message)
+        }
+        assertTrue(!reported)
+    }
+
+    @Test fun cancelledBlockingReadCannotPublishStaleResult() = runBlocking {
+        var published = false
+        val job = async {
+            runLauncherBackgroundRead(onError = { fail("Cancellation is not a scan failure") }) {
+                // Simulates a blocking PackageManager call returning after the scan was cancelled.
+                currentCoroutineContext().cancel()
+                listOf("Stale app")
+            }?.let { published = true }
+        }
+        try {
+            job.await()
+            fail("Cancelled scan must not publish")
+        } catch (_: CancellationException) {
+            // Expected: ensureActive rejects the stale value even if the read itself returned.
+        }
+        assertFalse(published)
+    }
+
+    @Test fun successfulRefreshPublishesNewValueWithoutError() = runBlocking {
+        var apps = listOf("Old app")
+        val result = runLauncherBackgroundRead(
+            onError = { fail("No error expected: ${it.message}") }
+        ) { listOf("New app") }
+        result?.let { apps = it }
+        assertEquals(listOf("New app"), apps)
+    }
+}
