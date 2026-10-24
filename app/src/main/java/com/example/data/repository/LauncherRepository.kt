@@ -1643,6 +1643,24 @@ class LauncherRepository(
         return stored.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0.45f
     }
 
+    // Home layout flags and the selected Home page may have a legacy preference type.
+    // Fall back on read without deleting the original value or touching Room/widget rows.
+    private fun readHomeBoolean(key: String, fallback: Boolean): Boolean =
+        try {
+            prefs.getBoolean(key, fallback)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home boolean type: $key", wrongType)
+            fallback
+        }
+
+    private fun readHomePageId(): String =
+        try {
+            prefs.getString("default_home_page_id", "page_home_1") ?: "page_home_1"
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved default Home page type", wrongType)
+            "page_home_1"
+        }
+
     fun loadSettings(): LauncherSettings {
         val viewModeStr = prefs.getString("all_apps_view_mode", AllAppsViewMode.METRO_LIST.name) ?: AllAppsViewMode.METRO_LIST.name
         val sortOrderStr = prefs.getString("all_apps_sort_order", AllAppsSortOrder.NAME_ASC.name) ?: AllAppsSortOrder.NAME_ASC.name
@@ -1676,7 +1694,7 @@ class LauncherRepository(
             wp10TileStyle = try { Wp10TileStyle.valueOf(wp10StyleStr) } catch (_: Exception) { Wp10TileStyle.TINTED_TRANSLUCENT },
             tileOpacity = loadTileOpacity(),
             wp10RevealBorder = prefs.getBoolean("wp10_reveal_border", true),
-            showMoreTiles = prefs.getBoolean("show_more_tiles", false),
+            showMoreTiles = readHomeBoolean("show_more_tiles", false),
             tileCornerRadiusDp = prefs.getInt("tile_corner_radius", 2),
             tileSpacingDp = prefs.getInt("tile_spacing_dp", 6),
             useRealAppIcons = prefs.getBoolean("use_real_app_icons", true),
@@ -1684,7 +1702,7 @@ class LauncherRepository(
             pageTransitionEffect = try { PageTransitionEffect.valueOf(transitionStr) } catch (_: Exception) { PageTransitionEffect.TURNSTILE_3D },
             doubleTapToGlance = prefs.getBoolean("double_tap_to_glance", true),
             lockHomeLayout = prefs.getBoolean("lock_home_layout", false),
-            autoArrangeTiles = prefs.getBoolean("auto_arrange_tiles", false),
+            autoArrangeTiles = readHomeBoolean("auto_arrange_tiles", false),
             fullWallpaperEnabled = prefs.getBoolean("full_wallpaper_enabled", true),
             wallpaperSource = runCatching { WallpaperSource.valueOf(prefs.getString("wallpaper_source", "") ?: "") }
                 .getOrElse { if (!prefs.getString("custom_wallpaper_uri", "").isNullOrBlank()) WallpaperSource.CUSTOM else if (prefs.contains("wallpaper_gradient_index")) WallpaperSource.LUMIA else WallpaperSource.SYSTEM },
@@ -1698,7 +1716,7 @@ class LauncherRepository(
             autoOptimizeBackgroundApps = prefs.getBoolean("auto_optimize_background_apps", true),
             quickNotes = prefs.getString("quick_notes", "Chào mừng trở lại Windows 10 Mobile! Ô Tile hỗ trợ tuỳ chỉnh trong suốt xuyên thấu từ 0% đến 100%.") ?: "",
             cloudSyncState = prefs.getString("cloud_sync_state", "Đã đồng bộ cục bộ") ?: "Đã đồng bộ cục bộ",
-            defaultHomePageId = prefs.getString("default_home_page_id", "page_home_1") ?: "page_home_1",
+            defaultHomePageId = readHomePageId(),
             showPageHeaderTitle = prefs.getBoolean("show_page_header_title", false),
             allAppsViewMode = try { AllAppsViewMode.valueOf(viewModeStr) } catch (_: Exception) { AllAppsViewMode.METRO_LIST },
             allAppsGridColumns = prefs.getInt("all_apps_grid_columns", 4),
