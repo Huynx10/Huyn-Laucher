@@ -10,7 +10,9 @@ permissions:
   contents: write
 
 concurrency:
-  group: beta-release-${{ github.event.workflow_run.head_sha }}
+  group: beta-release-main
+  # CI runs can complete out of commit order; keep pending releases for the SHA guard.
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -36,16 +38,20 @@ jobs:
           persist-credentials: true
 
       - name: Verify commit and reserve unique release identity
+        id: release_guard
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git ls-remote --heads origin main | cut -f1)" = "$SOURCE_SHA" || {
-            echo "::error::main moved since CI; refusing stale release."
-            exit 1
-          }
+          MAIN_SHA="$(git ls-remote --heads origin main | cut -f1)"
+          SOURCE_STATUS="$(bash scripts/beta-release-source-status.sh "$SOURCE_SHA" "$(git rev-parse HEAD)" "$MAIN_SHA")"
+          if [ "$SOURCE_STATUS" = stale ]; then
+            echo "::notice::main advanced since CI; safely skipping superseded beta release."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
           SHORT_SHA="$(printf '%s' "$SOURCE_SHA" | cut -c1-12)"
           TAG="v1.1.0-beta.$CI_RUN_NUMBER-g$SHORT_SHA"
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1 || gh release view "$TAG" >/dev/null 2>&1; then
@@ -57,17 +63,20 @@ jobs:
           echo "BETA_VERSION_NAME=1.1.0-beta.$CI_RUN_NUMBER" >> "$GITHUB_ENV"
 
       - name: Set up JDK 17
+        if: steps.release_guard.outputs.ready == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: temurin
 
       - name: Set up Gradle
+        if: steps.release_guard.outputs.ready == 'true'
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '9.3.1'
 
       - name: Restore persistent release signing identity
+        if: steps.release_guard.outputs.ready == 'true'
         env:
           BETA_KEYSTORE_BASE64: ${{ secrets.BETA_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.BETA_STORE_PASSWORD }}
@@ -88,12 +97,14 @@ jobs:
           bash scripts/verify-beta-keystore.sh "$KEYSTORE_PATH" "$BETA_CERT_SHA256"
 
       - name: Build signed release APK for exact CI commit
+        if: steps.release_guard.outputs.ready == 'true'
         env:
           STORE_PASSWORD: ${{ secrets.BETA_STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.BETA_KEY_PASSWORD }}
         run: gradle :app:assembleRelease
 
       - name: Verify signing identity and prepare checksum
+        if: steps.release_guard.outputs.ready == 'true'
         env:
           BETA_CERT_SHA256: ${{ secrets.BETA_CERT_SHA256 }}
         shell: bash
@@ -112,6 +123,7 @@ jobs:
           rm -f "$KEYSTORE_PATH"
 
       - name: Upload verified APK artifact
+        if: steps.release_guard.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: lumia-beta-${{ github.event.workflow_run.run_number }}
@@ -119,15 +131,18 @@ jobs:
           retention-days: 30
 
       - name: Publish immutable GitHub beta pre-release
+        if: steps.release_guard.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git ls-remote --heads origin main | cut -f1)" = "$SOURCE_SHA" || {
-            echo "::error::main advanced; refusing stale release."
-            exit 1
-          }
+          MAIN_SHA="$(git ls-remote --heads origin main | cut -f1)"
+          SOURCE_STATUS="$(bash scripts/beta-release-source-status.sh "$SOURCE_SHA" "$(git rev-parse HEAD)" "$MAIN_SHA")"
+          if [ "$SOURCE_STATUS" = stale ]; then
+            echo "::notice::main advanced during build; safely skipping superseded beta publishing."
+            exit 0
+          fi
           if git ls-remote --exit-code --tags origin "refs/tags/$BETA_TAG" >/dev/null 2>&1 || gh release view "$BETA_TAG" >/dev/null 2>&1; then
             echo "::error::Release already exists; refusing overwrite."
             exit 1
