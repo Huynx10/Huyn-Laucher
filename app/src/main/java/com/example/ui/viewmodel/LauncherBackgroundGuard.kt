@@ -1,6 +1,8 @@
 package com.example.ui.viewmodel
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * Isolates a non-critical launcher background read from other startup/refresh work.
@@ -12,7 +14,11 @@ internal suspend fun <T : Any> runLauncherBackgroundRead(
     onError: (Exception) -> Unit,
     read: suspend () -> T
 ): T? = try {
-    read()
+    val value = read()
+    // PackageManager and provider calls can block without suspending: a cancelled scan
+    // must not publish stale results after a newer refresh has already started.
+    currentCoroutineContext().ensureActive()
+    value
 } catch (cancelled: CancellationException) {
     throw cancelled
 } catch (error: Exception) {
