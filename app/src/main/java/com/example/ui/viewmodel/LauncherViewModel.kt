@@ -876,6 +876,7 @@ class LauncherViewModel(
     suspend fun resetDefaultsAwait() {
         settingsMutationMutex.withLock {
             repository.resetToDefaultTiles()
+            _settings.value = repository.loadSettings()
             _pages.value = repository.loadPages()
             refreshApps()
         }
