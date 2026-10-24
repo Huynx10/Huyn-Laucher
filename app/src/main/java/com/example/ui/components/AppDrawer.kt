@@ -1380,38 +1380,39 @@ fun AppDrawer(
                         )
                     }
 
-                    MenuActionRow(
-                        icon = Icons.Default.Info,
-                        label = "Thông tin ứng dụng",
-                        tint = Color.White,
-                        onClick = {
-                            try {
-                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = Uri.fromParts("package", app.packageName, null)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    appDrawerSystemActions(app.isSystemApp).forEach { action ->
+                        when (action) {
+                            AppDrawerSystemAction.APP_INFO -> MenuActionRow(
+                                icon = Icons.Default.Info,
+                                label = "Thông tin ứng dụng",
+                                tint = Color.White,
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                            data = Uri.fromParts("package", app.packageName, null)
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                    selectedAppForMenu = null
                                 }
-                                context.startActivity(intent)
-                            } catch (_: Exception) {}
-                            selectedAppForMenu = null
+                            )
+                            AppDrawerSystemAction.UNINSTALL -> MenuActionRow(
+                                icon = Icons.Default.Delete,
+                                label = "Gỡ cài đặt",
+                                tint = Color(0xFFE81123),
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
+                                            data = Uri.fromParts("package", app.packageName, null)
+                                            putExtra(Intent.EXTRA_RETURN_RESULT, true)
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                    selectedAppForMenu = null
+                                }
+                            )
                         }
-                    )
-
-                    if (!app.isSystemApp) {
-                        MenuActionRow(
-                            icon = Icons.Default.Delete,
-                            label = "Gỡ cài đặt",
-                            tint = Color(0xFFE81123),
-                            onClick = {
-                                try {
-                                    val intent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
-                                        data = Uri.fromParts("package", app.packageName, null)
-                                        putExtra(Intent.EXTRA_RETURN_RESULT, true)
-                                    }
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {}
-                                selectedAppForMenu = null
-                            }
-                        )
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
