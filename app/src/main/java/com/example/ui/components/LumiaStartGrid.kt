@@ -15,6 +15,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,6 +31,12 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -1328,18 +1336,29 @@ fun LumiaStartGrid(
             var expandedWidgetApp by remember { mutableStateOf<String?>(null) }
             var selectedNewAppTileSize by remember { mutableStateOf(TileSize.MEDIUM) }
 
+            val groupedWidgetApps = remember(installedWidgets, pickerSearchQuery) {
+                WidgetPickerGrouping.group(installedWidgets, pickerSearchQuery)
+            }
+            val filteredAppsForTile = remember(installedApps, pickerSearchQuery) {
+                val q = pickerSearchQuery.trim().lowercase(java.util.Locale.ROOT)
+                installedApps.filter { q.isEmpty() || it.label.lowercase(java.util.Locale.ROOT).contains(q) ||
+                    it.packageName.lowercase(java.util.Locale.ROOT).contains(q) }
+            }
+            val pickerMaxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.85f
             ModalBottomSheet(
                 onDismissRequest = onDismissAddTileSheet,
                 sheetState = sheetState,
                 containerColor = Color(0xFF17171B),
                 contentColor = Color.White
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = pickerMaxHeight)
+                        .testTag("add_tile_picker_list"),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    item(key = "picker_header", contentType = "header") {
+                        Column {
                     // Header Tabs: 0 = Widget & App Tile, 1 = Smart Folders
                     Row(
                         modifier = Modifier
@@ -1377,6 +1396,7 @@ fun LumiaStartGrid(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    if (activePickerTab == 0) {
                     // Search bar for both Widgets and Apps
                     OutlinedTextField(
                         value = pickerSearchQuery,
@@ -1419,6 +1439,12 @@ fun LumiaStartGrid(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
+                    }
+                        }
+                    }
+                    if (activePickerTab == 0) {
+                        item(key = "widget_heading", contentType = "header") {
+                            Column {
                     // Section 1: Native Android App Widgets (P0 Core Priority)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1440,11 +1466,10 @@ fun LumiaStartGrid(
                     }
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    val groupedWidgetApps = remember(installedWidgets, pickerSearchQuery) {
-                        WidgetPickerGrouping.group(installedWidgets, pickerSearchQuery)
-                    }
-
-                    if (groupedWidgetApps.isEmpty()) {
+                            }
+                        }
+                        if (groupedWidgetApps.isEmpty()) {
+                            item(key = "widget_empty", contentType = "empty") {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1463,19 +1488,18 @@ fun LumiaStartGrid(
                                 fontSize = 12.sp
                             )
                         }
-                    } else {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+                            }
+                        } else {
                             groupedWidgetApps.forEach { (packageName, widgets) ->
                                 val searching = pickerSearchQuery.isNotBlank()
                                 val expanded = searching || expandedWidgetApp == packageName
+                                item(key = "widget_app:$packageName", contentType = "widget_app") {
                                 Row(
                                     modifier = Modifier.fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(Color.White.copy(alpha = 0.07f))
-                                        .clickable(enabled = !searching) {
+                                        .semantics { stateDescription = if (expanded) "Đã mở" else "Đã thu gọn" }
+                                        .clickable(enabled = !searching, role = Role.Button) {
                                             expandedWidgetApp = if (expandedWidgetApp == packageName) null else packageName
                                         }
                                         .padding(horizontal = 12.dp, vertical = 12.dp)
@@ -1497,7 +1521,9 @@ fun LumiaStartGrid(
                                         Text(if (expanded) "Thu gọn" else "Xem", color = accent.color, fontSize = 12.sp)
                                     }
                                 }
-                                if (expanded) widgets.forEach { wItem ->
+                                }
+                                if (expanded) {
+                                    items(widgets, key = { "widget:${it.providerComponent}" }, contentType = { "widget" }) { wItem ->
                                 val resizeLabel = when {
                                     wItem.resizeMode == 3 -> "Co giãn 2 chiều"
                                     wItem.resizeMode == 1 -> "Co giãn ngang"
@@ -1565,13 +1591,160 @@ fun LumiaStartGrid(
                                         )
                                     }
                                 }
+                                    }
                                 }
+                            }
+                        }
+                        item(key = "app_controls", contentType = "controls") {
+                            Column {
+                    // Section 3: App Tiles & Real OS Telemetry Tiles
+                    Text(
+                        text = "GHIM APP TILE TỪ ỨNG DỤNG ĐÃ CÀI VÀO ${currentPage.title.uppercase()}",
+                        color = accent.color,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Kích thước App Tile:",
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontSize = 11.sp
+                        )
+                        TileSize.entries.forEach { sz ->
+                            val isSel = selectedNewAppTileSize == sz
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) accent.color else Color.White.copy(alpha = 0.08f))
+                                    .clickable { selectedNewAppTileSize = sz }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "${sz.spanX}x${sz.spanY}",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
+                    val systemTiles = listOf(
+                        Triple("Tối ưu RAM & Bộ nhớ", TileType.PERFORMANCE, TileSize.WIDE),
+                        Triple("Pin & Nhiệt độ Hệ thống", TileType.BATTERY, TileSize.MEDIUM)
+                    )
+
+                    systemTiles.forEach { (label, type, size) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    val newTile = TileEntity(
+                                        id = "tile_${type.name.lowercase()}_${System.currentTimeMillis()}",
+                                        title = label,
+                                        tileType = type,
+                                        size = size,
+                                        orderIndex = tiles.size,
+                                        pageId = currentPage.id,
+                                        gridX = -1,
+                                        gridY = -1,
+                                        isLiveEnabled = true
+                                    )
+                                    onPinNewTile(newTile)
+                                    onDismissAddTileSheet()
+                                }
+                                .padding(vertical = 8.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(accent.color),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PushPin,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = "Telemetry phần cứng thực tế • ${if (size == TileSize.WIDE) "4x2" else "2x2"}",
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+
+                            }
+                        }
+                        items(filteredAppsForTile, key = { "app:${it.packageName}" }, contentType = { "app" }) { app ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    val newTile = TileEntity(
+                                        id = "tile_app_${app.packageName}_${System.currentTimeMillis()}",
+                                        title = app.label,
+                                        packageName = app.packageName,
+                                        tileType = TileType.APP,
+                                        size = selectedNewAppTileSize,
+                                        orderIndex = tiles.size,
+                                        pageId = currentPage.id,
+                                        gridX = -1,
+                                        gridY = -1,
+                                        isLiveEnabled = true
+                                    )
+                                    onPinNewTile(newTile)
+                                    onDismissAddTileSheet()
+                                }
+                                .padding(vertical = 8.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.10f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PushPin,
+                                    contentDescription = null,
+                                    tint = accent.color,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = app.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    text = "${app.category.label} • App Tile ${selectedNewAppTileSize.spanX}x${selectedNewAppTileSize.spanY}",
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        }
+                    } else {
+                        item(key = "folder_controls", contentType = "controls") {
+                            Column {
                     // Section 2: Smart Folder Widget System (MIUI / HyperOS)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1757,159 +1930,10 @@ fun LumiaStartGrid(
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    // Section 3: App Tiles & Real OS Telemetry Tiles
-                    Text(
-                        text = "GHIM APP TILE TỪ ỨNG DỤNG ĐÃ CÀI VÀO ${currentPage.title.uppercase()}",
-                        color = accent.color,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Kích thước App Tile:",
-                            color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 11.sp
-                        )
-                        TileSize.entries.forEach { sz ->
-                            val isSel = selectedNewAppTileSize == sz
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) accent.color else Color.White.copy(alpha = 0.08f))
-                                    .clickable { selectedNewAppTileSize = sz }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "${sz.spanX}x${sz.spanY}",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                                )
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    val systemTiles = listOf(
-                        Triple("Tối ưu RAM & Bộ nhớ", TileType.PERFORMANCE, TileSize.WIDE),
-                        Triple("Pin & Nhiệt độ Hệ thống", TileType.BATTERY, TileSize.MEDIUM)
-                    )
-
-                    systemTiles.forEach { (label, type, size) ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable {
-                                    val newTile = TileEntity(
-                                        id = "tile_${type.name.lowercase()}_${System.currentTimeMillis()}",
-                                        title = label,
-                                        tileType = type,
-                                        size = size,
-                                        orderIndex = tiles.size,
-                                        pageId = currentPage.id,
-                                        gridX = -1,
-                                        gridY = -1,
-                                        isLiveEnabled = true
-                                    )
-                                    onPinNewTile(newTile)
-                                    onDismissAddTileSheet()
-                                }
-                                .padding(vertical = 8.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(accent.color),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PushPin,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = "Telemetry phần cứng thực tế • ${if (size == TileSize.WIDE) "4x2" else "2x2"}",
-                                    color = Color.White.copy(alpha = 0.55f),
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-
-                    val filteredAppsForTile = remember(installedApps, pickerSearchQuery) {
-                        val q = pickerSearchQuery.trim().lowercase()
-                        if (q.isEmpty()) installedApps.take(16)
-                        else installedApps.filter {
-                            it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q)
-                        }.take(20)
-                    }
-
-                    filteredAppsForTile.forEach { app ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable {
-                                    val newTile = TileEntity(
-                                        id = "tile_app_${app.packageName}_${System.currentTimeMillis()}",
-                                        title = app.label,
-                                        packageName = app.packageName,
-                                        tileType = TileType.APP,
-                                        size = selectedNewAppTileSize,
-                                        orderIndex = tiles.size,
-                                        pageId = currentPage.id,
-                                        gridX = -1,
-                                        gridY = -1,
-                                        isLiveEnabled = true
-                                    )
-                                    onPinNewTile(newTile)
-                                    onDismissAddTileSheet()
-                                }
-                                .padding(vertical = 8.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.10f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PushPin,
-                                    contentDescription = null,
-                                    tint = accent.color,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = app.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                Text(
-                                    text = "${app.category.label} • App Tile ${selectedNewAppTileSize.spanX}x${selectedNewAppTileSize.spanY}",
-                                    color = Color.White.copy(alpha = 0.55f),
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
+                    item(key = "bottom_space") { Spacer(modifier = Modifier.height(20.dp)) }
                 }
             }
         }
@@ -2046,4 +2070,5 @@ private fun SingleTilePillAction(
         )
     }
 }
+
 
