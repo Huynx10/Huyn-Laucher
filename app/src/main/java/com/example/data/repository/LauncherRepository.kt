@@ -58,11 +58,14 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 class LauncherRepository(
     private val context: Context,
     private val tileDao: TileDao,
     private val database: LumiaDatabase = LumiaDatabase.getDatabase(context),
+    // Candidate factory is injectable so ID collisions can be tested deterministically.
+    private val newTileIdCandidate: (String) -> String = { prefix -> "${prefix}_${UUID.randomUUID()}" },
     // Test seam: failed Room writes must not release the widget host's live binding.
     private val releaseWidgetBinding: (Int) -> Unit = { id ->
         LumiaWidgetHostManager.getInstance(context).releaseWidgetId(id)
@@ -70,6 +73,16 @@ class LauncherRepository(
 ) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+
+    private fun allocateUniqueTileId(prefix: String, existingTiles: List<TileEntity>): String {
+        val existingIds = existingTiles.mapTo(HashSet()) { it.id }
+        repeat(16) {
+            val candidate = newTileIdCandidate(prefix)
+            if (candidate.isNotBlank() && candidate !in existingIds) return candidate
+        }
+        // Fail closed: Room's REPLACE conflict policy must never overwrite a pinned tile.
+        error("Unable to allocate a unique tile ID")
+    }
 
     fun discoverInstalledWidgets(): List<WidgetProviderItem> =
         LumiaWidgetHostManager.getInstance(context).discoverInstalledWidgets()
@@ -690,7 +703,7 @@ class LauncherRepository(
         val minSpanX = ((provider.minWidthDp + 69) / 70).coerceIn(1, provider.targetCellWidth)
         val minSpanY = ((provider.minHeightDp + 69) / 70).coerceIn(1, provider.targetCellHeight)
         val widgetTile = TileEntity(
-            id = "widget_${provider.packageName}_${System.currentTimeMillis()}",
+            id = allocateUniqueTileId("widget_${provider.packageName}", allTiles),
             title = provider.label.ifBlank { provider.appName },
             packageName = provider.packageName,
             tileType = TileType.WIDGET,
@@ -852,7 +865,7 @@ class LauncherRepository(
             totalCols = totalCols
         )
         val tile = TileEntity(
-            id = "app_${app.packageName}_${System.currentTimeMillis()}",
+            id = allocateUniqueTileId("app_${app.packageName}", allTiles),
             title = app.label,
             packageName = app.packageName,
             tileType = TileType.APP,
