@@ -6,6 +6,8 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.LumiaDatabase
 import com.example.data.model.PageType
+import com.example.data.model.TileEntity
+import com.example.data.model.TileType
 import com.example.data.repository.LauncherRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -130,5 +132,36 @@ class PagePersistenceRegressionTest {
         assertEquals(original.first { it.pageType == PageType.HOME }.id, expected[1].id)
         assertEquals(expected.size, expected.map { it.id }.distinct().size)
         assertEquals(expected, repo.loadPages())
+    }
+
+    @Test fun wrongTypePagesPreferenceCannotCrashViewModelStartupOrDeleteWidgetRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            id = "existing_widget", title = "Saved widget",
+            tileType = TileType.WIDGET, widgetProvider = "example/.Provider",
+            appWidgetId = 127, pageId = "page_home_1"
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putInt("launcher_pages_json", 42).commit())
+
+        // Simulate Home/ViewModel creation with a legacy wrong-type persisted value.
+        val restarted = LauncherViewModel(repo, null, StandardTestDispatcher(pageScheduler))
+        store.put("launcher", restarted)
+        assertEquals(repo.getDefaultPages(), restarted.pages.value)
+        assertEquals(42, prefs.getInt("launcher_pages_json", -1))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun malformedPageJsonFallsBackOnReadWithoutRewritingUserData() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val raw = "[not-valid-json"
+        assertTrue(prefs.edit().putString("launcher_pages_json", raw).commit())
+
+        assertEquals(repo.getDefaultPages(), repo.loadPages())
+        assertEquals(raw, prefs.getString("launcher_pages_json", null))
+        // Even malformed input must not remove the terminal All Apps destination.
+        assertEquals(PageType.ALL_APPS, repo.loadPages().last().pageType)
     }
 }
