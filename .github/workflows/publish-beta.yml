@@ -84,7 +84,7 @@ jobs:
           done
           umask 077
           printf '%s' "$BETA_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias upload >/dev/null
+          # Check the persistent certificate before spending time on Gradle or publishing.\n          bash scripts/verify-beta-keystore.sh "$KEYSTORE_PATH" "$BETA_CERT_SHA256"
 
       - name: Build signed release APK for exact CI commit
         env:
