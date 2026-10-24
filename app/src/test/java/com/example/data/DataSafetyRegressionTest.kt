@@ -397,6 +397,56 @@ class DataSafetyRegressionTest {
         assertEquals(before, db.tileDao().getAllTiles())
     }
 
+    @Test fun nativeWidgetPinAfterSparseOrderPreservesBindingsAndTileStyle() = runBlocking {
+        val pinned = TileEntity("pinned_app", "Pinned", pageId = "page_home_2",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val existing = TileEntity("existing_widget", "Existing", tileType = TileType.WIDGET,
+            appWidgetId = 187, widgetProvider = "example/.Existing",
+            pageId = "page_home_2", orderIndex = 5, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, existing))
+        val provider = WidgetProviderItem("example/.New", "example", "New", "New widget", "Example")
+        val created = repo.pinWidgetTile(provider, 188, "page_home_2")
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(pinned, rows.single { it.id == pinned.id })
+        assertEquals(existing, rows.single { it.id == existing.id })
+        assertEquals(6, created.orderIndex)
+        assertEquals(TileType.WIDGET, created.tileType)
+        assertEquals(188, created.appWidgetId)
+        assertEquals(provider.providerComponent, created.widgetProvider)
+        assertEquals(created, rows.single { it.id == created.id })
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(rows.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun failedNativeWidgetPinLeavesExistingWidgetBindingsUntouched() = runBlocking {
+        val existing = TileEntity("existing_widget", "Existing", tileType = TileType.WIDGET,
+            appWidgetId = 187, widgetProvider = "example/.Existing",
+            pageId = "page_home_2", orderIndex = 5, gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(existing)
+        val before = db.tileDao().getAllTiles()
+        db.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER reject_widget_pin
+            BEFORE INSERT ON tiles
+            WHEN NEW.appWidgetId = 188
+            BEGIN
+                SELECT RAISE(ABORT, 'injected widget pin failure');
+            END
+            """.trimIndent()
+        )
+        val provider = WidgetProviderItem("example/.New", "example", "New", "New widget", "Example")
+        try {
+            repo.pinWidgetTile(provider, 188, "page_home_2")
+            fail("Expected injected Room insert failure")
+        } catch (_: android.database.sqlite.SQLiteException) {
+            // Failure propagates; existing Room/widget bindings must remain intact.
+        }
+        assertEquals(before, db.tileDao().getAllTiles())
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()
