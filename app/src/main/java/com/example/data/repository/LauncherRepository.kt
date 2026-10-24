@@ -844,6 +844,7 @@ class LauncherRepository(
     }
 
     suspend fun reassignTilesFromDeletedPage(deletedPageId: String, fallbackPageId: String) = withContext(Dispatchers.IO) {
+        require(deletedPageId != fallbackPageId) { "Cannot reassign tiles to the deleted Home page" }
         // Keep all widget moves atomic so a failed write cannot partially move a page.
         database.withTransaction {
             val allTiles = tileDao.getAllTiles()

@@ -326,6 +326,53 @@ class DataSafetyRegressionTest {
         assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
     }
 
+    @Test fun samePageReassignmentFailsFastWithoutChangingWidgetRows() = runBlocking {
+        val widget = TileEntity("same_page_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 151, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 0, gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+
+        try {
+            repo.reassignTilesFromDeletedPage("page_home_1", "page_home_1")
+            fail("Expected invalid same-page reassignment to fail")
+        } catch (_: IllegalArgumentException) {
+            // Invalid page pair is rejected, not silently rewritten.
+        }
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun failedSecondWidgetMoveRollsBackAllReassignments() = runBlocking {
+        val pinned = TileEntity("pinned_app", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val widgetA = TileEntity("widget_a", "Widget A", tileType = TileType.WIDGET,
+            appWidgetId = 152, widgetProvider = "example/.ProviderA",
+            pageId = "page_home_2", orderIndex = 0, gridX = 0, gridY = 0)
+        val widgetB = TileEntity("widget_b", "Widget B", tileType = TileType.WIDGET,
+            appWidgetId = 153, widgetProvider = "example/.ProviderB",
+            pageId = "page_home_2", orderIndex = 1, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, widgetA, widgetB))
+        val before = db.tileDao().getAllTiles()
+
+        db.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER reject_second_widget_move
+            BEFORE INSERT ON tiles
+            WHEN NEW.id = 'widget_b' AND NEW.pageId = 'page_home_1'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected second widget move failure');
+            END
+            """.trimIndent()
+        )
+
+        try {
+            repo.reassignTilesFromDeletedPage("page_home_2", "page_home_1")
+            fail("Expected injected database failure")
+        } catch (_: android.database.sqlite.SQLiteException) {
+            // Room must roll back the whole batch, not just the rejected row.
+        }
+        assertEquals(before, db.tileDao().getAllTiles())
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()
