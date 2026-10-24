@@ -1759,10 +1759,10 @@ class LauncherRepository(
             lockHomeLayout = readHomeBoolean("lock_home_layout", false),
             autoArrangeTiles = readHomeBoolean("auto_arrange_tiles", false),
             fullWallpaperEnabled = readHomeBoolean("full_wallpaper_enabled", true),
-            wallpaperSource = runCatching { WallpaperSource.valueOf(prefs.getString("wallpaper_source", "") ?: "") }
-                .getOrElse { if (!prefs.getString("custom_wallpaper_uri", "").isNullOrBlank()) WallpaperSource.CUSTOM else if (prefs.contains("wallpaper_gradient_index")) WallpaperSource.LUMIA else WallpaperSource.SYSTEM },
+            wallpaperSource = runCatching { WallpaperSource.valueOf(readHomeString("wallpaper_source", "")) }
+                .getOrElse { if (readHomeString("custom_wallpaper_uri", "").isNotBlank()) WallpaperSource.CUSTOM else if (prefs.contains("wallpaper_gradient_index")) WallpaperSource.LUMIA else WallpaperSource.SYSTEM },
             wallpaperGradientIndex = wallpaperIdx,
-            customWallpaperUri = prefs.getString("custom_wallpaper_uri", "") ?: "",
+            customWallpaperUri = readHomeString("custom_wallpaper_uri", ""),
             wallpaperDimAlpha = loadWallpaperDimAlpha(),
             turnstileAnimationEnabled = readHomeBoolean("turnstile_animation", true),
             glanceScreenEnabled = readHomeBoolean("glance_screen_enabled", true),

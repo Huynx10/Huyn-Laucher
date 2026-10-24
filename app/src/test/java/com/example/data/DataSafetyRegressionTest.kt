@@ -997,4 +997,29 @@ class DataSafetyRegressionTest {
         assertEquals(before, db.tileDao().getAllTiles())
     }
 
+
+    @Test fun wrongTypeWallpaperSourceAndUriCannotAbortTileStyleSaveOrChangeWidgets() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "wallpaper_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 219, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putInt("wallpaper_source", 12)
+            .putBoolean("custom_wallpaper_uri", true).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(WallpaperSource.SYSTEM, recovered.wallpaperSource)
+        assertEquals("", recovered.customWallpaperUri)
+        assertEquals(12, prefs.getInt("wallpaper_source", -1))
+        assertTrue(prefs.getBoolean("custom_wallpaper_uri", false))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
 }
