@@ -122,6 +122,34 @@ jobs:
           echo "APK_NAME=$APK_NAME" >> "$GITHUB_ENV"
           rm -f "$KEYSTORE_PATH"
 
+      - name: Verify in-place beta upgrade lineage against last published beta
+        if: steps.release_guard.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BETA_CERT_SHA256: ${{ secrets.BETA_CERT_SHA256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREVIOUS_TAG="$(gh release list --limit 100 --json tagName,isPrerelease,publishedAt --jq '[.[] | select(.isPrerelease and (.tagName | startswith("v1.1.0-beta.")))] | sort_by(.publishedAt) | last | .tagName // ""')"
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "::notice::No previous beta found; in-place upgrade lineage is not yet established."
+            exit 0
+          fi
+          PREVIOUS_DIR="$(mktemp -d)"
+          trap 'rm -rf "$PREVIOUS_DIR"' EXIT
+          gh release download "$PREVIOUS_TAG" --pattern '*.apk' --dir "$PREVIOUS_DIR"
+          COUNT="$(find "$PREVIOUS_DIR" -maxdepth 1 -type f -name '*.apk' | wc -l)"
+          if [ "$COUNT" -ne 1 ]; then
+            echo "::error::Previous beta must contain exactly one APK; refusing unverified upgrade."
+            exit 1
+          fi
+          PREVIOUS_APK="$(find "$PREVIOUS_DIR" -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          NEW_APK="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
+          test -n "$NEW_APK" && test -n "$APKSIGNER" && test -n "$AAPT"
+          bash scripts/verify-beta-upgrade-lineage.sh "$PREVIOUS_APK" "$NEW_APK" "$BETA_CERT_SHA256" "$APKSIGNER" "$AAPT"
+
       - name: Upload verified APK artifact
         if: steps.release_guard.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
