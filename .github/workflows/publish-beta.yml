@@ -133,6 +133,7 @@ jobs:
           PREVIOUS_TAG="$(gh release list --limit 100 --json tagName,isPrerelease,publishedAt --jq '[.[] | select(.isPrerelease and (.tagName | startswith("v1.1.0-beta.")))] | sort_by(.publishedAt) | last | .tagName // ""')"
           if [ -z "$PREVIOUS_TAG" ]; then
             echo "::notice::No previous beta found; in-place upgrade lineage is not yet established."
+            echo "LINEAGE_STATUS=not-established" >> "$GITHUB_ENV"
             exit 0
           fi
           PREVIOUS_DIR="$(mktemp -d)"
@@ -149,6 +150,7 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
           test -n "$NEW_APK" && test -n "$APKSIGNER" && test -n "$AAPT"
           bash scripts/verify-beta-upgrade-lineage.sh "$PREVIOUS_APK" "$NEW_APK" "$BETA_CERT_SHA256" "$APKSIGNER" "$AAPT"
+          echo "LINEAGE_STATUS=verified-against-$PREVIOUS_TAG" >> "$GITHUB_ENV"
 
       - name: Upload verified APK artifact
         if: steps.release_guard.outputs.ready == 'true'
@@ -182,6 +184,7 @@ jobs:
             echo "- CI: https://github.com/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID"
             echo "- SHA-256 checksum attached."
             echo "- Signing: persistent release identity, verified against expected fingerprint."
+            echo "- Beta-to-beta upgrade lineage: $LINEAGE_STATUS (certificate, application ID and versionCode). Device update not yet validated."
             echo "- Earlier debug-signed beta APKs may not accept an in-place update. Back up data before any manual migration; never uninstall automatically."
           } > dist/RELEASE_NOTES.md
           gh release create "$BETA_TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" \
