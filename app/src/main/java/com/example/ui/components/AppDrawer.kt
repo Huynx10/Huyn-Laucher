@@ -1381,16 +1381,6 @@ fun AppDrawer(
                     }
 
                     MenuActionRow(
-                        icon = Icons.Default.PlayArrow,
-                        label = "Mở ứng dụng",
-                        tint = Color.White,
-                        onClick = {
-                            onLaunchApp(app.packageName)
-                            selectedAppForMenu = null
-                        }
-                    )
-
-                    MenuActionRow(
                         icon = Icons.Default.Info,
                         label = "Thông tin ứng dụng",
                         tint = Color.White,
