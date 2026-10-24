@@ -16,7 +16,16 @@ if [[ ! "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]; then
 fi
 # apksigner verify must succeed before parsing the signer certificate.
 SIGNATURE_INFO="$("$APKSIGNER" verify --print-certs "$APK")"
-ACTUAL="$(printf '%s\n' "$SIGNATURE_INFO" | sed -nE 's/^[[:space:]]*Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]{64})[[:space:]]*$/\1/p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+# Android Build Tools 37 may label certificate digests as "V2 Signer:" or
+# "V3.0 Signer:" instead of the legacy "Signer #1" format.
+# Accept only signer *certificate* SHA-256 digests, never public-key digests.
+mapfile -t CERT_DIGESTS < <(printf '%s\n' "$SIGNATURE_INFO" | sed -nE 's/^[[:space:]]*(Signer #[0-9]+|V[0-9]+(\.[0-9]+)? Signer):?[[:space:]]+certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]{64})[[:space:]]*$/\3/p' | tr '[:upper:]' '[:lower:]' | sort -u)
+if (( ${#CERT_DIGESTS[@]} != 1 )); then
+  echo "Unable to identify exactly one APK signing certificate; refusing release" >&2
+  echo "Distinct certificate fingerprints found: ${#CERT_DIGESTS[@]}" >&2
+  exit 1
+fi
+ACTUAL="${CERT_DIGESTS[0]}"
 if [[ "$ACTUAL" != "$EXPECTED" ]]; then
   echo "APK signing certificate does not match the configured beta identity" >&2
   echo "Actual APK signing certificate SHA-256: $ACTUAL" >&2
