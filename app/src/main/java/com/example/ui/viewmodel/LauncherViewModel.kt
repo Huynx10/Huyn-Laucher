@@ -476,34 +476,36 @@ class LauncherViewModel(
         pendingPages.trySend(snapshot.toList())
     }
 
+    // All Apps is a fixed destination, never a movable Home page. Keep IDs intact.
+    private fun orderedPages(pages: List<LauncherPage>): List<LauncherPage> =
+        (pages.filter { it.pageType == PageType.HOME } +
+            pages.filter { it.pageType == PageType.ALL_APPS })
+            .mapIndexed { index, page -> page.copy(orderIndex = index) }
+
     fun addHomePage(title: String) {
-        val current = _pages.value.toMutableList()
+        val current = _pages.value
         val newPage = LauncherPage(
             id = "page_home_${UUID.randomUUID()}",
             title = title,
             pageType = PageType.HOME,
             orderIndex = current.size
         )
-        val allAppsIdx = current.indexOfLast { it.pageType == PageType.ALL_APPS }
-        if (allAppsIdx != -1 && allAppsIdx == current.size - 1) {
-            current.add(allAppsIdx, newPage)
-        } else {
-            current.add(newPage)
-        }
-        val reindexed = current.mapIndexed { idx, p -> p.copy(orderIndex = idx) }
-        _pages.value = reindexed
-        persistPages(reindexed)
+        val updated = orderedPages(current + newPage)
+        _pages.value = updated
+        persistPages(updated)
     }
 
     fun movePage(fromIndex: Int, toIndex: Int) {
         val current = _pages.value.toMutableList()
-        if (fromIndex in current.indices && toIndex in current.indices && fromIndex != toIndex) {
-            val item = current.removeAt(fromIndex)
-            current.add(toIndex, item)
-            val reindexed = current.mapIndexed { idx, p -> p.copy(orderIndex = idx) }
-            _pages.value = reindexed
-            persistPages(reindexed)
-        }
+        if (fromIndex !in current.indices || toIndex !in current.indices || fromIndex == toIndex) return
+        // The All Apps destination must stay terminal; dragging it is a no-op.
+        if (current[fromIndex].pageType != PageType.HOME) return
+        val item = current.removeAt(fromIndex)
+        current.add(toIndex, item)
+        val updated = orderedPages(current)
+        if (updated == _pages.value) return
+        _pages.value = updated
+        persistPages(updated)
     }
 
     fun renamePage(pageId: String, newTitle: String) {

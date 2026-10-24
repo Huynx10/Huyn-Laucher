@@ -96,4 +96,39 @@ class PagePersistenceRegressionTest {
         assertEquals(before, vm.pages.value)
         assertEquals(before, repo.loadPages())
     }
+
+    @Test fun legacyInterleavedAllAppsIsReadWithoutDroppingOrRewritingPages() {
+        val original = repo.loadPages()
+        val homes = original.filter { it.pageType == PageType.HOME }
+        val allApps = original.single { it.pageType == PageType.ALL_APPS }
+        repo.savePages(listOf(homes.first(), allApps, homes.last()))
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val rawBefore = prefs.getString("launcher_pages_json", null)
+
+        val normalized = repo.loadPages()
+        assertEquals(original.map { it.id }, normalized.map { it.id })
+        assertEquals(normalized.indices.toList(), normalized.map { it.orderIndex })
+        assertEquals(PageType.ALL_APPS, normalized.last().pageType)
+        // Normalizing a legacy read must not silently overwrite stored user data.
+        assertEquals(rawBefore, prefs.getString("launcher_pages_json", null))
+    }
+
+    @Test fun movingHomeAcrossAllAppsKeepsTerminalDestinationAndPersistsIds() {
+        val original = vm.pages.value
+        val allAppsId = original.single { it.pageType == PageType.ALL_APPS }.id
+        vm.movePage(original.lastIndex, 0)
+        assertEquals(original, vm.pages.value)
+
+        vm.movePage(0, original.lastIndex)
+        vm.addHomePage("Additional Home")
+        val expected = vm.pages.value
+        pageScheduler.runCurrent()
+
+        assertEquals(allAppsId, expected.last().id)
+        assertEquals(PageType.ALL_APPS, expected.last().pageType)
+        assertEquals(original.first { it.pageType == PageType.HOME }.id, expected[1].id)
+        assertEquals(expected.size, expected.map { it.id }.distinct().size)
+        assertEquals(expected, repo.loadPages())
+    }
 }
