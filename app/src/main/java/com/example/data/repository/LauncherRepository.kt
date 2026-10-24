@@ -1653,6 +1653,14 @@ class LauncherRepository(
             fallback
         }
 
+    private fun readHomeInt(key: String, fallback: Int): Int =
+        try {
+            prefs.getInt(key, fallback)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home dimension type: $key", wrongType)
+            fallback
+        }
+
     private fun readHomePageId(): String =
         try {
             prefs.getString("default_home_page_id", "page_home_1") ?: "page_home_1"
@@ -1695,8 +1703,8 @@ class LauncherRepository(
             tileOpacity = loadTileOpacity(),
             wp10RevealBorder = prefs.getBoolean("wp10_reveal_border", true),
             showMoreTiles = readHomeBoolean("show_more_tiles", false),
-            tileCornerRadiusDp = prefs.getInt("tile_corner_radius", 2),
-            tileSpacingDp = prefs.getInt("tile_spacing_dp", 6),
+            tileCornerRadiusDp = readHomeInt("tile_corner_radius", 2),
+            tileSpacingDp = readHomeInt("tile_spacing_dp", 6),
             useRealAppIcons = prefs.getBoolean("use_real_app_icons", true),
             miuiGlassBorder = prefs.getBoolean("miui_glass_border", true),
             pageTransitionEffect = try { PageTransitionEffect.valueOf(transitionStr) } catch (_: Exception) { PageTransitionEffect.TURNSTILE_3D },
