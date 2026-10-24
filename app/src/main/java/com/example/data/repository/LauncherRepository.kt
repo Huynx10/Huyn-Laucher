@@ -1657,7 +1657,7 @@ class LauncherRepository(
         try {
             prefs.getInt(key, fallback)
         } catch (wrongType: ClassCastException) {
-            Log.w("LauncherRepository", "Unexpected saved Home dimension type: $key", wrongType)
+            Log.w("LauncherRepository", "Unexpected saved Home integer type: $key", wrongType)
             fallback
         }
 
@@ -1706,10 +1706,10 @@ class LauncherRepository(
         val dynamicModeStr = prefs.getString("dynamic_accent_mode", DynamicAccentMode.WP10_VIBRANT.name) ?: DynamicAccentMode.WP10_VIBRANT.name
         val batterySaverModeStr = prefs.getString("battery_saver_mode", BatterySaverMode.AUTO.name) ?: BatterySaverMode.AUTO.name
 
-        val autoWallpaperAccent = prefs.getBoolean("auto_wallpaper_accent_enabled", true)
+        val autoWallpaperAccent = readHomeBoolean("auto_wallpaper_accent_enabled", true)
         val dynamicMode = try { DynamicAccentMode.valueOf(dynamicModeStr) } catch (_: Exception) { DynamicAccentMode.WP10_VIBRANT }
-        val swatchIndex = prefs.getInt("dynamic_swatch_index", 0).coerceIn(0, 3)
-        val wallpaperIdx = prefs.getInt("wallpaper_gradient_index", 0)
+        val swatchIndex = readHomeInt("dynamic_swatch_index", 0).coerceIn(0, 3)
+        val wallpaperIdx = readHomeInt("wallpaper_gradient_index", 0)
         val savedHex = prefs.getString("accent_color", null)
         val effectiveHex = if (autoWallpaperAccent && (savedHex == null || !prefs.contains("accent_color_manual_override"))) {
             DynamicAccentEngine.resolveAutoAccent(wallpaperIdx, dynamicMode, swatchIndex).hex
@@ -1722,7 +1722,7 @@ class LauncherRepository(
             autoWallpaperAccentEnabled = autoWallpaperAccent,
             dynamicAccentMode = dynamicMode,
             dynamicSwatchIndex = swatchIndex,
-            isDarkTheme = prefs.getBoolean("is_dark_theme", true),
+            isDarkTheme = readHomeBoolean("is_dark_theme", true),
             wp10TileStyle = try { Wp10TileStyle.valueOf(wp10StyleStr) } catch (_: Exception) { Wp10TileStyle.TINTED_TRANSLUCENT },
             tileOpacity = loadTileOpacity(),
             wp10RevealBorder = readHomeBoolean("wp10_reveal_border", true),

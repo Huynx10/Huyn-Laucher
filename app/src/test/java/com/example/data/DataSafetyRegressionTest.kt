@@ -197,6 +197,36 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(widget), db.tileDao().getAllTiles())
     }
 
+    @Test fun malformedHomeAccentPreferencesDoNotAbortTileStyleSaveOrLoseWidgets() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "accent_widget", "Existing widget", tileType = TileType.WIDGET,
+            appWidgetId = 139, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("auto_wallpaper_accent_enabled", "true")
+            .putString("dynamic_swatch_index", "2")
+            .putBoolean("wallpaper_gradient_index", true)
+            .putString("is_dark_theme", "false").commit())
+
+        val recovered = repo.loadSettings()
+        assertTrue(recovered.autoWallpaperAccentEnabled)
+        assertEquals(0, recovered.dynamicSwatchIndex)
+        assertEquals(0, recovered.wallpaperGradientIndex)
+        assertTrue(recovered.isDarkTheme)
+        // Loading settings must not rewrite malformed values or widget bindings.
+        assertEquals("true", prefs.getString("auto_wallpaper_accent_enabled", null))
+        assertEquals("2", prefs.getString("dynamic_swatch_index", null))
+        assertTrue(prefs.getBoolean("wallpaper_gradient_index", false))
+        assertEquals("false", prefs.getString("is_dark_theme", null))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
     @Test fun wrongTypeDefaultHomePageIdFallsBackWithoutRewritingOriginalValue() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
