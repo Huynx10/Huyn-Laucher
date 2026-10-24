@@ -218,6 +218,31 @@ class DataSafetyRegressionTest {
         assertTrue(repo.loadSettings().wallpaperDimAlpha.isFinite())
     }
 
+    @Test fun malformedBackupWallpaperAlphaCannotOverwriteHomeOrWidgetBindings() = runBlocking {
+        repo.ensureDefaultTiles()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "backup_widget", "Existing widget", tileType = TileType.WIDGET,
+            appWidgetId = 137, widgetProvider = "example/.Provider", gridX = 0, gridY = 16
+        )
+        db.tileDao().insertOrUpdate(widget)
+        val beforeTiles = db.tileDao().getAllTiles()
+        val beforePages = repo.loadPages()
+        val beforeSettings = repo.loadSettings()
+        val originalBackup = repo.exportBackupJson()
+
+        for (invalid in listOf<Any>("NaN", "Infinity", JSONObject().put("invalid", true))) {
+            val backup = JSONObject(originalBackup)
+            backup.getJSONObject("settings").put("wallpaperDimAlpha", invalid)
+            assertFalse(repo.restoreFromJson(backup.toString()))
+            assertEquals(beforeTiles, db.tileDao().getAllTiles())
+            assertEquals(beforePages, repo.loadPages())
+            assertEquals(beforeSettings, repo.loadSettings())
+            assertNull(prefs.getString("pending_restore_json", null))
+        }
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()
