@@ -447,6 +447,55 @@ class DataSafetyRegressionTest {
         assertEquals(before, db.tileDao().getAllTiles())
     }
 
+    @Test fun genericTilePinAfterSparseOrderKeepsNativeWidgetBindings() = runBlocking {
+        val pinned = TileEntity("pinned_app", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val widget = TileEntity("native_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 197, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 5, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, widget))
+        val added = TileEntity("new_app", "New", pageId = "page_home_1",
+            gridX = -1, gridY = -1)
+
+        repo.pinTile(added)
+
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(pinned, rows.single { it.id == pinned.id })
+        assertEquals(widget, rows.single { it.id == widget.id })
+        assertEquals(6, rows.single { it.id == added.id }.orderIndex)
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(rows.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun failedGenericTilePinDoesNotChangeExistingWidgetBindings() = runBlocking {
+        val widget = TileEntity("native_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 197, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 5, gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        val before = db.tileDao().getAllTiles()
+        db.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER reject_generic_tile_pin
+            BEFORE INSERT ON tiles
+            WHEN NEW.id = 'new_app'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected generic Tile pin failure');
+            END
+            """.trimIndent()
+        )
+        try {
+            repo.pinTile(TileEntity("new_app", "New", pageId = "page_home_1",
+                gridX = -1, gridY = -1))
+            fail("Expected injected database failure")
+        } catch (_: android.database.sqlite.SQLiteException) {
+            // The caller receives the write failure; existing widget data stays intact.
+        }
+        assertEquals(before, db.tileDao().getAllTiles())
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()

@@ -906,20 +906,29 @@ class LauncherRepository(
     }
 
     suspend fun pinTile(tile: TileEntity) = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val pageTiles = allTiles.filter { it.pageId == tile.pageId }
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val (gx, gy) = if (tile.gridX >= 0 && tile.gridY >= 0) {
-            tile.gridX to tile.gridY
-        } else {
-            findFirstFreeGridPosition(
-                existingPageTiles = pageTiles,
-                spanX = tile.size.effectiveSpanX(totalCols),
-                spanY = tile.size.effectiveSpanY(),
-                totalCols = totalCols
+        // Read occupancy and persist the new Tile atomically, including sparse page orders.
+        database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val pageTiles = allTiles.filter { it.pageId == tile.pageId }
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val (gx, gy) = if (tile.gridX >= 0 && tile.gridY >= 0) {
+                tile.gridX to tile.gridY
+            } else {
+                findFirstFreeGridPosition(
+                    existingPageTiles = pageTiles,
+                    spanX = tile.size.effectiveSpanX(totalCols),
+                    spanY = tile.size.effectiveSpanY(),
+                    totalCols = totalCols
+                )
+            }
+            tileDao.insertOrUpdate(
+                tile.copy(
+                    orderIndex = (pageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                    gridX = gx,
+                    gridY = gy
+                )
             )
         }
-        tileDao.insertOrUpdate(tile.copy(orderIndex = pageTiles.size, gridX = gx, gridY = gy))
         autoArrangeIfEnabled(tile.pageId)
     }
 
