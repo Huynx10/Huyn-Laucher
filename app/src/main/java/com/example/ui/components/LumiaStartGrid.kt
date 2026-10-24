@@ -1531,29 +1531,6 @@ fun LumiaStartGrid(
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        val iconBmp = rememberAppIcon(wItem.packageName)
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .clip(RoundedCornerShape(9.dp))
-                                                .background(accent.color.copy(alpha = 0.22f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (iconBmp != null) {
-                                                androidx.compose.foundation.Image(
-                                                    bitmap = iconBmp,
-                                                    contentDescription = wItem.appName,
-                                                    modifier = Modifier.size(26.dp)
-                                                )
-                                            } else {
-                                                Icon(
-                                                    imageVector = Icons.Default.Widgets,
-                                                    contentDescription = null,
-                                                    tint = accent.color,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            }
-                                        }
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = wItem.label,
@@ -1564,7 +1541,7 @@ fun LumiaStartGrid(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
-                                                text = "${wItem.appName} • Tối thiểu ${wItem.targetCellWidth}x${wItem.targetCellHeight} (${recSize.spanX}x${recSize.spanY}) • $resizeLabel",
+                                                text = "Tối thiểu ${wItem.targetCellWidth}×${wItem.targetCellHeight} • $resizeLabel",
                                                 color = Color.White.copy(alpha = 0.65f),
                                                 fontSize = 11.sp,
                                                 maxLines = 1,
@@ -1588,7 +1565,7 @@ fun LumiaStartGrid(
                                             .padding(horizontal = 10.dp, vertical = 6.dp)
                                     ) {
                                         Text(
-                                            text = "+ Ghim",
+                                            text = "Ghim",
                                             color = Color.White,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
