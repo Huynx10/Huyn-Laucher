@@ -30,6 +30,49 @@ class DataSafetyRegressionTest {
     }
     @After fun close() = db.close()
 
+    @Test fun legacyTileStyleTypesRecoverWithoutDroppingTilesOrWidgetLinks() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val existing = TileEntity(
+            "existing_widget", "Existing widget", tileType = TileType.WIDGET,
+            appWidgetId = 127, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(existing)
+        assertTrue(prefs.edit().putInt("wp10_tile_style", 7)
+            .putString("tile_opacity", "0.72").commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(Wp10TileStyle.TINTED_TRANSLUCENT, recovered.wp10TileStyle)
+        assertEquals(0.72f, recovered.tileOpacity, 0.001f)
+        assertEquals(listOf(existing), db.tileDao().getAllTiles())
+        // A read is non-destructive: the user can still recover their original data.
+        assertEquals(7, prefs.getInt("wp10_tile_style", -1))
+
+        repo.saveSettingsWithReflow(recovered.copy(
+            wp10TileStyle = Wp10TileStyle.CLASSIC_METRO, tileOpacity = 1f
+        ))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(1f, repo.loadSettings().tileOpacity, 0f)
+        assertEquals(listOf(existing), db.tileDao().getAllTiles())
+    }
+
+    @Test fun malformedOrNonFiniteOpacityNeverReachesTileRenderingSettings() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        assertTrue(prefs.edit().putString("tile_opacity", "not-a-number").commit())
+        assertEquals(0.45f, repo.loadSettings().tileOpacity, 0f)
+
+        assertTrue(prefs.edit().putFloat("tile_opacity", Float.NaN).commit())
+        assertEquals(0.45f, repo.loadSettings().tileOpacity, 0f)
+
+        assertTrue(prefs.edit().putFloat("tile_opacity", Float.NEGATIVE_INFINITY).commit())
+        assertEquals(0.45f, repo.loadSettings().tileOpacity, 0f)
+
+        repo.saveSettings(repo.loadSettings().copy(tileOpacity = Float.POSITIVE_INFINITY))
+        assertEquals(0.45f, prefs.getFloat("tile_opacity", -1f), 0f)
+        assertTrue(repo.loadSettings().tileOpacity.isFinite())
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()
