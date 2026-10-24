@@ -1431,7 +1431,7 @@ fun LumiaStartGrid(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "WIDGET THEO ỨNG DỤNG (${installedWidgets.map { it.packageName }.distinct().size})",
+                            text = "Widget theo ứng dụng",
                             color = accent.color,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
