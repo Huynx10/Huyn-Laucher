@@ -29,15 +29,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +50,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -360,6 +358,21 @@ fun TileView(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.34f))
+                    .semantics {
+                        customActions = tileEditAccessibilityActions(tile, settings.lockHomeLayout).map { action ->
+                            CustomAccessibilityAction(action.label) {
+                                when (action) {
+                                    TileEditAccessibilityAction.MOVE_LEFT -> onNudgeLeft()
+                                    TileEditAccessibilityAction.MOVE_RIGHT -> onNudgeRight()
+                                    TileEditAccessibilityAction.MOVE_UP -> onNudgeUp()
+                                    TileEditAccessibilityAction.MOVE_DOWN -> onNudgeDown()
+                                    TileEditAccessibilityAction.SHRINK -> onDecreaseSize()
+                                    TileEditAccessibilityAction.GROW -> onIncreaseSize()
+                                }
+                                true
+                            }
+                        }
+                    }
             ) {
                 if (settings.lockHomeLayout) {
                     Box(
@@ -379,62 +392,7 @@ fun TileView(
                         )
                     }
                 } else {
-                    // Top-left: 1-cell free grid nudge controls (or Customize on SMALL tile)
-                    if (tile.size == TileSize.SMALL) {
-                        if (onCustomizeTile != null) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(3.dp)
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF881798))
-                                    .clickable { onCustomizeTile() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Palette,
-                                    contentDescription = "Đổi màu ô Tile",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            MiniTileBadgeButton(
-                                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                contentDescription = "Qua trái 1 ô",
-                                bgColor = Color.Black.copy(alpha = 0.75f),
-                                onClick = onNudgeLeft
-                            )
-                            MiniTileBadgeButton(
-                                icon = Icons.Default.KeyboardArrowUp,
-                                contentDescription = "Lên trên 1 ô",
-                                bgColor = Color.Black.copy(alpha = 0.75f),
-                                onClick = onNudgeUp
-                            )
-                            MiniTileBadgeButton(
-                                icon = Icons.Default.KeyboardArrowDown,
-                                contentDescription = "Xuống dưới 1 ô",
-                                bgColor = Color.Black.copy(alpha = 0.75f),
-                                onClick = onNudgeDown
-                            )
-                            MiniTileBadgeButton(
-                                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = "Qua phải 1 ô",
-                                bgColor = Color.Black.copy(alpha = 0.75f),
-                                onClick = onNudgeRight
-                            )
-                        }
-                    }
-
-                    // Top-right: Unpin button (Windows 10 Mobile / One UI corner badge)
+                    // Unpin only: never uninstall the underlying application.
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -446,8 +404,8 @@ fun TileView(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Bỏ ghim",
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Bỏ khỏi màn hình chính",
                             tint = Color.White,
                             modifier = Modifier.size(if (tile.size == TileSize.SMALL) 13.dp else 15.dp)
                         )
@@ -622,20 +580,16 @@ fun TileView(
                         )
                     }
 
-                    // Bottom-right: Combined `-` / `+` Resize Stepper Buttons + Corner Border Drag Handle
-                    val allowedSizes = remember(tile.tileType, tile.widgetProvider, tile.widgetMinSpanX, tile.widgetMinSpanY, tile.widgetResizeMode) {
-                        tile.allowedSizesForTile()
-                    }
-                    val currentAllowedIdx = allowedSizes.indexOf(tile.size)
-                    val canShrink = if (currentAllowedIdx != -1) currentAllowedIdx > 0 else tile.size != TileSize.SMALL
-                    val canGrow = if (currentAllowedIdx != -1) currentAllowedIdx < allowedSizes.lastIndex else tile.size != TileSize.LARGE
-                    Row(
+                    // One unobtrusive corner drag target; edge handles remain available.
+                    Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(3.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .size(32.dp)
+                            .clip(CircleShape)
                             .background(Color(0xFF0078D7))
-                            .border(1.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(14.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+                            .semantics { contentDescription = "Kéo góc để đổi kích thước ô" }
                             .pointerInput(tile.id, tile.size) {
                                 detectDragGestures(
                                     onDragStart = {
@@ -649,62 +603,21 @@ fun TileView(
                                         onResizeDrag(dragAmount.x, dragAmount.y)
                                     }
                                 )
-                            },
-                        verticalAlignment = Alignment.CenterVertically
+                            }
+                            .testTag("tile_resize_corner_${tile.id}"),
+                        contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(if (tile.size == TileSize.SMALL) 20.dp else 25.dp)
-                                .clickable(enabled = canShrink) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onDecreaseSize()
-                                }
-                                .testTag("tile_resize_minus_${tile.id}"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Remove,
-                                contentDescription = "Thu nhỏ kích thước ô Tile (-)",
-                                tint = if (canShrink) Color.White else Color.White.copy(alpha = 0.38f),
-                                modifier = Modifier.size(if (tile.size == TileSize.SMALL) 12.dp else 15.dp)
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .width(1.dp)
-                                .height(if (tile.size == TileSize.SMALL) 12.dp else 15.dp)
-                                .background(Color.White.copy(alpha = 0.35f))
+                                .size(12.dp)
+                                .border(2.dp, Color.White, RoundedCornerShape(2.dp))
                         )
-
-                        Box(
-                            modifier = Modifier
-                                .size(if (tile.size == TileSize.SMALL) 20.dp else 25.dp)
-                                .clickable(enabled = canGrow) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onIncreaseSize()
-                                }
-                                .testTag("tile_resize_plus_${tile.id}"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Phóng to kích thước ô Tile (+)",
-                                tint = if (canGrow) Color.White else Color.White.copy(alpha = 0.38f),
-                                modifier = Modifier.size(if (tile.size == TileSize.SMALL) 12.dp else 15.dp)
-                            )
-                        }
                     }
                 }
 
                 if (tile.size != TileSize.SMALL) {
                     Text(
-                        text = when (tile.size) {
-                            TileSize.SMALL -> "1x1"
-                            TileSize.MEDIUM -> "2x2 • Bấm +/- hoặc kéo viền"
-                            TileSize.WIDE -> "4x2 • Bấm +/- hoặc kéo viền"
-                            TileSize.LARGE -> "4x4 • Bấm +/- hoặc kéo viền"
-                        },
+                        text = "${tile.size.spanX}×${tile.size.spanY} • Kéo viền để đổi cỡ",
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -719,27 +632,31 @@ fun TileView(
     }
 }
 
-@Composable
-private fun MiniTileBadgeButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    bgColor: Color,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier.size(44.dp).clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier.size(28.dp).clip(CircleShape).background(bgColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = Color.White,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
+
+// TalkBack can move/resize a tile without persistent on-screen arrows or +/- buttons.
+internal enum class TileEditAccessibilityAction(val label: String) {
+    MOVE_LEFT("Di chuyển ô sang trái"),
+    MOVE_RIGHT("Di chuyển ô sang phải"),
+    MOVE_UP("Di chuyển ô lên trên"),
+    MOVE_DOWN("Di chuyển ô xuống dưới"),
+    SHRINK("Thu nhỏ ô"),
+    GROW("Phóng to ô")
+}
+
+internal fun tileEditAccessibilityActions(
+    tile: TileEntity,
+    layoutLocked: Boolean
+): List<TileEditAccessibilityAction> {
+    if (layoutLocked) return emptyList()
+    val result = mutableListOf(
+        TileEditAccessibilityAction.MOVE_LEFT,
+        TileEditAccessibilityAction.MOVE_RIGHT,
+        TileEditAccessibilityAction.MOVE_UP,
+        TileEditAccessibilityAction.MOVE_DOWN
+    )
+    val allowed = tile.allowedSizesForTile()
+    val index = allowed.indexOf(tile.size)
+    if (index > 0) result += TileEditAccessibilityAction.SHRINK
+    if (index >= 0 && index < allowed.lastIndex) result += TileEditAccessibilityAction.GROW
+    return result
 }
