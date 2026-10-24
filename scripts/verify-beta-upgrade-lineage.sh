@@ -31,8 +31,10 @@ apk_identity() {
   fi
   printf '%s\n' "$parsed"
 }
-read -r PREVIOUS_PACKAGE PREVIOUS_CODE <<< "$(apk_identity "$PREVIOUS_APK")"
-read -r NEW_PACKAGE NEW_CODE <<< "$(apk_identity "$NEW_APK")"
+PREVIOUS_IDENTITY="$(apk_identity "$PREVIOUS_APK")"
+NEW_IDENTITY="$(apk_identity "$NEW_APK")"
+read -r PREVIOUS_PACKAGE PREVIOUS_CODE <<< "$PREVIOUS_IDENTITY"
+read -r NEW_PACKAGE NEW_CODE <<< "$NEW_IDENTITY"
 if [ "$PREVIOUS_PACKAGE" != "$NEW_PACKAGE" ]; then
   echo "APK applicationId changed; in-place upgrade is unsafe" >&2
   exit 1
