@@ -39,17 +39,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
@@ -364,14 +363,6 @@ fun LumiaStartGrid(
                         accentColor = accent.color,
                         canMovePage = allHomePages.size > 1,
                         isLocked = settings.lockHomeLayout,
-                        onIncreaseSize = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onStepTileSize(activeTile.id, true)
-                        },
-                        onDecreaseSize = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onStepTileSize(activeTile.id, false)
-                        },
                         onCustomize = { tileToCustomize = activeTile },
                         onMoveToPage = { tileToMoveAcrossPages = activeTile },
                         onGroupToSmartFolder = {
@@ -1935,8 +1926,6 @@ private fun SingleTileContextualBar(
     accentColor: Color,
     canMovePage: Boolean,
     isLocked: Boolean,
-    onIncreaseSize: () -> Unit,
-    onDecreaseSize: () -> Unit,
     onCustomize: () -> Unit,
     onMoveToPage: () -> Unit,
     onGroupToSmartFolder: () -> Unit = {},
@@ -1944,12 +1933,6 @@ private fun SingleTileContextualBar(
     onOpenSmartFolder: () -> Unit = {},
     onUnpin: () -> Unit
 ) {
-    val allowedSizes = remember(tile.tileType, tile.widgetProvider, tile.widgetMinSpanX, tile.widgetMinSpanY, tile.widgetResizeMode) {
-        tile.allowedSizesForTile()
-    }
-    val currentAllowedIdx = allowedSizes.indexOf(tile.size)
-    val canShrink = if (currentAllowedIdx != -1) currentAllowedIdx > 0 else tile.size != TileSize.SMALL
-    val canGrow = if (currentAllowedIdx != -1) currentAllowedIdx < allowedSizes.lastIndex else tile.size != TileSize.LARGE
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1972,7 +1955,7 @@ private fun SingleTileContextualBar(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = if (isLocked) "Bố cục đang khóa" else "Bấm +/- hoặc kéo viền để đổi cỡ • Tự động lưu",
+                text = if (isLocked) "Bố cục đang khóa" else "${tile.size.spanX}×${tile.size.spanY} • Kéo viền để đổi cỡ • Tự động lưu",
                 color = Color.White.copy(alpha = 0.65f),
                 fontSize = 10.sp,
                 maxLines = 1,
@@ -1985,59 +1968,6 @@ private fun SingleTileContextualBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                // Stepper - / Size / + Pill
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.White.copy(alpha = 0.12f))
-                        .padding(horizontal = 4.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(if (canShrink) Color(0xFF0078D7) else Color.White.copy(alpha = 0.08f))
-                            .clickable(enabled = canShrink) { onDecreaseSize() }
-                            .testTag("contextual_bar_resize_minus"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Remove,
-                            contentDescription = "Thu nhỏ (-)",
-                            tint = if (canShrink) Color.White else Color.White.copy(alpha = 0.35f),
-                            modifier = Modifier.size(13.dp)
-                        )
-                    }
-                    Text(
-                        text = when (tile.size) {
-                            TileSize.SMALL -> "1x1"
-                            TileSize.MEDIUM -> "2x2"
-                            TileSize.WIDE -> "4x2"
-                            TileSize.LARGE -> "4x4"
-                        },
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(if (canGrow) Color(0xFF0078D7) else Color.White.copy(alpha = 0.08f))
-                            .clickable(enabled = canGrow) { onIncreaseSize() }
-                            .testTag("contextual_bar_resize_plus"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Phóng to (+)",
-                            tint = if (canGrow) Color.White else Color.White.copy(alpha = 0.35f),
-                            modifier = Modifier.size(13.dp)
-                        )
-                    }
-                }
                 if (tile.tileType == TileType.SMART_FOLDER) {
                     SingleTilePillAction(
                         icon = Icons.Default.GridView,
@@ -2077,8 +2007,8 @@ private fun SingleTileContextualBar(
                     )
                 }
                 SingleTilePillAction(
-                    icon = Icons.Default.Close,
-                    label = "Gỡ",
+                    icon = Icons.Default.Delete,
+                    label = "Bỏ ghim",
                     bgColor = Color(0xFFE81123).copy(alpha = 0.85f),
                     onClick = onUnpin
                 )
