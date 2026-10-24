@@ -947,4 +947,54 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(original), db.tileDao().getAllTiles())
     }
 
+
+    @Test fun appPinAfterSparseOrderPreservesNativeWidgetAndTileStyle() = runBlocking {
+        val pinned = TileEntity("pinned", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val widget = TileEntity("native_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 217, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 5, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, widget))
+
+        repo.pinApp(AppItem(label = "New app", packageName = "example.new"), "page_home_1")
+
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(pinned, rows.single { it.id == pinned.id })
+        assertEquals(widget, rows.single { it.id == widget.id })
+        val added = rows.single { it.packageName == "example.new" }
+        assertEquals(6, added.orderIndex)
+        assertEquals("page_home_1", added.pageId)
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(rows.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun failedAppPinPropagatesRoomErrorWithoutChangingWidgetBindings() = runBlocking {
+        val widget = TileEntity("native_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 218, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 5, gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        val before = db.tileDao().getAllTiles()
+        db.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER reject_app_pin
+            BEFORE INSERT ON tiles
+            WHEN NEW.packageName = 'example.new'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected app pin failure');
+            END
+            """.trimIndent()
+        )
+        try {
+            repo.pinApp(AppItem(label = "New app", packageName = "example.new"), "page_home_1")
+            fail("Expected injected Room insert failure")
+        } catch (_: android.database.sqlite.SQLiteException) {
+            // The exception must reach the caller; no widget binding may be lost.
+        }
+        assertEquals(before, db.tileDao().getAllTiles())
+    }
+
 }

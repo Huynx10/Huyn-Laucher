@@ -880,28 +880,31 @@ class LauncherRepository(
     }
 
     suspend fun pinApp(app: AppItem, pageId: String = "page_home_1") = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val pageTiles = allTiles.filter { it.pageId == pageId }
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val (gx, gy) = findFirstFreeGridPosition(
-            existingPageTiles = pageTiles,
-            spanX = TileSize.MEDIUM.effectiveSpanX(totalCols),
-            spanY = TileSize.MEDIUM.effectiveSpanY(),
-            totalCols = totalCols
-        )
-        val tile = TileEntity(
-            id = allocateUniqueTileId("app_${app.packageName}", allTiles),
-            title = app.label,
-            packageName = app.packageName,
-            tileType = TileType.APP,
-            size = TileSize.MEDIUM,
-            orderIndex = pageTiles.size,
-            pageId = pageId,
-            gridX = gx,
-            gridY = gy,
-            notificationCount = 0
-        )
-        tileDao.insertOrUpdate(tile)
+        // Keep occupancy, ID allocation and insert in one Room transaction.
+        database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val pageTiles = allTiles.filter { it.pageId == pageId }
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val (gx, gy) = findFirstFreeGridPosition(
+                existingPageTiles = pageTiles,
+                spanX = TileSize.MEDIUM.effectiveSpanX(totalCols),
+                spanY = TileSize.MEDIUM.effectiveSpanY(),
+                totalCols = totalCols
+            )
+            val tile = TileEntity(
+                id = allocateUniqueTileId("app_${app.packageName}", allTiles),
+                title = app.label,
+                packageName = app.packageName,
+                tileType = TileType.APP,
+                size = TileSize.MEDIUM,
+                orderIndex = (pageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                pageId = pageId,
+                gridX = gx,
+                gridY = gy,
+                notificationCount = 0
+            )
+            tileDao.insertOrUpdate(tile)
+        }
         autoArrangeIfEnabled(pageId)
     }
 
