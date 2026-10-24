@@ -1978,7 +1978,13 @@ class LauncherRepository(
                     batterySaverThresholdPct = s.optInt("batterySaverThresholdPct", cur.batterySaverThresholdPct).coerceIn(10, 50),
                     wallpaperSource = runCatching { WallpaperSource.valueOf(s.optString("wallpaperSource", cur.wallpaperSource.name)) }.getOrDefault(cur.wallpaperSource),
                     wallpaperGradientIndex = s.optInt("wallpaperGradientIndex", cur.wallpaperGradientIndex),
-                    wallpaperDimAlpha = s.optDouble("wallpaperDimAlpha", cur.wallpaperDimAlpha.toDouble()).toFloat().coerceIn(0f, 0.75f),
+                    wallpaperDimAlpha = if (s.has("wallpaperDimAlpha")) {
+                        // Backups encode this as a JSON number. Reject malformed/non-finite values
+                        // before the restore journal or any Room/widget rows are modified.
+                        requireNotNull(
+                            (s.get("wallpaperDimAlpha") as? Number)?.toDouble()?.takeIf { it.isFinite() }
+                        ) { "Invalid wallpaperDimAlpha in backup" }.toFloat().coerceIn(0f, 0.75f)
+                    } else cur.wallpaperDimAlpha,
                     autoOptimizeBackgroundApps = s.optBoolean("autoOptimizeBackgroundApps", cur.autoOptimizeBackgroundApps),
                     quickNotes = s.optString("quickNotes", cur.quickNotes),
                     defaultHomePageId = s.optString("defaultHomePageId", cur.defaultHomePageId),
@@ -2078,7 +2084,8 @@ class LauncherRepository(
             true
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            Log.e("LauncherRepository", "Backup restore rejected or failed", failure)
             false
         }
     }
