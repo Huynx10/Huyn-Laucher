@@ -183,6 +183,41 @@ class DataSafetyRegressionTest {
         assertEquals("page_home_2", repo.loadSettings().defaultHomePageId)
     }
 
+    @Test fun malformedWallpaperPreferencesCannotAbortTileStyleSaveOrChangeWidgetRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "wallpaper_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 130, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("wallpaper_dim_alpha", "bad")
+            .putString("full_wallpaper_enabled", "true").commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(0.18f, recovered.wallpaperDimAlpha, 0f)
+        assertTrue(recovered.fullWallpaperEnabled)
+        assertEquals("bad", prefs.getString("wallpaper_dim_alpha", null))
+        assertEquals("true", prefs.getString("full_wallpaper_enabled", null))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(0.18f, prefs.getFloat("wallpaper_dim_alpha", -1f), 0f)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun nonFiniteWallpaperDimAlphaNeverReachesRenderingOrPersistence() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        assertTrue(prefs.edit().putFloat("wallpaper_dim_alpha", Float.NaN).commit())
+        assertEquals(0.18f, repo.loadSettings().wallpaperDimAlpha, 0f)
+
+        repo.saveSettings(repo.loadSettings().copy(wallpaperDimAlpha = Float.POSITIVE_INFINITY))
+        assertEquals(0.18f, prefs.getFloat("wallpaper_dim_alpha", -1f), 0f)
+        assertTrue(repo.loadSettings().wallpaperDimAlpha.isFinite())
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()

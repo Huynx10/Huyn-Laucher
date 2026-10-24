@@ -1677,6 +1677,22 @@ class LauncherRepository(
             "page_home_1"
         }
 
+    // A malformed legacy value must not abort Home rendering or Tile Style saving.
+    // Preserve the raw preference on read so backup/restore remains non-destructive.
+    private fun loadWallpaperDimAlpha(): Float {
+        val stored = try {
+            prefs.getFloat("wallpaper_dim_alpha", 0.18f)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved wallpaper dim alpha type", wrongType)
+            return 0.18f
+        }
+        if (!stored.isFinite()) {
+            Log.w("LauncherRepository", "Non-finite saved wallpaper dim alpha")
+            return 0.18f
+        }
+        return stored.coerceIn(0f, 0.75f)
+    }
+
     fun loadSettings(): LauncherSettings {
         val viewModeStr = prefs.getString("all_apps_view_mode", AllAppsViewMode.METRO_LIST.name) ?: AllAppsViewMode.METRO_LIST.name
         val sortOrderStr = prefs.getString("all_apps_sort_order", AllAppsSortOrder.NAME_ASC.name) ?: AllAppsSortOrder.NAME_ASC.name
@@ -1719,12 +1735,12 @@ class LauncherRepository(
             doubleTapToGlance = prefs.getBoolean("double_tap_to_glance", true),
             lockHomeLayout = readHomeBoolean("lock_home_layout", false),
             autoArrangeTiles = readHomeBoolean("auto_arrange_tiles", false),
-            fullWallpaperEnabled = prefs.getBoolean("full_wallpaper_enabled", true),
+            fullWallpaperEnabled = readHomeBoolean("full_wallpaper_enabled", true),
             wallpaperSource = runCatching { WallpaperSource.valueOf(prefs.getString("wallpaper_source", "") ?: "") }
                 .getOrElse { if (!prefs.getString("custom_wallpaper_uri", "").isNullOrBlank()) WallpaperSource.CUSTOM else if (prefs.contains("wallpaper_gradient_index")) WallpaperSource.LUMIA else WallpaperSource.SYSTEM },
             wallpaperGradientIndex = wallpaperIdx,
             customWallpaperUri = prefs.getString("custom_wallpaper_uri", "") ?: "",
-            wallpaperDimAlpha = prefs.getFloat("wallpaper_dim_alpha", 0.18f).coerceIn(0f, 0.75f),
+            wallpaperDimAlpha = loadWallpaperDimAlpha(),
             turnstileAnimationEnabled = prefs.getBoolean("turnstile_animation", true),
             glanceScreenEnabled = prefs.getBoolean("glance_screen_enabled", true),
             batterySaverMode = try { BatterySaverMode.valueOf(batterySaverModeStr) } catch (_: Exception) { BatterySaverMode.AUTO },
@@ -1780,7 +1796,7 @@ class LauncherRepository(
             .putString("wallpaper_source", settings.wallpaperSource.name)
             .putInt("wallpaper_gradient_index", settings.wallpaperGradientIndex)
             .putString("custom_wallpaper_uri", settings.customWallpaperUri)
-            .putFloat("wallpaper_dim_alpha", settings.wallpaperDimAlpha.coerceIn(0f, 0.75f))
+            .putFloat("wallpaper_dim_alpha", settings.wallpaperDimAlpha.takeIf { it.isFinite() }?.coerceIn(0f, 0.75f) ?: 0.18f)
             .putBoolean("turnstile_animation", settings.turnstileAnimationEnabled)
             .putBoolean("glance_screen_enabled", settings.glanceScreenEnabled)
             .putString("battery_saver_mode", settings.batterySaverMode.name)
