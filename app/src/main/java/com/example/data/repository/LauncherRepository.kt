@@ -822,25 +822,29 @@ class LauncherRepository(
     }
 
     suspend fun moveTileToPage(tileId: String, targetPageId: String) = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val target = allTiles.find { it.id == tileId } ?: return@withContext
-        if (target.pageId == targetPageId) return@withContext
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val targetPageTiles = allTiles.filter { it.pageId == targetPageId }
-        val (freeX, freeY) = findFirstFreeGridPosition(
-            existingPageTiles = targetPageTiles,
-            spanX = target.size.effectiveSpanX(totalCols),
-            spanY = target.size.effectiveSpanY(),
-            totalCols = totalCols
-        )
-        tileDao.update(
-            target.copy(
-                pageId = targetPageId,
-                orderIndex = targetPageTiles.size,
-                gridX = freeX,
-                gridY = freeY
+        // Keep target placement and widget row update in one Room transaction.
+        database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val target = allTiles.find { it.id == tileId } ?: return@withTransaction
+            if (target.pageId == targetPageId) return@withTransaction
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val targetPageTiles = allTiles.filter { it.pageId == targetPageId }
+            val (freeX, freeY) = findFirstFreeGridPosition(
+                existingPageTiles = targetPageTiles,
+                spanX = target.size.effectiveSpanX(totalCols),
+                spanY = target.size.effectiveSpanY(),
+                totalCols = totalCols
             )
-        )
+            tileDao.update(
+                target.copy(
+                    pageId = targetPageId,
+                    // Sparse order indices must not collide with an existing tile.
+                    orderIndex = (targetPageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                    gridX = freeX,
+                    gridY = freeY
+                )
+            )
+        }
     }
 
     suspend fun reassignTilesFromDeletedPage(deletedPageId: String, fallbackPageId: String) = withContext(Dispatchers.IO) {

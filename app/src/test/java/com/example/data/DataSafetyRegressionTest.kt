@@ -326,6 +326,30 @@ class DataSafetyRegressionTest {
         assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
     }
 
+    @Test fun movingWidgetToPageAppendsAfterSparseOrderWithoutLosingBinding() = runBlocking {
+        val pinned = TileEntity("pinned", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val existing = TileEntity("existing", "Existing", pageId = "page_home_1",
+            orderIndex = 5, gridX = 2, gridY = 0)
+        val widget = TileEntity("moving_widget", "Moving widget", tileType = TileType.WIDGET,
+            appWidgetId = 161, widgetProvider = "example/.Provider",
+            pageId = "page_home_2", orderIndex = 0, gridX = 0, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, existing, widget))
+
+        repo.moveTileToPage(widget.id, "page_home_1")
+
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(pinned, rows.single { it.id == pinned.id })
+        assertEquals(existing, rows.single { it.id == existing.id })
+        val moved = rows.single { it.id == widget.id }
+        assertEquals("page_home_1", moved.pageId)
+        assertEquals(6, moved.orderIndex)
+        assertEquals(widget.appWidgetId, moved.appWidgetId)
+        assertEquals(widget.widgetProvider, moved.widgetProvider)
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+    }
+
     @Test fun samePageReassignmentFailsFastWithoutChangingWidgetRows() = runBlocking {
         val widget = TileEntity("same_page_widget", "Widget", tileType = TileType.WIDGET,
             appWidgetId = 151, widgetProvider = "example/.Provider",
