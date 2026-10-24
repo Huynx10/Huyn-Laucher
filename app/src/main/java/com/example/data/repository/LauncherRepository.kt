@@ -215,7 +215,12 @@ class LauncherRepository(
             if (list.none { it.pageType == PageType.ALL_APPS }) {
                 list.add(LauncherPage("page_all_apps", "Tất cả ứng dụng", PageType.ALL_APPS, list.size))
             }
-            list.sortedBy { it.orderIndex }.mapIndexed { idx, p -> p.copy(orderIndex = idx) }
+            // Keep All Apps terminal even when an older saved layout interleaved it with Home pages.
+            // Preserve every page ID/title; this is a read-only normalization, not a reset.
+            val sorted = list.sortedBy { it.orderIndex }
+            (sorted.filter { it.pageType == PageType.HOME } +
+                sorted.filter { it.pageType == PageType.ALL_APPS })
+                .mapIndexed { idx, p -> p.copy(orderIndex = idx) }
         } catch (_: Exception) {
             getDefaultPages()
         }
