@@ -3,7 +3,6 @@ package com.example.ui.viewmodel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -12,7 +11,7 @@ class LauncherBackgroundGuardTest {
     @Test fun failingScanRetainsLastKnownCatalogAndReportsError() = runBlocking {
         var apps = listOf("Existing app")
         var errorCount = 0
-        val result = runLauncherBackgroundRead(
+        val result = runLauncherBackgroundRead<List<String>>(
             onError = { error ->
                 assertEquals("Package manager unavailable", error.message)
                 errorCount++
@@ -26,7 +25,7 @@ class LauncherBackgroundGuardTest {
     @Test fun oneFailedStageDoesNotPreventFollowingStages() = runBlocking {
         val completed = mutableListOf<String>()
         val failures = mutableListOf<String>()
-        runLauncherBackgroundRead(onError = { failures.add(it.message.orEmpty()) }) {
+        runLauncherBackgroundRead<Unit>(onError = { failures.add(it.message.orEmpty()) }) {
             completed.add("apps")
             throw IllegalArgumentException("apps failed")
         }
@@ -47,7 +46,7 @@ class LauncherBackgroundGuardTest {
     @Test fun cancellationIsNotSwallowedOrReportedAsFailure() = runBlocking {
         var reported = false
         try {
-            runLauncherBackgroundRead(onError = { reported = true }) {
+            runLauncherBackgroundRead<Unit>(onError = { reported = true }) {
                 throw CancellationException("superseded refresh")
             }
             fail("Cancellation must propagate")
