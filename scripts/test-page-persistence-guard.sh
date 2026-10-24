@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+file=app/src/main/java/com/example/ui/viewmodel/LauncherViewModel.kt
+grep -Fq 'private val pendingPages = Channel<List<LauncherPage>>(Channel.CONFLATED)' "$file"
+grep -Fq 'for (snapshot in pendingPages) repository.savePages(snapshot)' "$file"
+grep -Fq 'id = "page_home_${UUID.randomUUID()}"' "$file"
+test "$(grep -c 'repository.savePages(' "$file")" -eq 1
+grep -Fq 'persistPages(reindexed)' "$file"
+grep -Fq 'persistPages(updated)' "$file"
+grep -Fq 'persistPages(remaining)' "$file"
+echo "Page persistence regression guards passed"
