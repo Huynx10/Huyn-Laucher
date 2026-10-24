@@ -101,6 +101,7 @@ import com.example.data.model.TileSize
 import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import com.example.ui.theme.LumiaPalette
+import com.example.ui.widget.WidgetPickerGrouping
 import com.example.ui.widget.DefaultWidgetMatcher
 import kotlin.math.roundToInt
 
@@ -1445,22 +1446,11 @@ fun LumiaStartGrid(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    val filteredWidgets = remember(installedWidgets, pickerSearchQuery) {
-                        val q = pickerSearchQuery.trim().lowercase()
-                        if (q.isEmpty()) installedWidgets
-                        else installedWidgets.filter {
-                            it.label.lowercase().contains(q) ||
-                                it.appName.lowercase().contains(q) ||
-                                it.packageName.lowercase().contains(q)
-                        }
+                    val groupedWidgetApps = remember(installedWidgets, pickerSearchQuery) {
+                        WidgetPickerGrouping.group(installedWidgets, pickerSearchQuery)
                     }
 
-                    val groupedWidgetApps = remember(filteredWidgets) {
-                        filteredWidgets.groupBy { it.packageName }.toList()
-                            .sortedBy { (_, widgets) -> widgets.first().appName.lowercase() }
-                    }
-
-                    if (filteredWidgets.isEmpty()) {
+                    if (groupedWidgetApps.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
