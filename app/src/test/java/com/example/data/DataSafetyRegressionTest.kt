@@ -427,5 +427,58 @@ class DataSafetyRegressionTest {
         AppCategory.entries.forEach { assertTrue(SmartFolderConfig.defaultSeedItemsForCategory(it).isEmpty()) }
     }
 
-}
+    @Test fun pinAppRetriesCollidingIdWithoutReplacingExistingTile() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val original = TileEntity("taken", "Keep me", packageName = "example.existing",
+            gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(original)
+        val candidates = java.util.ArrayDeque(listOf("taken", "app_unique"))
+        val guarded = LauncherRepository(context, db.tileDao(), db,
+            newTileIdCandidate = { candidates.removeFirst() })
 
+        guarded.pinApp(AppItem(label = "New app", packageName = "example.new"))
+
+        val after = db.tileDao().getAllTiles()
+        assertEquals(2, after.size)
+        assertEquals(original, after.single { it.id == original.id })
+        assertEquals("example.new", after.single { it.id == "app_unique" }.packageName)
+    }
+
+    @Test fun pinNativeWidgetRetriesCollidingIdWithoutLosingPreviousBinding() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val original = TileEntity("taken", "Existing widget", tileType = TileType.WIDGET,
+            appWidgetId = 201, widgetProvider = "example/.OldProvider", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(original)
+        val candidates = java.util.ArrayDeque(listOf("taken", "widget_unique"))
+        val guarded = LauncherRepository(context, db.tileDao(), db,
+            newTileIdCandidate = { candidates.removeFirst() })
+        val provider = WidgetProviderItem(
+            providerComponent = "example/.NewProvider", packageName = "example",
+            className = "NewProvider", label = "New widget", appName = "Example"
+        )
+
+        val pinned = guarded.pinWidgetTile(provider, 202)
+        val after = db.tileDao().getAllTiles()
+        assertEquals("widget_unique", pinned.id)
+        assertEquals(2, after.size)
+        assertEquals(original, after.single { it.id == original.id })
+        assertEquals(202, after.single { it.id == pinned.id }.appWidgetId)
+    }
+
+    @Test fun exhaustedIdCandidatesFailWithoutReplacingAnyTile() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val original = TileEntity("taken", "Keep me", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(original)
+        val guarded = LauncherRepository(context, db.tileDao(), db,
+            newTileIdCandidate = { "taken" })
+
+        try {
+            guarded.pinApp(AppItem(label = "New app", packageName = "example.new"))
+            fail("Expected duplicate IDs to be rejected")
+        } catch (expected: IllegalStateException) {
+            assertTrue(expected.message?.contains("unique tile ID") == true)
+        }
+        assertEquals(listOf(original), db.tileDao().getAllTiles())
+    }
+
+}
