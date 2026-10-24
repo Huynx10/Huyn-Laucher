@@ -1504,7 +1504,6 @@ fun LumiaStartGrid(
                                     }
                                 }
                                 if (expanded) widgets.forEach { wItem ->
-                                val recSize = wItem.recommendedTileSize
                                 val resizeLabel = when {
                                     wItem.resizeMode == 3 -> "Co giãn 2 chiều"
                                     wItem.resizeMode == 1 -> "Co giãn ngang"
