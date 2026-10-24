@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 sealed interface CloudAuthState {
     data object Unauthenticated : CloudAuthState
@@ -79,6 +80,7 @@ class LauncherViewModel(
 
     private val _pages = MutableStateFlow(repository.loadPages())
     val pages: StateFlow<List<LauncherPage>> = _pages.asStateFlow()
+    private val pendingPages = Channel<List<LauncherPage>>(Channel.CONFLATED)
 
     private val _apps = MutableStateFlow<List<AppItem>>(emptyList())
     val apps: StateFlow<List<AppItem>> = _apps.asStateFlow()
@@ -159,6 +161,10 @@ class LauncherViewModel(
     }
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            for (snapshot in pendingPages) repository.savePages(snapshot)
+        }
+
         // One writer per launcher: rapid slider/toggle changes cannot start concurrent Room reflows.
         viewModelScope.launch(Dispatchers.IO) {
             for (candidate in pendingSettings) {
@@ -439,10 +445,14 @@ class LauncherViewModel(
         _isPageManagerOpen.value = false
     }
 
+    private fun persistPages(snapshot: List<LauncherPage>) {
+        pendingPages.trySend(snapshot.toList())
+    }
+
     fun addHomePage(title: String) {
         val current = _pages.value.toMutableList()
         val newPage = LauncherPage(
-            id = "page_home_${System.currentTimeMillis()}",
+            id = "page_home_${UUID.randomUUID()}",
             title = title,
             pageType = PageType.HOME,
             orderIndex = current.size
@@ -455,9 +465,7 @@ class LauncherViewModel(
         }
         val reindexed = current.mapIndexed { idx, p -> p.copy(orderIndex = idx) }
         _pages.value = reindexed
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.savePages(reindexed)
-        }
+        persistPages(reindexed)
     }
 
     fun movePage(fromIndex: Int, toIndex: Int) {
@@ -467,9 +475,7 @@ class LauncherViewModel(
             current.add(toIndex, item)
             val reindexed = current.mapIndexed { idx, p -> p.copy(orderIndex = idx) }
             _pages.value = reindexed
-            viewModelScope.launch(Dispatchers.IO) {
-                repository.savePages(reindexed)
-            }
+            persistPages(reindexed)
         }
     }
 
@@ -478,9 +484,7 @@ class LauncherViewModel(
             if (it.id == pageId) it.copy(title = newTitle) else it
         }
         _pages.value = updated
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.savePages(updated)
-        }
+        persistPages(updated)
     }
 
     fun deleteHomePage(pageId: String) {
@@ -496,7 +500,7 @@ class LauncherViewModel(
         }
 
         viewModelScope.launch {
-            repository.savePages(remaining)
+            persistPages(remaining)
             repository.reassignTilesFromDeletedPage(pageId, fallbackHomeId)
         }
     }
