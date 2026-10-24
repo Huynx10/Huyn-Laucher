@@ -289,7 +289,10 @@ fun SettingsSheet(
         }
     }
 
-    fun applyChanges() {
+    fun applyChanges(
+        styleOverride: Wp10TileStyle = wp10TileStyle,
+        opacityOverride: Float = tileOpacity
+    ) {
         val resolvedHex = if (autoWallpaperAccent) {
             DynamicAccentEngine.resolveAutoAccent(wallpaperIndex, dynamicAccentMode, dynamicSwatchIndex).hex
         } else {
@@ -302,8 +305,8 @@ fun SettingsSheet(
                 dynamicAccentMode = dynamicAccentMode,
                 dynamicSwatchIndex = dynamicSwatchIndex,
                 isDarkTheme = isDarkTheme,
-                tileOpacity = tileOpacity,
-                wp10TileStyle = wp10TileStyle,
+                tileOpacity = opacityOverride.coerceIn(0f, 1f),
+                wp10TileStyle = styleOverride,
                 wp10RevealBorder = wp10RevealBorder,
                 showMoreTiles = showMoreTiles,
                 tileCornerRadiusDp = tileCornerRadius,
@@ -879,14 +882,16 @@ fun SettingsSheet(
                                                     else Color.White.copy(alpha = 0.07f)
                                                 )
                                                 .clickable {
-                                                    wp10TileStyle = style
-                                                    when (style) {
-                                                        Wp10TileStyle.CRYSTAL_CLEAR -> tileOpacity = 0f
-                                                        Wp10TileStyle.CLASSIC_METRO -> tileOpacity = 1f
-                                                        Wp10TileStyle.FLUENT_ACRYLIC -> if (tileOpacity > 0.7f || tileOpacity < 0.1f) tileOpacity = 0.38f
-                                                        Wp10TileStyle.TINTED_TRANSLUCENT -> if (tileOpacity > 0.75f || tileOpacity < 0.1f) tileOpacity = 0.42f
+                                                    val nextOpacity = when (style) {
+                                                        Wp10TileStyle.CRYSTAL_CLEAR -> 0f
+                                                        Wp10TileStyle.CLASSIC_METRO -> 1f
+                                                        Wp10TileStyle.FLUENT_ACRYLIC -> if (tileOpacity > 0.7f || tileOpacity < 0.1f) 0.38f else tileOpacity
+                                                        Wp10TileStyle.TINTED_TRANSLUCENT -> if (tileOpacity > 0.75f || tileOpacity < 0.1f) 0.42f else tileOpacity
                                                     }
-                                                    applyChanges()
+                                                    wp10TileStyle = style
+                                                    tileOpacity = nextOpacity
+                                                    // Commit both values together, independent of Compose recomposition.
+                                                    applyChanges(styleOverride = style, opacityOverride = nextOpacity)
                                                 }
                                                 .padding(vertical = 8.dp)
                                                 .testTag("wp10_tile_style_${style.name.lowercase()}"),
@@ -911,13 +916,15 @@ fun SettingsSheet(
                                     valueRange = 0f..1f,
                                     accentColor = accent.color,
                                     onValueChange = {
-                                        tileOpacity = it
-                                        if (it <= 0.03f && wp10TileStyle == Wp10TileStyle.CLASSIC_METRO) {
-                                            wp10TileStyle = Wp10TileStyle.CRYSTAL_CLEAR
-                                        } else if (it < 0.98f && wp10TileStyle == Wp10TileStyle.CLASSIC_METRO) {
-                                            wp10TileStyle = Wp10TileStyle.TINTED_TRANSLUCENT
+                                        val nextOpacity = it.coerceIn(0f, 1f)
+                                        val nextStyle = when {
+                                            nextOpacity <= 0.03f && wp10TileStyle == Wp10TileStyle.CLASSIC_METRO -> Wp10TileStyle.CRYSTAL_CLEAR
+                                            nextOpacity < 0.98f && wp10TileStyle == Wp10TileStyle.CLASSIC_METRO -> Wp10TileStyle.TINTED_TRANSLUCENT
+                                            else -> wp10TileStyle
                                         }
-                                        applyChanges()
+                                        tileOpacity = nextOpacity
+                                        wp10TileStyle = nextStyle
+                                        applyChanges(styleOverride = nextStyle, opacityOverride = nextOpacity)
                                     }
                                 )
 
