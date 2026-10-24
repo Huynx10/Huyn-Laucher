@@ -34,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AllAppsViewMode
 import com.example.data.model.LauncherSettings
-import com.example.data.model.WallpaperSource
 import com.example.data.remote.CloudBackup
 import com.example.ui.viewmodel.CloudAuthState
 import kotlinx.coroutines.CancellationException
@@ -42,7 +41,7 @@ import kotlinx.coroutines.launch
 
 private enum class CleanSection(val label: String) {
     HOME("Màn hình chính"), APPS("Danh sách ứng dụng"),
-    WALLPAPER("Hình nền và màu sắc"), WIDGETS("Widget"), BACKUP("Sao lưu và khôi phục")
+    WIDGETS("Widget"), BACKUP("Sao lưu và khôi phục")
 }
 private val bg = Color(0xFF131316)
 private val primary = Color(0xFFF7F7F8)
@@ -77,13 +76,9 @@ fun CleanSettingsScreen(
     var restoreData by remember { mutableStateOf("") }
     var cloudConfirmation by remember { mutableStateOf<CloudBackup?>(null) }
     var opacity by remember(settings.tileOpacity) { mutableFloatStateOf(settings.tileOpacity) }
-    var dim by remember(settings.wallpaperDimAlpha) { mutableFloatStateOf(settings.wallpaperDimAlpha) }
 
     fun back() { if (!busy) { if (section == null) onDismiss() else section = null } }
     BackHandler { back() }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) onPickCustomWallpaper(uri)
-    }
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
     fun chooseHome() {
         try {
@@ -136,7 +131,6 @@ fun CleanSettingsScreen(
                             SettingAction(group.label, when (group) {
                                 CleanSection.HOME -> "Bố cục, Tile và chuyển trang"
                                 CleanSection.APPS -> "A–Z, tìm kiếm và nhóm"
-                                CleanSection.WALLPAPER -> "Hình nền hệ thống hoặc ảnh riêng"
                                 CleanSection.WIDGETS -> "Nội dung thật từ ứng dụng"
                                 CleanSection.BACKUP -> "Sao lưu và khôi phục bố cục"
                             }, { section = group }, card = true)
@@ -182,25 +176,6 @@ fun CleanSettingsScreen(
                         item { SettingToggle("Dùng biểu tượng ứng dụng gốc", null, settings.useRealAppIcons) {
                             onSaveSettings(settings.copy(useRealAppIcons = it))
                         } }
-                    }
-                    CleanSection.WALLPAPER -> {
-                        item { Heading("Hình nền") }
-                        item { SettingAction("Theo hệ thống",
-                            if (settings.wallpaperSource == WallpaperSource.SYSTEM) "Đang dùng" else "Dùng ảnh nền Samsung",
-                            { onSaveSettings(settings.copy(wallpaperSource = WallpaperSource.SYSTEM)) }) }
-                        item { SettingAction("Nền Lumia",
-                            if (settings.wallpaperSource == WallpaperSource.LUMIA) "Đang dùng" else "Hình nền màu Lumia",
-                            { onSaveSettings(settings.copy(wallpaperSource = WallpaperSource.LUMIA)) }) }
-                        item { SettingAction("Chọn ảnh", null, { photoPicker.launch("image/*") }) }
-                        item { Heading("Màu sắc") }
-                        item { SettingToggle("Lấy màu theo hình nền", null, settings.autoWallpaperAccentEnabled) {
-                            onSaveSettings(settings.copy(autoWallpaperAccentEnabled = it))
-                        } }
-                        item { SettingToggle("Giao diện tối", null, settings.isDarkTheme) {
-                            onSaveSettings(settings.copy(isDarkTheme = it))
-                        } }
-                        item { SettingSlider("Làm tối hình nền", dim, 0f..0.7f,
-                            { dim = it }, { onSaveSettings(settings.copy(wallpaperDimAlpha = dim)) }) }
                     }
                     CleanSection.WIDGETS -> {
                         item { Heading("Widget thật từ ứng dụng") }
