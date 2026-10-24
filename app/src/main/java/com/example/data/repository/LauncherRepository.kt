@@ -185,7 +185,14 @@ class LauncherRepository(
     }
 
     fun loadPages(): List<LauncherPage> {
-        val raw = prefs.getString("launcher_pages_json", null)
+        // SharedPreferences may contain a legacy/wrong-type value. Do not crash Home
+        // startup or rewrite the original value while presenting safe fallback pages.
+        val raw = try {
+            prefs.getString("launcher_pages_json", null)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home pages type", wrongType)
+            return getDefaultPages()
+        }
         if (raw.isNullOrBlank()) {
             val defaults = getDefaultPages()
             savePages(defaults)
@@ -221,7 +228,9 @@ class LauncherRepository(
             (sorted.filter { it.pageType == PageType.HOME } +
                 sorted.filter { it.pageType == PageType.ALL_APPS })
                 .mapIndexed { idx, p -> p.copy(orderIndex = idx) }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            // Preserve malformed JSON for diagnosis/recovery; a read must not wipe pages.
+            Log.e("LauncherRepository", "Could not decode saved Home pages", error)
             getDefaultPages()
         }
     }
