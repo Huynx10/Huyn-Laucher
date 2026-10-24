@@ -844,27 +844,29 @@ class LauncherRepository(
     }
 
     suspend fun reassignTilesFromDeletedPage(deletedPageId: String, fallbackPageId: String) = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val placedOnFallback = allTiles.filter { it.pageId == fallbackPageId }.toMutableList()
-        val affected = allTiles.filter { it.pageId == deletedPageId }.mapIndexed { idx, tile ->
-            val (gx, gy) = findFirstFreeGridPosition(
-                existingPageTiles = placedOnFallback,
-                spanX = tile.size.effectiveSpanX(totalCols),
-                spanY = tile.size.effectiveSpanY(),
-                totalCols = totalCols
-            )
-            val moved = tile.copy(
-                pageId = fallbackPageId,
-                orderIndex = placedOnFallback.size + idx,
-                gridX = gx,
-                gridY = gy
-            )
-            placedOnFallback.add(moved)
-            moved
-        }
-        if (affected.isNotEmpty()) {
-            tileDao.insertAll(affected)
+        // Keep all widget moves atomic so a failed write cannot partially move a page.
+        database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val placedOnFallback = allTiles.filter { it.pageId == fallbackPageId }.toMutableList()
+            var nextOrderIndex = (placedOnFallback.maxOfOrNull { it.orderIndex } ?: -1) + 1
+            val affected = allTiles.filter { it.pageId == deletedPageId }.map { tile ->
+                val (gx, gy) = findFirstFreeGridPosition(
+                    existingPageTiles = placedOnFallback,
+                    spanX = tile.size.effectiveSpanX(totalCols),
+                    spanY = tile.size.effectiveSpanY(),
+                    totalCols = totalCols
+                )
+                val moved = tile.copy(
+                    pageId = fallbackPageId,
+                    orderIndex = nextOrderIndex++,
+                    gridX = gx,
+                    gridY = gy
+                )
+                placedOnFallback.add(moved)
+                moved
+            }
+            if (affected.isNotEmpty()) tileDao.insertAll(affected)
         }
     }
 

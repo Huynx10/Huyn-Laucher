@@ -300,6 +300,32 @@ class DataSafetyRegressionTest {
         }
     }
 
+    @Test fun deletingHomePageMovesWidgetRowsWithStableIdsAndOrder() = runBlocking {
+        val pinned = TileEntity("pinned_app", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val widgetA = TileEntity("widget_a", "Widget A", tileType = TileType.WIDGET,
+            appWidgetId = 141, widgetProvider = "example/.ProviderA",
+            pageId = "page_home_2", orderIndex = 0, gridX = 0, gridY = 0)
+        val widgetB = TileEntity("widget_b", "Widget B", tileType = TileType.WIDGET,
+            appWidgetId = 142, widgetProvider = "example/.ProviderB",
+            pageId = "page_home_2", orderIndex = 1, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, widgetA, widgetB))
+
+        repo.reassignTilesFromDeletedPage("page_home_2", "page_home_1")
+
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(setOf(pinned.id, widgetA.id, widgetB.id), rows.map { it.id }.toSet())
+        assertTrue(rows.all { it.pageId == "page_home_1" })
+        val moved = rows.filter { it.id != pinned.id }.sortedBy { it.orderIndex }
+        assertEquals(listOf(1, 2), moved.map { it.orderIndex })
+        assertEquals(widgetA.appWidgetId, rows.single { it.id == widgetA.id }.appWidgetId)
+        assertEquals(widgetA.widgetProvider, rows.single { it.id == widgetA.id }.widgetProvider)
+        assertEquals(widgetB.appWidgetId, rows.single { it.id == widgetB.id }.appWidgetId)
+        assertEquals(widgetB.widgetProvider, rows.single { it.id == widgetB.id }.widgetProvider)
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()
