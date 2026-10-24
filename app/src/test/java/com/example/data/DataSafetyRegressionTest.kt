@@ -73,6 +73,41 @@ class DataSafetyRegressionTest {
         assertTrue(repo.loadSettings().tileOpacity.isFinite())
     }
 
+    @Test fun wrongTypeHomeGridFlagsCannotAbortTileStyleSaveOrDeleteWidgets() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "existing_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 127, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("show_more_tiles", "true")
+            .putInt("auto_arrange_tiles", 1).commit())
+
+        val recovered = repo.loadSettings()
+        assertFalse(recovered.showMoreTiles)
+        assertFalse(recovered.autoArrangeTiles)
+        assertEquals("true", prefs.getString("show_more_tiles", null))
+        assertEquals(1, prefs.getInt("auto_arrange_tiles", -1))
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun wrongTypeDefaultHomePageIdFallsBackWithoutRewritingOriginalValue() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        assertTrue(prefs.edit().putInt("default_home_page_id", 7).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals("page_home_1", recovered.defaultHomePageId)
+        assertEquals(7, prefs.getInt("default_home_page_id", -1))
+
+        repo.saveSettings(recovered.copy(defaultHomePageId = "page_home_2"))
+        assertEquals("page_home_2", repo.loadSettings().defaultHomePageId)
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()
