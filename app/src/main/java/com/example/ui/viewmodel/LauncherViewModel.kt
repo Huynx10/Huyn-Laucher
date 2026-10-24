@@ -34,6 +34,8 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -72,7 +74,8 @@ data class SmartFolderOpenRequest(
 
 class LauncherViewModel(
     private val repository: LauncherRepository,
-    private val cloudSyncRepository: CloudSyncRepository?
+    private val cloudSyncRepository: CloudSyncRepository?,
+    private val pagePersistenceDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
 
     val tiles: StateFlow<List<TileEntity>> = repository.tilesFlow
@@ -161,8 +164,21 @@ class LauncherViewModel(
     }
 
     init {
-        viewModelScope.launch(Dispatchers.IO) {
-            for (snapshot in pendingPages) repository.savePages(snapshot)
+        viewModelScope.launch(pagePersistenceDispatcher) {
+            for (snapshot in pendingPages) {
+                settingsMutationMutex.withLock {
+                    // A restore/reset may have replaced the layout while this write was queued.
+                    if (snapshot != _pages.value) return@withLock
+                    try {
+                        repository.savePages(snapshot)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Log.e(TAG, "Page save failed", error)
+                        _cloudSyncMessage.value = "Không lưu được danh sách trang. Hãy thử lại."
+                    }
+                }
+            }
         }
 
         // One writer per launcher: rapid slider/toggle changes cannot start concurrent Room reflows.
@@ -488,6 +504,7 @@ class LauncherViewModel(
     }
 
     fun deleteHomePage(pageId: String) {
+        if (_pages.value.none { it.id == pageId && it.pageType == PageType.HOME }) return
         val homePages = _pages.value.filter { it.pageType == PageType.HOME }
         if (homePages.size <= 1) return
         val remaining = _pages.value.filter { it.id != pageId }
