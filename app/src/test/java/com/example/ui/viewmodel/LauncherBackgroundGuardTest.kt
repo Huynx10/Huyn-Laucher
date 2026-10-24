@@ -1,8 +1,12 @@
 package com.example.ui.viewmodel
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -54,6 +58,24 @@ class LauncherBackgroundGuardTest {
             assertEquals("superseded refresh", cancelled.message)
         }
         assertTrue(!reported)
+    }
+
+    @Test fun cancelledBlockingReadCannotPublishStaleResult() = runBlocking {
+        var published = false
+        val job = async {
+            runLauncherBackgroundRead(onError = { fail("Cancellation is not a scan failure") }) {
+                // Simulates a blocking PackageManager call returning after the scan was cancelled.
+                currentCoroutineContext().cancel()
+                listOf("Stale app")
+            }?.let { published = true }
+        }
+        try {
+            job.await()
+            fail("Cancelled scan must not publish")
+        } catch (_: CancellationException) {
+            // Expected: ensureActive rejects the stale value even if the read itself returned.
+        }
+        assertFalse(published)
     }
 
     @Test fun successfulRefreshPublishesNewValueWithoutError() = runBlocking {
