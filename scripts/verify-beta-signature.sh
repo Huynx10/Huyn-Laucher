@@ -19,6 +19,8 @@ SIGNATURE_INFO="$("$APKSIGNER" verify --print-certs "$APK")"
 ACTUAL="$(printf '%s\n' "$SIGNATURE_INFO" | sed -nE 's/^[[:space:]]*Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]{64})[[:space:]]*$/\1/p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
 if [[ "$ACTUAL" != "$EXPECTED" ]]; then
   echo "APK signing certificate does not match the configured beta identity" >&2
+  echo "Actual APK signing certificate SHA-256: $ACTUAL" >&2
+  echo "Compare this public certificate fingerprint with the intended release keystore and update BETA_CERT_SHA256 only after confirming update compatibility." >&2
   exit 1
 fi
 echo "APK signature and signing certificate verified"
