@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: beta-release-${{ github.event.workflow_run.head_sha }}
+  group: beta-release-main
   cancel-in-progress: false
 
 jobs:
