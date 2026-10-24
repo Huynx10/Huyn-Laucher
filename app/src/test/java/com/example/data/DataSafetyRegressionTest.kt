@@ -143,6 +143,33 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(widget), db.tileDao().getAllTiles())
     }
 
+    @Test fun wrongTypeHomePageNavigationSettingsDoNotAbortTileStyleSave() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "navigation_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 129, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putInt("page_transition_effect", 3)
+            .putString("lock_home_layout", "false")
+            .putInt("show_page_header_title", 1).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(PageTransitionEffect.TURNSTILE_3D, recovered.pageTransitionEffect)
+        assertFalse(recovered.lockHomeLayout)
+        assertFalse(recovered.showPageHeaderTitle)
+        // A read must not rewrite legacy data or Room widget bindings.
+        assertEquals(3, prefs.getInt("page_transition_effect", -1))
+        assertEquals("false", prefs.getString("lock_home_layout", null))
+        assertEquals(1, prefs.getInt("show_page_header_title", -1))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
     @Test fun wrongTypeDefaultHomePageIdFallsBackWithoutRewritingOriginalValue() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
