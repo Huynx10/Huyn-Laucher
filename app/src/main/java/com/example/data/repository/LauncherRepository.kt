@@ -703,37 +703,41 @@ class LauncherRepository(
         pageId: String = "page_home_1",
         preferredSize: TileSize? = null
     ): TileEntity = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val pageTiles = allTiles.filter { it.pageId == pageId }
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val minimumSize = TileSize.fromTargetSpans(provider.targetCellWidth, provider.targetCellHeight)
-        val resolvedSize = preferredSize?.takeIf { it.spanX >= minimumSize.spanX && it.spanY >= minimumSize.spanY } ?: minimumSize
-        val (gx, gy) = findFirstFreeGridPosition(
-            existingPageTiles = pageTiles,
-            spanX = resolvedSize.effectiveSpanX(totalCols),
-            spanY = resolvedSize.effectiveSpanY(),
-            totalCols = totalCols
-        )
-        val minSpanX = ((provider.minWidthDp + 69) / 70).coerceIn(1, provider.targetCellWidth)
-        val minSpanY = ((provider.minHeightDp + 69) / 70).coerceIn(1, provider.targetCellHeight)
-        val widgetTile = TileEntity(
-            id = allocateUniqueTileId("widget_${provider.packageName}", allTiles),
-            title = provider.label.ifBlank { provider.appName },
-            packageName = provider.packageName,
-            tileType = TileType.WIDGET,
-            size = resolvedSize,
-            orderIndex = pageTiles.size,
-            pageId = pageId,
-            gridX = gx,
-            gridY = gy,
-            isLiveEnabled = true,
-            appWidgetId = appWidgetId,
-            widgetProvider = provider.providerComponent,
-            widgetMinSpanX = minSpanX,
-            widgetMinSpanY = minSpanY,
-            widgetResizeMode = provider.resizeMode
-        )
-        tileDao.insertOrUpdate(widgetTile)
+        // Keep placement lookup and widget insertion atomic on sparse Home pages.
+        val widgetTile = database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val pageTiles = allTiles.filter { it.pageId == pageId }
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val minimumSize = TileSize.fromTargetSpans(provider.targetCellWidth, provider.targetCellHeight)
+            val resolvedSize = preferredSize?.takeIf { it.spanX >= minimumSize.spanX && it.spanY >= minimumSize.spanY } ?: minimumSize
+            val (gx, gy) = findFirstFreeGridPosition(
+                existingPageTiles = pageTiles,
+                spanX = resolvedSize.effectiveSpanX(totalCols),
+                spanY = resolvedSize.effectiveSpanY(),
+                totalCols = totalCols
+            )
+            val minSpanX = ((provider.minWidthDp + 69) / 70).coerceIn(1, provider.targetCellWidth)
+            val minSpanY = ((provider.minHeightDp + 69) / 70).coerceIn(1, provider.targetCellHeight)
+            val widgetTile = TileEntity(
+                id = allocateUniqueTileId("widget_${provider.packageName}", allTiles),
+                title = provider.label.ifBlank { provider.appName },
+                packageName = provider.packageName,
+                tileType = TileType.WIDGET,
+                size = resolvedSize,
+                orderIndex = (pageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                pageId = pageId,
+                gridX = gx,
+                gridY = gy,
+                isLiveEnabled = true,
+                appWidgetId = appWidgetId,
+                widgetProvider = provider.providerComponent,
+                widgetMinSpanX = minSpanX,
+                widgetMinSpanY = minSpanY,
+                widgetResizeMode = provider.resizeMode
+            )
+            tileDao.insertOrUpdate(widgetTile)
+            widgetTile
+        }
         autoArrangeIfEnabled(pageId)
         widgetTile
     }
