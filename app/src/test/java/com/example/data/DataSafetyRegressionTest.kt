@@ -170,6 +170,33 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(widget), db.tileDao().getAllTiles())
     }
 
+    @Test fun wrongTypeHomeGestureAndAnimationFlagsCannotAbortTileStyleSave() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "gesture_widget", "Existing widget", tileType = TileType.WIDGET,
+            appWidgetId = 138, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("double_tap_to_glance", "false")
+            .putInt("turnstile_animation", 0)
+            .putString("glance_screen_enabled", "false").commit())
+
+        val recovered = repo.loadSettings()
+        assertTrue(recovered.doubleTapToGlance)
+        assertTrue(recovered.turnstileAnimationEnabled)
+        assertTrue(recovered.glanceScreenEnabled)
+        // Reading a legacy value must not overwrite it or alter Room widget links.
+        assertEquals("false", prefs.getString("double_tap_to_glance", null))
+        assertEquals(0, prefs.getInt("turnstile_animation", -1))
+        assertEquals("false", prefs.getString("glance_screen_enabled", null))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
     @Test fun wrongTypeDefaultHomePageIdFallsBackWithoutRewritingOriginalValue() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
