@@ -95,6 +95,29 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(widget), db.tileDao().getAllTiles())
     }
 
+    @Test fun wrongTypeTileDimensionsDoNotAbortStyleSaveOrChangeWidgetRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "existing_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 127, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("tile_corner_radius", "8")
+            .putBoolean("tile_spacing_dp", true).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(2, recovered.tileCornerRadiusDp)
+        assertEquals(6, recovered.tileSpacingDp)
+        assertEquals("8", prefs.getString("tile_corner_radius", null))
+        assertTrue(prefs.getBoolean("tile_spacing_dp", false))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
     @Test fun wrongTypeDefaultHomePageIdFallsBackWithoutRewritingOriginalValue() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
