@@ -1475,12 +1475,15 @@ fun LumiaStartGrid(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             groupedWidgetApps.forEach { (packageName, widgets) ->
-                                val expanded = expandedWidgetApp == packageName || pickerSearchQuery.isNotBlank()
+                                val searching = pickerSearchQuery.isNotBlank()
+                                val expanded = searching || expandedWidgetApp == packageName
                                 Row(
                                     modifier = Modifier.fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(Color.White.copy(alpha = 0.07f))
-                                        .clickable { expandedWidgetApp = if (expandedWidgetApp == packageName) null else packageName }
+                                        .clickable(enabled = !searching) {
+                                            expandedWidgetApp = if (expandedWidgetApp == packageName) null else packageName
+                                        }
                                         .padding(horizontal = 12.dp, vertical = 12.dp)
                                         .testTag("widget_app_group_$packageName"),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -1496,7 +1499,9 @@ fun LumiaStartGrid(
                                         Text(widgets.first().appName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                                         Text("${widgets.size} widget", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
                                     }
-                                    Text(if (expanded) "Thu gọn" else "Xem", color = accent.color, fontSize = 12.sp)
+                                    if (!searching) {
+                                        Text(if (expanded) "Thu gọn" else "Xem", color = accent.color, fontSize = 12.sp)
+                                    }
                                 }
                                 if (expanded) widgets.forEach { wItem ->
                                 val recSize = wItem.recommendedTileSize
