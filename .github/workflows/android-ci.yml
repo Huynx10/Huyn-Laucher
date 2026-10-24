@@ -30,6 +30,7 @@ jobs:
           bash scripts/test-verify-beta-signature.sh
           bash scripts/test-verify-beta-keystore.sh
           bash scripts/test-beta-release-source-status.sh
+          bash scripts/test-page-persistence-guard.sh
 
       - name: Run Unit & Robolectric Tests
         run: gradle :app:testDebugUnitTest
