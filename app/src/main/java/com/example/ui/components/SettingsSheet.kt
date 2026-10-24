@@ -1154,38 +1154,10 @@ fun SettingsSheet(
                     SettingsCategoryTab.BATTERY_SYSTEM -> {
                         // 1. Background App Hibernation & RAM Optimizer
                         item {
-                            MinimalGroupCard(title = "BỘ NHỚ LAUNCHER & PIN") {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color.White.copy(alpha = 0.05f))
-                                        .padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    StatMiniColumn(
-                                        title = "Tiến trình hiển thị",
-                                        value = "${telemetry.backgroundAppsCount} app",
-                                        valueColor = if (telemetry.backgroundAppsCount > 2) Color(0xFFFFB300) else Color(0xFF4CAF50)
-                                    )
-                                    StatMiniColumn(
-                                        title = "Bộ nhớ RAM",
-                                        value = "${telemetry.ramUsagePct}% (${telemetry.availableRamMb}MB trống)",
-                                        valueColor = Color.White
-                                    )
-                                    StatMiniColumn(
-                                        title = "Pin & Nhiệt độ",
-                                        value = "${telemetry.batteryPct}% • ${telemetry.batteryTempC}°C",
-                                        valueColor = if (telemetry.batteryPct <= 25) Color(0xFFFF5252) else Color(0xFF4CAF50)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
+                            MinimalGroupCard(title = "BỘ NHỚ ĐỆM LAUNCHER") {
                                 Button(
                                     onClick = {
-                                        val fresh = onOptimizeMemory()
+                                        onOptimizeMemory()
                                         lastOptimizeBanner =
                                             "Đã xóa bộ nhớ đệm biểu tượng của Launcher"
                                     },
@@ -1221,7 +1193,7 @@ fun SettingsSheet(
                                 }
 
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("Android quản lý ứng dụng chạy nền. Launcher chỉ quản lý bộ nhớ đệm của chính mình.", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                                Text("Chỉ xóa bộ nhớ đệm biểu tượng của launcher; không xóa bố cục hoặc dữ liệu ứng dụng.", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                             }
                         }
 
