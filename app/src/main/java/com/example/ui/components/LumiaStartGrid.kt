@@ -1324,6 +1324,7 @@ fun LumiaStartGrid(
             var absorbExistingTiles by remember { mutableStateOf(false) }
             var activePickerTab by remember { mutableIntStateOf(0) } // 0 = Widgets & Apps, 1 = Smart Folders
             var pickerSearchQuery by remember { mutableStateOf("") }
+            var expandedWidgetApp by remember { mutableStateOf<String?>(null) }
             var selectedNewAppTileSize by remember { mutableStateOf(TileSize.MEDIUM) }
 
             ModalBottomSheet(
@@ -1429,7 +1430,7 @@ fun LumiaStartGrid(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "ANDROID APP WIDGETS TRÊN MÁY (${installedWidgets.size})",
+                            text = "WIDGET THEO ỨNG DỤNG (${installedWidgets.map { it.packageName }.distinct().size})",
                             color = accent.color,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
@@ -1437,7 +1438,7 @@ fun LumiaStartGrid(
                         )
                     }
                     Text(
-                        text = "Nhúng trực tiếp Widget gốc của ứng dụng vào Metro Tile — giữ nguyên tương tác & cập nhật chuẩn Android",
+                        text = "Chọn ứng dụng để xem và ghim widget",
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 12.sp
                     )
@@ -1454,6 +1455,11 @@ fun LumiaStartGrid(
                         }
                     }
 
+                    val groupedWidgetApps = remember(filteredWidgets) {
+                        filteredWidgets.groupBy { it.packageName }.toList()
+                            .sortedBy { (_, widgets) -> widgets.first().appName.lowercase() }
+                    }
+
                     if (filteredWidgets.isEmpty()) {
                         Box(
                             modifier = Modifier
@@ -1465,7 +1471,7 @@ fun LumiaStartGrid(
                         ) {
                             Text(
                                 text = if (pickerSearchQuery.isBlank()) {
-                                    "Chưa phát hiện AppWidgetProvider nào trên thiết bị hoặc trình giả lập hiện tại. Bạn có thể ghim App Tile hoặc الترا System Tile bên dưới."
+                                    "Chưa có widget từ ứng dụng đã cài."
                                 } else {
                                     "Không tìm thấy Widget nào khớp với \"$pickerSearchQuery\"."
                                 },
@@ -1478,7 +1484,31 @@ fun LumiaStartGrid(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            filteredWidgets.take(20).forEach { wItem ->
+                            groupedWidgetApps.forEach { (packageName, widgets) ->
+                                val expanded = expandedWidgetApp == packageName || pickerSearchQuery.isNotBlank()
+                                Row(
+                                    modifier = Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.07f))
+                                        .clickable { expandedWidgetApp = if (expandedWidgetApp == packageName) null else packageName }
+                                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                                        .testTag("widget_app_group_$packageName"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    val appIcon = rememberAppIcon(packageName)
+                                    if (appIcon != null) {
+                                        androidx.compose.foundation.Image(bitmap = appIcon, contentDescription = null, modifier = Modifier.size(32.dp))
+                                    } else {
+                                        Icon(Icons.Default.Widgets, contentDescription = null, tint = accent.color)
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(widgets.first().appName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                        Text("${widgets.size} widget", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                                    }
+                                    Text(if (expanded) "Thu gọn" else "Xem", color = accent.color, fontSize = 12.sp)
+                                }
+                                if (expanded) widgets.forEach { wItem ->
                                 val recSize = wItem.recommendedTileSize
                                 val resizeLabel = when {
                                     wItem.resizeMode == 3 -> "Co giãn 2 chiều"
@@ -1569,6 +1599,7 @@ fun LumiaStartGrid(
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
+                                }
                                 }
                             }
                         }
