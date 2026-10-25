@@ -90,7 +90,13 @@ class LauncherRepository(
     val tilesFlow: Flow<List<TileEntity>> = tileDao.getAllTilesFlow()
 
     suspend fun ensureDefaultTiles() = withContext(Dispatchers.IO) {
-        prefs.getString("pending_restore_json", null)?.let { pending ->
+        val pendingRestore = readOptionalHomeString("pending_restore_json")
+        if (prefs.contains("pending_restore_json") && pendingRestore == null) {
+            // The journal is malformed; keep every existing tile and the raw value for repair.
+            Log.w("LauncherRepository", "Pending restore marker has an unexpected type")
+            return@withContext
+        }
+        pendingRestore?.let { pending ->
             if (!restoreFromJson(pending)) {
                 // A failed restore must not crash the default HOME launcher at every startup.
                 // Keep the journal for a later retry; never replace existing user tiles here.
@@ -98,7 +104,7 @@ class LauncherRepository(
                 return@withContext
             }
         }
-        if (tileDao.getCount() == 0 && !prefs.getBoolean("home_initialized", false)) {
+        if (tileDao.getCount() == 0 && !readHomeBoolean("home_initialized", prefs.contains("home_initialized"))) {
             val defaults = createDefaultTiles()
             tileDao.insertAll(defaults)
             prefs.edit().putBoolean("smart_folder_default_seeded_v1", true).apply()
@@ -106,7 +112,7 @@ class LauncherRepository(
             val allTiles = tileDao.getAllTiles().toMutableList()
             // Never insert a new Smart Folder into an existing or restored home layout.
             // Keep the legacy migration marker without changing the user's tiles.
-            if (!prefs.getBoolean("smart_folder_default_seeded_v1", false)) {
+            if (!readHomeBoolean("smart_folder_default_seeded_v1", false)) {
                 prefs.edit().putBoolean("smart_folder_default_seeded_v1", true).apply()
             }
             val needsCoordInit = allTiles.any { it.gridX < 0 || it.gridY < 0 }
@@ -1361,7 +1367,7 @@ class LauncherRepository(
     }
 
     private fun loadCustomAppCategories(): Map<String, String> {
-        val raw = prefs.getString("custom_app_categories_json", null) ?: return emptyMap()
+        val raw = readOptionalHomeString("custom_app_categories_json") ?: return emptyMap()
         return try {
             val obj = JSONObject(raw)
             val map = mutableMapOf<String, String>()
@@ -1390,7 +1396,7 @@ class LauncherRepository(
     }
 
     private fun loadAppDrawerFolders(): List<AppFolder> {
-        val raw = prefs.getString("app_drawer_folders_json", null) ?: return emptyList()
+        val raw = readOptionalHomeString("app_drawer_folders_json") ?: return emptyList()
         return parseAppDrawerFoldersJson(raw)
     }
 
@@ -1449,7 +1455,7 @@ class LauncherRepository(
     }
 
     private fun loadAppDrawerCustomOrder(): List<String> {
-        val raw = prefs.getString("app_drawer_custom_order_json", null) ?: return emptyList()
+        val raw = readOptionalHomeString("app_drawer_custom_order_json") ?: return emptyList()
         return try {
             val arr = JSONArray(raw)
             val list = mutableListOf<String>()
@@ -1692,6 +1698,14 @@ class LauncherRepository(
             fallback
         }
 
+    private fun readOptionalHomeString(key: String): String? =
+        try {
+            prefs.getString(key, null)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home string type: $key", wrongType)
+            null
+        }
+
     private fun readHomePageId(): String =
         try {
             prefs.getString("default_home_page_id", "page_home_1") ?: "page_home_1"
@@ -1717,8 +1731,8 @@ class LauncherRepository(
     }
 
     fun loadSettings(): LauncherSettings {
-        val viewModeStr = prefs.getString("all_apps_view_mode", AllAppsViewMode.METRO_LIST.name) ?: AllAppsViewMode.METRO_LIST.name
-        val sortOrderStr = prefs.getString("all_apps_sort_order", AllAppsSortOrder.NAME_ASC.name) ?: AllAppsSortOrder.NAME_ASC.name
+        val viewModeStr = readHomeString("all_apps_view_mode", AllAppsViewMode.METRO_LIST.name)
+        val sortOrderStr = readHomeString("all_apps_sort_order", AllAppsSortOrder.NAME_ASC.name)
         val transitionStr = readHomeString("page_transition_effect", PageTransitionEffect.TURNSTILE_3D.name)
         val wp10StyleStr = try {
             prefs.getString("wp10_tile_style", Wp10TileStyle.TINTED_TRANSLUCENT.name)
@@ -1726,14 +1740,14 @@ class LauncherRepository(
             Log.w("LauncherRepository", "Unexpected saved tile style type", wrongType)
             null
         } ?: Wp10TileStyle.TINTED_TRANSLUCENT.name
-        val dynamicModeStr = prefs.getString("dynamic_accent_mode", DynamicAccentMode.WP10_VIBRANT.name) ?: DynamicAccentMode.WP10_VIBRANT.name
-        val batterySaverModeStr = prefs.getString("battery_saver_mode", BatterySaverMode.AUTO.name) ?: BatterySaverMode.AUTO.name
+        val dynamicModeStr = readHomeString("dynamic_accent_mode", DynamicAccentMode.WP10_VIBRANT.name)
+        val batterySaverModeStr = readHomeString("battery_saver_mode", BatterySaverMode.AUTO.name)
 
         val autoWallpaperAccent = readHomeBoolean("auto_wallpaper_accent_enabled", true)
         val dynamicMode = try { DynamicAccentMode.valueOf(dynamicModeStr) } catch (_: Exception) { DynamicAccentMode.WP10_VIBRANT }
         val swatchIndex = readHomeInt("dynamic_swatch_index", 0).coerceIn(0, 3)
         val wallpaperIdx = readHomeInt("wallpaper_gradient_index", 0)
-        val savedHex = prefs.getString("accent_color", null)
+        val savedHex = readOptionalHomeString("accent_color")
         val effectiveHex = if (autoWallpaperAccent && (savedHex == null || !prefs.contains("accent_color_manual_override"))) {
             DynamicAccentEngine.resolveAutoAccent(wallpaperIdx, dynamicMode, swatchIndex).hex
         } else {
@@ -1769,17 +1783,17 @@ class LauncherRepository(
             batterySaverMode = try { BatterySaverMode.valueOf(batterySaverModeStr) } catch (_: Exception) { BatterySaverMode.AUTO },
             batterySaverThresholdPct = readHomeInt("battery_saver_threshold_pct", 25).coerceIn(10, 50),
             autoOptimizeBackgroundApps = readHomeBoolean("auto_optimize_background_apps", true),
-            quickNotes = prefs.getString("quick_notes", "Chào mừng trở lại Windows 10 Mobile! Ô Tile hỗ trợ tuỳ chỉnh trong suốt xuyên thấu từ 0% đến 100%.") ?: "",
-            cloudSyncState = prefs.getString("cloud_sync_state", "Đã đồng bộ cục bộ") ?: "Đã đồng bộ cục bộ",
+            quickNotes = readHomeString("quick_notes", "Chào mừng trở lại Windows 10 Mobile! Ô Tile hỗ trợ tuỳ chỉnh trong suốt xuyên thấu từ 0% đến 100%."),
+            cloudSyncState = readHomeString("cloud_sync_state", "Đã đồng bộ cục bộ"),
             defaultHomePageId = readHomePageId(),
             showPageHeaderTitle = readHomeBoolean("show_page_header_title", false),
             allAppsViewMode = try { AllAppsViewMode.valueOf(viewModeStr) } catch (_: Exception) { AllAppsViewMode.METRO_LIST },
-            allAppsGridColumns = prefs.getInt("all_apps_grid_columns", 4),
+            allAppsGridColumns = readHomeInt("all_apps_grid_columns", 4).coerceIn(2, 8),
             allAppsSortOrder = try { AllAppsSortOrder.valueOf(sortOrderStr) } catch (_: Exception) { AllAppsSortOrder.NAME_ASC },
-            allAppsShowSearchBar = prefs.getBoolean("all_apps_show_search_bar", true),
-            allAppsShowLetterHeaders = prefs.getBoolean("all_apps_show_letter_headers", true),
-            allAppsCategorizedEnabled = prefs.getBoolean("all_apps_categorized_enabled", true),
-            allAppsGroupByCategory = prefs.getBoolean("all_apps_group_by_category", false),
+            allAppsShowSearchBar = readHomeBoolean("all_apps_show_search_bar", true),
+            allAppsShowLetterHeaders = readHomeBoolean("all_apps_show_letter_headers", true),
+            allAppsCategorizedEnabled = readHomeBoolean("all_apps_categorized_enabled", true),
+            allAppsGroupByCategory = readHomeBoolean("all_apps_group_by_category", false),
             customAppCategories = loadCustomAppCategories(),
             appDrawerFolders = loadAppDrawerFolders(),
             appDrawerCustomOrder = loadAppDrawerCustomOrder()

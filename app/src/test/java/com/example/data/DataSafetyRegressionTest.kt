@@ -1048,4 +1048,48 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(widget), db.tileDao().getAllTiles())
     }
 
+    @Test fun mixedLegacyPreferenceTypesDoNotBlockHomeOrTileStyleSave() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity("legacy_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 301, widgetProvider = "example/.Provider", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit()
+            .putInt("all_apps_view_mode", 1)
+            .putBoolean("dynamic_accent_mode", false)
+            .putInt("accent_color", 123)
+            .putBoolean("quick_notes", true)
+            .putInt("custom_app_categories_json", 2)
+            .putBoolean("app_drawer_folders_json", false)
+            .putInt("app_drawer_custom_order_json", 3)
+            .putString("all_apps_grid_columns", "bad")
+            .putInt("all_apps_show_search_bar", 1)
+            .commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(AllAppsViewMode.METRO_LIST, recovered.allAppsViewMode)
+        assertEquals(4, recovered.allAppsGridColumns)
+        assertTrue(recovered.allAppsShowSearchBar)
+        assertEquals(1, prefs.getInt("all_apps_view_mode", -1))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun malformedInitializationFlagsDoNotReseedDeliberatelyEmptyHome() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        assertTrue(prefs.edit()
+            .putString("home_initialized", "legacy")
+            .putInt("smart_folder_default_seeded_v1", 1)
+            .putBoolean("pending_restore_json", true)
+            .commit())
+
+        repo.ensureDefaultTiles()
+
+        assertTrue(db.tileDao().getAllTiles().isEmpty())
+        assertEquals("legacy", prefs.getString("home_initialized", null))
+        assertTrue(prefs.getBoolean("pending_restore_json", false))
+    }
 }
