@@ -34,6 +34,9 @@ jobs:
           bash scripts/test-page-persistence-guard.sh
           bash scripts/test-tile-style-atomic-save.sh
 
+      - name: Android Lint (API compatibility)
+        run: gradle :app:lintDebug
+
       - name: Run Unit & Robolectric Tests
         run: gradle :app:testDebugUnitTest
 
