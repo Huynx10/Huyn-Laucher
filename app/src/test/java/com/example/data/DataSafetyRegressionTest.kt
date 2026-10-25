@@ -1022,4 +1022,30 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(widget), db.tileDao().getAllTiles())
     }
 
+
+    @Test fun wrongTypePowerPreferencesCannotAbortTileStyleSaveOrChangeWidgets() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "power_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 220, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("battery_saver_threshold_pct", "30")
+            .putInt("auto_optimize_background_apps", 1).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(25, recovered.batterySaverThresholdPct)
+        assertTrue(recovered.autoOptimizeBackgroundApps)
+        // A read must preserve the original legacy values and native widget binding.
+        assertEquals("30", prefs.getString("battery_saver_threshold_pct", null))
+        assertEquals(1, prefs.getInt("auto_optimize_background_apps", -1))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
 }
