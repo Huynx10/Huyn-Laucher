@@ -82,10 +82,16 @@ fun CleanSettingsScreen(
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
     fun chooseHome() {
         try {
-            val role = if (Build.VERSION.SDK_INT >= 29) ctx.getSystemService(RoleManager::class.java) else null
-            if (role != null && role.isRoleAvailable(RoleManager.ROLE_HOME) && !role.isRoleHeld(RoleManager.ROLE_HOME)) {
-                roleLauncher.launch(role.createRequestRoleIntent(RoleManager.ROLE_HOME))
-            } else ctx.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val role = ctx.getSystemService(RoleManager::class.java)
+                if (role != null && role.isRoleAvailable(RoleManager.ROLE_HOME) && !role.isRoleHeld(RoleManager.ROLE_HOME)) {
+                    roleLauncher.launch(role.createRequestRoleIntent(RoleManager.ROLE_HOME))
+                } else {
+                    ctx.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+                }
+            } else {
+                ctx.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+            }
         } catch (_: Exception) {
             Toast.makeText(ctx, "Không mở được cài đặt mặc định", Toast.LENGTH_SHORT).show()
         }
