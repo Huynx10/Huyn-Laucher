@@ -90,7 +90,13 @@ class LauncherRepository(
     val tilesFlow: Flow<List<TileEntity>> = tileDao.getAllTilesFlow()
 
     suspend fun ensureDefaultTiles() = withContext(Dispatchers.IO) {
-        prefs.getString("pending_restore_json", null)?.let { pending ->
+        val pendingRestore = readOptionalHomeString("pending_restore_json")
+        if (prefs.contains("pending_restore_json") && pendingRestore == null) {
+            // The journal is malformed; keep every existing tile and the raw value for repair.
+            Log.w("LauncherRepository", "Pending restore marker has an unexpected type")
+            return@withContext
+        }
+        pendingRestore?.let { pending ->
             if (!restoreFromJson(pending)) {
                 // A failed restore must not crash the default HOME launcher at every startup.
                 // Keep the journal for a later retry; never replace existing user tiles here.
@@ -98,7 +104,7 @@ class LauncherRepository(
                 return@withContext
             }
         }
-        if (tileDao.getCount() == 0 && !prefs.getBoolean("home_initialized", false)) {
+        if (tileDao.getCount() == 0 && !readHomeBoolean("home_initialized", prefs.contains("home_initialized"))) {
             val defaults = createDefaultTiles()
             tileDao.insertAll(defaults)
             prefs.edit().putBoolean("smart_folder_default_seeded_v1", true).apply()
@@ -106,7 +112,7 @@ class LauncherRepository(
             val allTiles = tileDao.getAllTiles().toMutableList()
             // Never insert a new Smart Folder into an existing or restored home layout.
             // Keep the legacy migration marker without changing the user's tiles.
-            if (!prefs.getBoolean("smart_folder_default_seeded_v1", false)) {
+            if (!readHomeBoolean("smart_folder_default_seeded_v1", false)) {
                 prefs.edit().putBoolean("smart_folder_default_seeded_v1", true).apply()
             }
             val needsCoordInit = allTiles.any { it.gridX < 0 || it.gridY < 0 }
@@ -703,37 +709,41 @@ class LauncherRepository(
         pageId: String = "page_home_1",
         preferredSize: TileSize? = null
     ): TileEntity = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val pageTiles = allTiles.filter { it.pageId == pageId }
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val minimumSize = TileSize.fromTargetSpans(provider.targetCellWidth, provider.targetCellHeight)
-        val resolvedSize = preferredSize?.takeIf { it.spanX >= minimumSize.spanX && it.spanY >= minimumSize.spanY } ?: minimumSize
-        val (gx, gy) = findFirstFreeGridPosition(
-            existingPageTiles = pageTiles,
-            spanX = resolvedSize.effectiveSpanX(totalCols),
-            spanY = resolvedSize.effectiveSpanY(),
-            totalCols = totalCols
-        )
-        val minSpanX = ((provider.minWidthDp + 69) / 70).coerceIn(1, provider.targetCellWidth)
-        val minSpanY = ((provider.minHeightDp + 69) / 70).coerceIn(1, provider.targetCellHeight)
-        val widgetTile = TileEntity(
-            id = allocateUniqueTileId("widget_${provider.packageName}", allTiles),
-            title = provider.label.ifBlank { provider.appName },
-            packageName = provider.packageName,
-            tileType = TileType.WIDGET,
-            size = resolvedSize,
-            orderIndex = pageTiles.size,
-            pageId = pageId,
-            gridX = gx,
-            gridY = gy,
-            isLiveEnabled = true,
-            appWidgetId = appWidgetId,
-            widgetProvider = provider.providerComponent,
-            widgetMinSpanX = minSpanX,
-            widgetMinSpanY = minSpanY,
-            widgetResizeMode = provider.resizeMode
-        )
-        tileDao.insertOrUpdate(widgetTile)
+        // Keep placement lookup and widget insertion atomic on sparse Home pages.
+        val widgetTile = database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val pageTiles = allTiles.filter { it.pageId == pageId }
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val minimumSize = TileSize.fromTargetSpans(provider.targetCellWidth, provider.targetCellHeight)
+            val resolvedSize = preferredSize?.takeIf { it.spanX >= minimumSize.spanX && it.spanY >= minimumSize.spanY } ?: minimumSize
+            val (gx, gy) = findFirstFreeGridPosition(
+                existingPageTiles = pageTiles,
+                spanX = resolvedSize.effectiveSpanX(totalCols),
+                spanY = resolvedSize.effectiveSpanY(),
+                totalCols = totalCols
+            )
+            val minSpanX = ((provider.minWidthDp + 69) / 70).coerceIn(1, provider.targetCellWidth)
+            val minSpanY = ((provider.minHeightDp + 69) / 70).coerceIn(1, provider.targetCellHeight)
+            val widgetTile = TileEntity(
+                id = allocateUniqueTileId("widget_${provider.packageName}", allTiles),
+                title = provider.label.ifBlank { provider.appName },
+                packageName = provider.packageName,
+                tileType = TileType.WIDGET,
+                size = resolvedSize,
+                orderIndex = (pageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                pageId = pageId,
+                gridX = gx,
+                gridY = gy,
+                isLiveEnabled = true,
+                appWidgetId = appWidgetId,
+                widgetProvider = provider.providerComponent,
+                widgetMinSpanX = minSpanX,
+                widgetMinSpanY = minSpanY,
+                widgetResizeMode = provider.resizeMode
+            )
+            tileDao.insertOrUpdate(widgetTile)
+            widgetTile
+        }
         autoArrangeIfEnabled(pageId)
         widgetTile
     }
@@ -822,93 +832,112 @@ class LauncherRepository(
     }
 
     suspend fun moveTileToPage(tileId: String, targetPageId: String) = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val target = allTiles.find { it.id == tileId } ?: return@withContext
-        if (target.pageId == targetPageId) return@withContext
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val targetPageTiles = allTiles.filter { it.pageId == targetPageId }
-        val (freeX, freeY) = findFirstFreeGridPosition(
-            existingPageTiles = targetPageTiles,
-            spanX = target.size.effectiveSpanX(totalCols),
-            spanY = target.size.effectiveSpanY(),
-            totalCols = totalCols
-        )
-        tileDao.update(
-            target.copy(
-                pageId = targetPageId,
-                orderIndex = targetPageTiles.size,
-                gridX = freeX,
-                gridY = freeY
+        // Keep target placement and widget row update in one Room transaction.
+        database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val target = allTiles.find { it.id == tileId } ?: return@withTransaction
+            if (target.pageId == targetPageId) return@withTransaction
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val targetPageTiles = allTiles.filter { it.pageId == targetPageId }
+            val (freeX, freeY) = findFirstFreeGridPosition(
+                existingPageTiles = targetPageTiles,
+                spanX = target.size.effectiveSpanX(totalCols),
+                spanY = target.size.effectiveSpanY(),
+                totalCols = totalCols
             )
-        )
+            tileDao.update(
+                target.copy(
+                    pageId = targetPageId,
+                    // Sparse order indices must not collide with an existing tile.
+                    orderIndex = (targetPageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                    gridX = freeX,
+                    gridY = freeY
+                )
+            )
+        }
     }
 
     suspend fun reassignTilesFromDeletedPage(deletedPageId: String, fallbackPageId: String) = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val placedOnFallback = allTiles.filter { it.pageId == fallbackPageId }.toMutableList()
-        val affected = allTiles.filter { it.pageId == deletedPageId }.mapIndexed { idx, tile ->
-            val (gx, gy) = findFirstFreeGridPosition(
-                existingPageTiles = placedOnFallback,
-                spanX = tile.size.effectiveSpanX(totalCols),
-                spanY = tile.size.effectiveSpanY(),
-                totalCols = totalCols
-            )
-            val moved = tile.copy(
-                pageId = fallbackPageId,
-                orderIndex = placedOnFallback.size + idx,
-                gridX = gx,
-                gridY = gy
-            )
-            placedOnFallback.add(moved)
-            moved
-        }
-        if (affected.isNotEmpty()) {
-            tileDao.insertAll(affected)
+        require(deletedPageId != fallbackPageId) { "Cannot reassign tiles to the deleted Home page" }
+        // Keep all widget moves atomic so a failed write cannot partially move a page.
+        database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val placedOnFallback = allTiles.filter { it.pageId == fallbackPageId }.toMutableList()
+            var nextOrderIndex = (placedOnFallback.maxOfOrNull { it.orderIndex } ?: -1) + 1
+            val affected = allTiles.filter { it.pageId == deletedPageId }.map { tile ->
+                val (gx, gy) = findFirstFreeGridPosition(
+                    existingPageTiles = placedOnFallback,
+                    spanX = tile.size.effectiveSpanX(totalCols),
+                    spanY = tile.size.effectiveSpanY(),
+                    totalCols = totalCols
+                )
+                val moved = tile.copy(
+                    pageId = fallbackPageId,
+                    orderIndex = nextOrderIndex++,
+                    gridX = gx,
+                    gridY = gy
+                )
+                placedOnFallback.add(moved)
+                moved
+            }
+            if (affected.isNotEmpty()) tileDao.insertAll(affected)
         }
     }
 
     suspend fun pinApp(app: AppItem, pageId: String = "page_home_1") = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val pageTiles = allTiles.filter { it.pageId == pageId }
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val (gx, gy) = findFirstFreeGridPosition(
-            existingPageTiles = pageTiles,
-            spanX = TileSize.MEDIUM.effectiveSpanX(totalCols),
-            spanY = TileSize.MEDIUM.effectiveSpanY(),
-            totalCols = totalCols
-        )
-        val tile = TileEntity(
-            id = allocateUniqueTileId("app_${app.packageName}", allTiles),
-            title = app.label,
-            packageName = app.packageName,
-            tileType = TileType.APP,
-            size = TileSize.MEDIUM,
-            orderIndex = pageTiles.size,
-            pageId = pageId,
-            gridX = gx,
-            gridY = gy,
-            notificationCount = 0
-        )
-        tileDao.insertOrUpdate(tile)
+        // Keep occupancy, ID allocation and insert in one Room transaction.
+        database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val pageTiles = allTiles.filter { it.pageId == pageId }
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val (gx, gy) = findFirstFreeGridPosition(
+                existingPageTiles = pageTiles,
+                spanX = TileSize.MEDIUM.effectiveSpanX(totalCols),
+                spanY = TileSize.MEDIUM.effectiveSpanY(),
+                totalCols = totalCols
+            )
+            val tile = TileEntity(
+                id = allocateUniqueTileId("app_${app.packageName}", allTiles),
+                title = app.label,
+                packageName = app.packageName,
+                tileType = TileType.APP,
+                size = TileSize.MEDIUM,
+                orderIndex = (pageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                pageId = pageId,
+                gridX = gx,
+                gridY = gy,
+                notificationCount = 0
+            )
+            tileDao.insertOrUpdate(tile)
+        }
         autoArrangeIfEnabled(pageId)
     }
 
     suspend fun pinTile(tile: TileEntity) = withContext(Dispatchers.IO) {
-        val allTiles = tileDao.getAllTiles()
-        val pageTiles = allTiles.filter { it.pageId == tile.pageId }
-        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
-        val (gx, gy) = if (tile.gridX >= 0 && tile.gridY >= 0) {
-            tile.gridX to tile.gridY
-        } else {
-            findFirstFreeGridPosition(
-                existingPageTiles = pageTiles,
-                spanX = tile.size.effectiveSpanX(totalCols),
-                spanY = tile.size.effectiveSpanY(),
-                totalCols = totalCols
+        // Read occupancy and persist the new Tile atomically, including sparse page orders.
+        database.withTransaction {
+            val allTiles = tileDao.getAllTiles()
+            val pageTiles = allTiles.filter { it.pageId == tile.pageId }
+            val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+            val (gx, gy) = if (tile.gridX >= 0 && tile.gridY >= 0) {
+                tile.gridX to tile.gridY
+            } else {
+                findFirstFreeGridPosition(
+                    existingPageTiles = pageTiles,
+                    spanX = tile.size.effectiveSpanX(totalCols),
+                    spanY = tile.size.effectiveSpanY(),
+                    totalCols = totalCols
+                )
+            }
+            tileDao.insertOrUpdate(
+                tile.copy(
+                    orderIndex = (pageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                    gridX = gx,
+                    gridY = gy
+                )
             )
         }
-        tileDao.insertOrUpdate(tile.copy(orderIndex = pageTiles.size, gridX = gx, gridY = gy))
         autoArrangeIfEnabled(tile.pageId)
     }
 
@@ -1338,7 +1367,7 @@ class LauncherRepository(
     }
 
     private fun loadCustomAppCategories(): Map<String, String> {
-        val raw = prefs.getString("custom_app_categories_json", null) ?: return emptyMap()
+        val raw = readOptionalHomeString("custom_app_categories_json") ?: return emptyMap()
         return try {
             val obj = JSONObject(raw)
             val map = mutableMapOf<String, String>()
@@ -1367,7 +1396,7 @@ class LauncherRepository(
     }
 
     private fun loadAppDrawerFolders(): List<AppFolder> {
-        val raw = prefs.getString("app_drawer_folders_json", null) ?: return emptyList()
+        val raw = readOptionalHomeString("app_drawer_folders_json") ?: return emptyList()
         return parseAppDrawerFoldersJson(raw)
     }
 
@@ -1426,7 +1455,7 @@ class LauncherRepository(
     }
 
     private fun loadAppDrawerCustomOrder(): List<String> {
-        val raw = prefs.getString("app_drawer_custom_order_json", null) ?: return emptyList()
+        val raw = readOptionalHomeString("app_drawer_custom_order_json") ?: return emptyList()
         return try {
             val arr = JSONArray(raw)
             val list = mutableListOf<String>()
@@ -1643,24 +1672,82 @@ class LauncherRepository(
         return stored.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0.45f
     }
 
+    // Home layout flags and the selected Home page may have a legacy preference type.
+    // Fall back on read without deleting the original value or touching Room/widget rows.
+    private fun readHomeBoolean(key: String, fallback: Boolean): Boolean =
+        try {
+            prefs.getBoolean(key, fallback)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home boolean type: $key", wrongType)
+            fallback
+        }
+
+    private fun readHomeInt(key: String, fallback: Int): Int =
+        try {
+            prefs.getInt(key, fallback)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home integer type: $key", wrongType)
+            fallback
+        }
+
+    private fun readHomeString(key: String, fallback: String): String =
+        try {
+            prefs.getString(key, fallback) ?: fallback
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home string type: $key", wrongType)
+            fallback
+        }
+
+    private fun readOptionalHomeString(key: String): String? =
+        try {
+            prefs.getString(key, null)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved Home string type: $key", wrongType)
+            null
+        }
+
+    private fun readHomePageId(): String =
+        try {
+            prefs.getString("default_home_page_id", "page_home_1") ?: "page_home_1"
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved default Home page type", wrongType)
+            "page_home_1"
+        }
+
+    // A malformed legacy value must not abort Home rendering or Tile Style saving.
+    // Preserve the raw preference on read so backup/restore remains non-destructive.
+    private fun loadWallpaperDimAlpha(): Float {
+        val stored = try {
+            prefs.getFloat("wallpaper_dim_alpha", 0.18f)
+        } catch (wrongType: ClassCastException) {
+            Log.w("LauncherRepository", "Unexpected saved wallpaper dim alpha type", wrongType)
+            return 0.18f
+        }
+        if (!stored.isFinite()) {
+            Log.w("LauncherRepository", "Non-finite saved wallpaper dim alpha")
+            return 0.18f
+        }
+        return stored.coerceIn(0f, 0.75f)
+    }
+
     fun loadSettings(): LauncherSettings {
-        val viewModeStr = prefs.getString("all_apps_view_mode", AllAppsViewMode.METRO_LIST.name) ?: AllAppsViewMode.METRO_LIST.name
-        val sortOrderStr = prefs.getString("all_apps_sort_order", AllAppsSortOrder.NAME_ASC.name) ?: AllAppsSortOrder.NAME_ASC.name
-        val transitionStr = prefs.getString("page_transition_effect", PageTransitionEffect.TURNSTILE_3D.name) ?: PageTransitionEffect.TURNSTILE_3D.name
+        val viewModeStr = readHomeString("all_apps_view_mode", AllAppsViewMode.METRO_LIST.name)
+        val sortOrderStr = readHomeString("all_apps_sort_order", AllAppsSortOrder.NAME_ASC.name)
+        val transitionStr = readHomeString("page_transition_effect", PageTransitionEffect.TURNSTILE_3D.name)
         val wp10StyleStr = try {
             prefs.getString("wp10_tile_style", Wp10TileStyle.TINTED_TRANSLUCENT.name)
         } catch (wrongType: ClassCastException) {
             Log.w("LauncherRepository", "Unexpected saved tile style type", wrongType)
             null
         } ?: Wp10TileStyle.TINTED_TRANSLUCENT.name
-        val dynamicModeStr = prefs.getString("dynamic_accent_mode", DynamicAccentMode.WP10_VIBRANT.name) ?: DynamicAccentMode.WP10_VIBRANT.name
-        val batterySaverModeStr = prefs.getString("battery_saver_mode", BatterySaverMode.AUTO.name) ?: BatterySaverMode.AUTO.name
+        val dynamicModeStr = readHomeString("dynamic_accent_mode", DynamicAccentMode.WP10_VIBRANT.name)
+        val batterySaverModeStr = readHomeString("battery_saver_mode", BatterySaverMode.AUTO.name)
 
-        val autoWallpaperAccent = prefs.getBoolean("auto_wallpaper_accent_enabled", true)
+        val autoWallpaperAccent = readHomeBoolean("auto_wallpaper_accent_enabled", true)
         val dynamicMode = try { DynamicAccentMode.valueOf(dynamicModeStr) } catch (_: Exception) { DynamicAccentMode.WP10_VIBRANT }
-        val swatchIndex = prefs.getInt("dynamic_swatch_index", 0).coerceIn(0, 3)
-        val wallpaperIdx = prefs.getInt("wallpaper_gradient_index", 0)
-        val savedHex = prefs.getString("accent_color", null)
+        val swatchIndex = readHomeInt("dynamic_swatch_index", 0).coerceIn(0, 3)
+        val wallpaperIdx = readHomeInt("wallpaper_gradient_index", 0)
+        val savedHex = readOptionalHomeString("accent_color")
         val effectiveHex = if (autoWallpaperAccent && (savedHex == null || !prefs.contains("accent_color_manual_override"))) {
             DynamicAccentEngine.resolveAutoAccent(wallpaperIdx, dynamicMode, swatchIndex).hex
         } else {
@@ -1672,41 +1759,41 @@ class LauncherRepository(
             autoWallpaperAccentEnabled = autoWallpaperAccent,
             dynamicAccentMode = dynamicMode,
             dynamicSwatchIndex = swatchIndex,
-            isDarkTheme = prefs.getBoolean("is_dark_theme", true),
+            isDarkTheme = readHomeBoolean("is_dark_theme", true),
             wp10TileStyle = try { Wp10TileStyle.valueOf(wp10StyleStr) } catch (_: Exception) { Wp10TileStyle.TINTED_TRANSLUCENT },
             tileOpacity = loadTileOpacity(),
-            wp10RevealBorder = prefs.getBoolean("wp10_reveal_border", true),
-            showMoreTiles = prefs.getBoolean("show_more_tiles", false),
-            tileCornerRadiusDp = prefs.getInt("tile_corner_radius", 2),
-            tileSpacingDp = prefs.getInt("tile_spacing_dp", 6),
-            useRealAppIcons = prefs.getBoolean("use_real_app_icons", true),
-            miuiGlassBorder = prefs.getBoolean("miui_glass_border", true),
+            wp10RevealBorder = readHomeBoolean("wp10_reveal_border", true),
+            showMoreTiles = readHomeBoolean("show_more_tiles", false),
+            tileCornerRadiusDp = readHomeInt("tile_corner_radius", 2),
+            tileSpacingDp = readHomeInt("tile_spacing_dp", 6),
+            useRealAppIcons = readHomeBoolean("use_real_app_icons", true),
+            miuiGlassBorder = readHomeBoolean("miui_glass_border", true),
             pageTransitionEffect = try { PageTransitionEffect.valueOf(transitionStr) } catch (_: Exception) { PageTransitionEffect.TURNSTILE_3D },
-            doubleTapToGlance = prefs.getBoolean("double_tap_to_glance", true),
-            lockHomeLayout = prefs.getBoolean("lock_home_layout", false),
-            autoArrangeTiles = prefs.getBoolean("auto_arrange_tiles", false),
-            fullWallpaperEnabled = prefs.getBoolean("full_wallpaper_enabled", true),
-            wallpaperSource = runCatching { WallpaperSource.valueOf(prefs.getString("wallpaper_source", "") ?: "") }
-                .getOrElse { if (!prefs.getString("custom_wallpaper_uri", "").isNullOrBlank()) WallpaperSource.CUSTOM else if (prefs.contains("wallpaper_gradient_index")) WallpaperSource.LUMIA else WallpaperSource.SYSTEM },
+            doubleTapToGlance = readHomeBoolean("double_tap_to_glance", true),
+            lockHomeLayout = readHomeBoolean("lock_home_layout", false),
+            autoArrangeTiles = readHomeBoolean("auto_arrange_tiles", false),
+            fullWallpaperEnabled = readHomeBoolean("full_wallpaper_enabled", true),
+            wallpaperSource = runCatching { WallpaperSource.valueOf(readHomeString("wallpaper_source", "")) }
+                .getOrElse { if (readHomeString("custom_wallpaper_uri", "").isNotBlank()) WallpaperSource.CUSTOM else if (prefs.contains("wallpaper_gradient_index")) WallpaperSource.LUMIA else WallpaperSource.SYSTEM },
             wallpaperGradientIndex = wallpaperIdx,
-            customWallpaperUri = prefs.getString("custom_wallpaper_uri", "") ?: "",
-            wallpaperDimAlpha = prefs.getFloat("wallpaper_dim_alpha", 0.18f).coerceIn(0f, 0.75f),
-            turnstileAnimationEnabled = prefs.getBoolean("turnstile_animation", true),
-            glanceScreenEnabled = prefs.getBoolean("glance_screen_enabled", true),
+            customWallpaperUri = readHomeString("custom_wallpaper_uri", ""),
+            wallpaperDimAlpha = loadWallpaperDimAlpha(),
+            turnstileAnimationEnabled = readHomeBoolean("turnstile_animation", true),
+            glanceScreenEnabled = readHomeBoolean("glance_screen_enabled", true),
             batterySaverMode = try { BatterySaverMode.valueOf(batterySaverModeStr) } catch (_: Exception) { BatterySaverMode.AUTO },
-            batterySaverThresholdPct = prefs.getInt("battery_saver_threshold_pct", 25).coerceIn(10, 50),
-            autoOptimizeBackgroundApps = prefs.getBoolean("auto_optimize_background_apps", true),
-            quickNotes = prefs.getString("quick_notes", "Chào mừng trở lại Windows 10 Mobile! Ô Tile hỗ trợ tuỳ chỉnh trong suốt xuyên thấu từ 0% đến 100%.") ?: "",
-            cloudSyncState = prefs.getString("cloud_sync_state", "Đã đồng bộ cục bộ") ?: "Đã đồng bộ cục bộ",
-            defaultHomePageId = prefs.getString("default_home_page_id", "page_home_1") ?: "page_home_1",
-            showPageHeaderTitle = prefs.getBoolean("show_page_header_title", false),
+            batterySaverThresholdPct = readHomeInt("battery_saver_threshold_pct", 25).coerceIn(10, 50),
+            autoOptimizeBackgroundApps = readHomeBoolean("auto_optimize_background_apps", true),
+            quickNotes = readHomeString("quick_notes", "Chào mừng trở lại Windows 10 Mobile! Ô Tile hỗ trợ tuỳ chỉnh trong suốt xuyên thấu từ 0% đến 100%."),
+            cloudSyncState = readHomeString("cloud_sync_state", "Đã đồng bộ cục bộ"),
+            defaultHomePageId = readHomePageId(),
+            showPageHeaderTitle = readHomeBoolean("show_page_header_title", false),
             allAppsViewMode = try { AllAppsViewMode.valueOf(viewModeStr) } catch (_: Exception) { AllAppsViewMode.METRO_LIST },
-            allAppsGridColumns = prefs.getInt("all_apps_grid_columns", 4),
+            allAppsGridColumns = readHomeInt("all_apps_grid_columns", 4).coerceIn(2, 8),
             allAppsSortOrder = try { AllAppsSortOrder.valueOf(sortOrderStr) } catch (_: Exception) { AllAppsSortOrder.NAME_ASC },
-            allAppsShowSearchBar = prefs.getBoolean("all_apps_show_search_bar", true),
-            allAppsShowLetterHeaders = prefs.getBoolean("all_apps_show_letter_headers", true),
-            allAppsCategorizedEnabled = prefs.getBoolean("all_apps_categorized_enabled", true),
-            allAppsGroupByCategory = prefs.getBoolean("all_apps_group_by_category", false),
+            allAppsShowSearchBar = readHomeBoolean("all_apps_show_search_bar", true),
+            allAppsShowLetterHeaders = readHomeBoolean("all_apps_show_letter_headers", true),
+            allAppsCategorizedEnabled = readHomeBoolean("all_apps_categorized_enabled", true),
+            allAppsGroupByCategory = readHomeBoolean("all_apps_group_by_category", false),
             customAppCategories = loadCustomAppCategories(),
             appDrawerFolders = loadAppDrawerFolders(),
             appDrawerCustomOrder = loadAppDrawerCustomOrder()
@@ -1746,7 +1833,7 @@ class LauncherRepository(
             .putString("wallpaper_source", settings.wallpaperSource.name)
             .putInt("wallpaper_gradient_index", settings.wallpaperGradientIndex)
             .putString("custom_wallpaper_uri", settings.customWallpaperUri)
-            .putFloat("wallpaper_dim_alpha", settings.wallpaperDimAlpha.coerceIn(0f, 0.75f))
+            .putFloat("wallpaper_dim_alpha", settings.wallpaperDimAlpha.takeIf { it.isFinite() }?.coerceIn(0f, 0.75f) ?: 0.18f)
             .putBoolean("turnstile_animation", settings.turnstileAnimationEnabled)
             .putBoolean("glance_screen_enabled", settings.glanceScreenEnabled)
             .putString("battery_saver_mode", settings.batterySaverMode.name)
@@ -1928,7 +2015,13 @@ class LauncherRepository(
                     batterySaverThresholdPct = s.optInt("batterySaverThresholdPct", cur.batterySaverThresholdPct).coerceIn(10, 50),
                     wallpaperSource = runCatching { WallpaperSource.valueOf(s.optString("wallpaperSource", cur.wallpaperSource.name)) }.getOrDefault(cur.wallpaperSource),
                     wallpaperGradientIndex = s.optInt("wallpaperGradientIndex", cur.wallpaperGradientIndex),
-                    wallpaperDimAlpha = s.optDouble("wallpaperDimAlpha", cur.wallpaperDimAlpha.toDouble()).toFloat().coerceIn(0f, 0.75f),
+                    wallpaperDimAlpha = if (s.has("wallpaperDimAlpha")) {
+                        // Backups encode this as a JSON number. Reject malformed/non-finite values
+                        // before the restore journal or any Room/widget rows are modified.
+                        requireNotNull(
+                            (s.get("wallpaperDimAlpha") as? Number)?.toDouble()?.takeIf { it.isFinite() }
+                        ) { "Invalid wallpaperDimAlpha in backup" }.toFloat().coerceIn(0f, 0.75f)
+                    } else cur.wallpaperDimAlpha,
                     autoOptimizeBackgroundApps = s.optBoolean("autoOptimizeBackgroundApps", cur.autoOptimizeBackgroundApps),
                     quickNotes = s.optString("quickNotes", cur.quickNotes),
                     defaultHomePageId = s.optString("defaultHomePageId", cur.defaultHomePageId),
@@ -2028,7 +2121,8 @@ class LauncherRepository(
             true
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            Log.e("LauncherRepository", "Backup restore rejected or failed", failure)
             false
         }
     }

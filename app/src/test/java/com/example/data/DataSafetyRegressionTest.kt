@@ -73,6 +73,429 @@ class DataSafetyRegressionTest {
         assertTrue(repo.loadSettings().tileOpacity.isFinite())
     }
 
+    @Test fun wrongTypeHomeGridFlagsCannotAbortTileStyleSaveOrDeleteWidgets() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "existing_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 127, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("show_more_tiles", "true")
+            .putInt("auto_arrange_tiles", 1).commit())
+
+        val recovered = repo.loadSettings()
+        assertFalse(recovered.showMoreTiles)
+        assertFalse(recovered.autoArrangeTiles)
+        assertEquals("true", prefs.getString("show_more_tiles", null))
+        assertEquals(1, prefs.getInt("auto_arrange_tiles", -1))
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun wrongTypeTileDimensionsDoNotAbortStyleSaveOrChangeWidgetRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "existing_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 127, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("tile_corner_radius", "8")
+            .putBoolean("tile_spacing_dp", true).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(2, recovered.tileCornerRadiusDp)
+        assertEquals(6, recovered.tileSpacingDp)
+        assertEquals("8", prefs.getString("tile_corner_radius", null))
+        assertTrue(prefs.getBoolean("tile_spacing_dp", false))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun wrongTypeTileAppearanceFlagsDoNotAbortStyleSaveOrChangeWidgetRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "appearance_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 128, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("wp10_reveal_border", "false")
+            .putInt("use_real_app_icons", 0)
+            .putString("miui_glass_border", "false").commit())
+
+        val recovered = repo.loadSettings()
+        assertTrue(recovered.wp10RevealBorder)
+        assertTrue(recovered.useRealAppIcons)
+        assertTrue(recovered.miuiGlassBorder)
+        assertEquals("false", prefs.getString("wp10_reveal_border", null))
+        assertEquals(0, prefs.getInt("use_real_app_icons", -1))
+        assertEquals("false", prefs.getString("miui_glass_border", null))
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun wrongTypeHomePageNavigationSettingsDoNotAbortTileStyleSave() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "navigation_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 129, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putInt("page_transition_effect", 3)
+            .putString("lock_home_layout", "false")
+            .putInt("show_page_header_title", 1).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(PageTransitionEffect.TURNSTILE_3D, recovered.pageTransitionEffect)
+        assertFalse(recovered.lockHomeLayout)
+        assertFalse(recovered.showPageHeaderTitle)
+        // A read must not rewrite legacy data or Room widget bindings.
+        assertEquals(3, prefs.getInt("page_transition_effect", -1))
+        assertEquals("false", prefs.getString("lock_home_layout", null))
+        assertEquals(1, prefs.getInt("show_page_header_title", -1))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun wrongTypeHomeGestureAndAnimationFlagsCannotAbortTileStyleSave() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "gesture_widget", "Existing widget", tileType = TileType.WIDGET,
+            appWidgetId = 138, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("double_tap_to_glance", "false")
+            .putInt("turnstile_animation", 0)
+            .putString("glance_screen_enabled", "false").commit())
+
+        val recovered = repo.loadSettings()
+        assertTrue(recovered.doubleTapToGlance)
+        assertTrue(recovered.turnstileAnimationEnabled)
+        assertTrue(recovered.glanceScreenEnabled)
+        // Reading a legacy value must not overwrite it or alter Room widget links.
+        assertEquals("false", prefs.getString("double_tap_to_glance", null))
+        assertEquals(0, prefs.getInt("turnstile_animation", -1))
+        assertEquals("false", prefs.getString("glance_screen_enabled", null))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun malformedHomeAccentPreferencesDoNotAbortTileStyleSaveOrLoseWidgets() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "accent_widget", "Existing widget", tileType = TileType.WIDGET,
+            appWidgetId = 139, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("auto_wallpaper_accent_enabled", "true")
+            .putString("dynamic_swatch_index", "2")
+            .putBoolean("wallpaper_gradient_index", true)
+            .putString("is_dark_theme", "false").commit())
+
+        val recovered = repo.loadSettings()
+        assertTrue(recovered.autoWallpaperAccentEnabled)
+        assertEquals(0, recovered.dynamicSwatchIndex)
+        assertEquals(0, recovered.wallpaperGradientIndex)
+        assertTrue(recovered.isDarkTheme)
+        // Loading settings must not rewrite malformed values or widget bindings.
+        assertEquals("true", prefs.getString("auto_wallpaper_accent_enabled", null))
+        assertEquals("2", prefs.getString("dynamic_swatch_index", null))
+        assertTrue(prefs.getBoolean("wallpaper_gradient_index", false))
+        assertEquals("false", prefs.getString("is_dark_theme", null))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun wrongTypeDefaultHomePageIdFallsBackWithoutRewritingOriginalValue() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        assertTrue(prefs.edit().putInt("default_home_page_id", 7).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals("page_home_1", recovered.defaultHomePageId)
+        assertEquals(7, prefs.getInt("default_home_page_id", -1))
+
+        repo.saveSettings(recovered.copy(defaultHomePageId = "page_home_2"))
+        assertEquals("page_home_2", repo.loadSettings().defaultHomePageId)
+    }
+
+    @Test fun malformedWallpaperPreferencesCannotAbortTileStyleSaveOrChangeWidgetRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "wallpaper_widget", "Saved widget", tileType = TileType.WIDGET,
+            appWidgetId = 130, widgetProvider = "example/.Provider", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("wallpaper_dim_alpha", "bad")
+            .putString("full_wallpaper_enabled", "true").commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(0.18f, recovered.wallpaperDimAlpha, 0f)
+        assertTrue(recovered.fullWallpaperEnabled)
+        assertEquals("bad", prefs.getString("wallpaper_dim_alpha", null))
+        assertEquals("true", prefs.getString("full_wallpaper_enabled", null))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(0.18f, prefs.getFloat("wallpaper_dim_alpha", -1f), 0f)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun nonFiniteWallpaperDimAlphaNeverReachesRenderingOrPersistence() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        assertTrue(prefs.edit().putFloat("wallpaper_dim_alpha", Float.NaN).commit())
+        assertEquals(0.18f, repo.loadSettings().wallpaperDimAlpha, 0f)
+
+        repo.saveSettings(repo.loadSettings().copy(wallpaperDimAlpha = Float.POSITIVE_INFINITY))
+        assertEquals(0.18f, prefs.getFloat("wallpaper_dim_alpha", -1f), 0f)
+        assertTrue(repo.loadSettings().wallpaperDimAlpha.isFinite())
+    }
+
+    @Test fun malformedBackupWallpaperAlphaCannotOverwriteHomeOrWidgetBindings() = runBlocking {
+        repo.ensureDefaultTiles()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "backup_widget", "Existing widget", tileType = TileType.WIDGET,
+            appWidgetId = 137, widgetProvider = "example/.Provider", gridX = 0, gridY = 16
+        )
+        db.tileDao().insertOrUpdate(widget)
+        val beforeTiles = db.tileDao().getAllTiles()
+        val beforePages = repo.loadPages()
+        val beforeSettings = repo.loadSettings()
+        val originalBackup = repo.exportBackupJson()
+
+        for (invalid in listOf<Any>("NaN", "Infinity", JSONObject().put("invalid", true))) {
+            val backup = JSONObject(originalBackup)
+            backup.getJSONObject("settings").put("wallpaperDimAlpha", invalid)
+            assertFalse(repo.restoreFromJson(backup.toString()))
+            assertEquals(beforeTiles, db.tileDao().getAllTiles())
+            assertEquals(beforePages, repo.loadPages())
+            assertEquals(beforeSettings, repo.loadSettings())
+            assertNull(prefs.getString("pending_restore_json", null))
+        }
+    }
+
+    @Test fun deletingHomePageMovesWidgetRowsWithStableIdsAndOrder() = runBlocking {
+        val pinned = TileEntity("pinned_app", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val widgetA = TileEntity("widget_a", "Widget A", tileType = TileType.WIDGET,
+            appWidgetId = 141, widgetProvider = "example/.ProviderA",
+            pageId = "page_home_2", orderIndex = 0, gridX = 0, gridY = 0)
+        val widgetB = TileEntity("widget_b", "Widget B", tileType = TileType.WIDGET,
+            appWidgetId = 142, widgetProvider = "example/.ProviderB",
+            pageId = "page_home_2", orderIndex = 1, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, widgetA, widgetB))
+
+        repo.reassignTilesFromDeletedPage("page_home_2", "page_home_1")
+
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(setOf(pinned.id, widgetA.id, widgetB.id), rows.map { it.id }.toSet())
+        assertTrue(rows.all { it.pageId == "page_home_1" })
+        val moved = rows.filter { it.id != pinned.id }.sortedBy { it.orderIndex }
+        assertEquals(listOf(1, 2), moved.map { it.orderIndex })
+        assertEquals(widgetA.appWidgetId, rows.single { it.id == widgetA.id }.appWidgetId)
+        assertEquals(widgetA.widgetProvider, rows.single { it.id == widgetA.id }.widgetProvider)
+        assertEquals(widgetB.appWidgetId, rows.single { it.id == widgetB.id }.appWidgetId)
+        assertEquals(widgetB.widgetProvider, rows.single { it.id == widgetB.id }.widgetProvider)
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+    }
+
+    @Test fun movingWidgetToPageAppendsAfterSparseOrderWithoutLosingBinding() = runBlocking {
+        val pinned = TileEntity("pinned", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val existing = TileEntity("existing", "Existing", pageId = "page_home_1",
+            orderIndex = 5, gridX = 2, gridY = 0)
+        val widget = TileEntity("moving_widget", "Moving widget", tileType = TileType.WIDGET,
+            appWidgetId = 161, widgetProvider = "example/.Provider",
+            pageId = "page_home_2", orderIndex = 0, gridX = 0, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, existing, widget))
+
+        repo.moveTileToPage(widget.id, "page_home_1")
+
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(pinned, rows.single { it.id == pinned.id })
+        assertEquals(existing, rows.single { it.id == existing.id })
+        val moved = rows.single { it.id == widget.id }
+        assertEquals("page_home_1", moved.pageId)
+        assertEquals(6, moved.orderIndex)
+        assertEquals(widget.appWidgetId, moved.appWidgetId)
+        assertEquals(widget.widgetProvider, moved.widgetProvider)
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+    }
+
+    @Test fun samePageReassignmentFailsFastWithoutChangingWidgetRows() = runBlocking {
+        val widget = TileEntity("same_page_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 151, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 0, gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+
+        try {
+            repo.reassignTilesFromDeletedPage("page_home_1", "page_home_1")
+            fail("Expected invalid same-page reassignment to fail")
+        } catch (_: IllegalArgumentException) {
+            // Invalid page pair is rejected, not silently rewritten.
+        }
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun failedSecondWidgetMoveRollsBackAllReassignments() = runBlocking {
+        val pinned = TileEntity("pinned_app", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val widgetA = TileEntity("widget_a", "Widget A", tileType = TileType.WIDGET,
+            appWidgetId = 152, widgetProvider = "example/.ProviderA",
+            pageId = "page_home_2", orderIndex = 0, gridX = 0, gridY = 0)
+        val widgetB = TileEntity("widget_b", "Widget B", tileType = TileType.WIDGET,
+            appWidgetId = 153, widgetProvider = "example/.ProviderB",
+            pageId = "page_home_2", orderIndex = 1, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, widgetA, widgetB))
+        val before = db.tileDao().getAllTiles()
+
+        db.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER reject_second_widget_move
+            BEFORE INSERT ON tiles
+            WHEN NEW.id = 'widget_b' AND NEW.pageId = 'page_home_1'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected second widget move failure');
+            END
+            """.trimIndent()
+        )
+
+        try {
+            repo.reassignTilesFromDeletedPage("page_home_2", "page_home_1")
+            fail("Expected injected database failure")
+        } catch (_: android.database.sqlite.SQLiteException) {
+            // Room must roll back the whole batch, not just the rejected row.
+        }
+        assertEquals(before, db.tileDao().getAllTiles())
+    }
+
+    @Test fun nativeWidgetPinAfterSparseOrderPreservesBindingsAndTileStyle() = runBlocking {
+        val pinned = TileEntity("pinned_app", "Pinned", pageId = "page_home_2",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val existing = TileEntity("existing_widget", "Existing", tileType = TileType.WIDGET,
+            appWidgetId = 187, widgetProvider = "example/.Existing",
+            pageId = "page_home_2", orderIndex = 5, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, existing))
+        val provider = WidgetProviderItem("example/.New", "example", "New", "New widget", "Example")
+        val created = repo.pinWidgetTile(provider, 188, "page_home_2")
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(pinned, rows.single { it.id == pinned.id })
+        assertEquals(existing, rows.single { it.id == existing.id })
+        assertEquals(6, created.orderIndex)
+        assertEquals(TileType.WIDGET, created.tileType)
+        assertEquals(188, created.appWidgetId)
+        assertEquals(provider.providerComponent, created.widgetProvider)
+        assertEquals(created, rows.single { it.id == created.id })
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(rows.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun failedNativeWidgetPinLeavesExistingWidgetBindingsUntouched() = runBlocking {
+        val existing = TileEntity("existing_widget", "Existing", tileType = TileType.WIDGET,
+            appWidgetId = 187, widgetProvider = "example/.Existing",
+            pageId = "page_home_2", orderIndex = 5, gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(existing)
+        val before = db.tileDao().getAllTiles()
+        db.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER reject_widget_pin
+            BEFORE INSERT ON tiles
+            WHEN NEW.appWidgetId = 188
+            BEGIN
+                SELECT RAISE(ABORT, 'injected widget pin failure');
+            END
+            """.trimIndent()
+        )
+        val provider = WidgetProviderItem("example/.New", "example", "New", "New widget", "Example")
+        try {
+            repo.pinWidgetTile(provider, 188, "page_home_2")
+            fail("Expected injected Room insert failure")
+        } catch (_: android.database.sqlite.SQLiteException) {
+            // Failure propagates; existing Room/widget bindings must remain intact.
+        }
+        assertEquals(before, db.tileDao().getAllTiles())
+    }
+
+    @Test fun genericTilePinAfterSparseOrderKeepsNativeWidgetBindings() = runBlocking {
+        val pinned = TileEntity("pinned_app", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val widget = TileEntity("native_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 197, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 5, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, widget))
+        val added = TileEntity("new_app", "New", pageId = "page_home_1",
+            gridX = -1, gridY = -1)
+
+        repo.pinTile(added)
+
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(pinned, rows.single { it.id == pinned.id })
+        assertEquals(widget, rows.single { it.id == widget.id })
+        assertEquals(6, rows.single { it.id == added.id }.orderIndex)
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(rows.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun failedGenericTilePinDoesNotChangeExistingWidgetBindings() = runBlocking {
+        val widget = TileEntity("native_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 197, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 5, gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        val before = db.tileDao().getAllTiles()
+        db.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER reject_generic_tile_pin
+            BEFORE INSERT ON tiles
+            WHEN NEW.id = 'new_app'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected generic Tile pin failure');
+            END
+            """.trimIndent()
+        )
+        try {
+            repo.pinTile(TileEntity("new_app", "New", pageId = "page_home_1",
+                gridX = -1, gridY = -1))
+            fail("Expected injected database failure")
+        } catch (_: android.database.sqlite.SQLiteException) {
+            // The caller receives the write failure; existing widget data stays intact.
+        }
+        assertEquals(before, db.tileDao().getAllTiles())
+    }
+
     @Test fun malformedRestoreDoesNotWritePagesSettingsOrTiles() = runBlocking {
         repo.ensureDefaultTiles()
         val before = db.tileDao().getAllTiles()
@@ -524,4 +947,149 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(original), db.tileDao().getAllTiles())
     }
 
+
+    @Test fun appPinAfterSparseOrderPreservesNativeWidgetAndTileStyle() = runBlocking {
+        val pinned = TileEntity("pinned", "Pinned", pageId = "page_home_1",
+            orderIndex = 0, gridX = 0, gridY = 0)
+        val widget = TileEntity("native_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 217, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 5, gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(pinned, widget))
+
+        repo.pinApp(AppItem(label = "New app", packageName = "example.new"), "page_home_1")
+
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(3, rows.size)
+        assertEquals(pinned, rows.single { it.id == pinned.id })
+        assertEquals(widget, rows.single { it.id == widget.id })
+        val added = rows.single { it.packageName == "example.new" }
+        assertEquals(6, added.orderIndex)
+        assertEquals("page_home_1", added.pageId)
+        assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
+
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(rows.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun failedAppPinPropagatesRoomErrorWithoutChangingWidgetBindings() = runBlocking {
+        val widget = TileEntity("native_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 218, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", orderIndex = 5, gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        val before = db.tileDao().getAllTiles()
+        db.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER reject_app_pin
+            BEFORE INSERT ON tiles
+            WHEN NEW.packageName = 'example.new'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected app pin failure');
+            END
+            """.trimIndent()
+        )
+        try {
+            repo.pinApp(AppItem(label = "New app", packageName = "example.new"), "page_home_1")
+            fail("Expected injected Room insert failure")
+        } catch (_: android.database.sqlite.SQLiteException) {
+            // The exception must reach the caller; no widget binding may be lost.
+        }
+        assertEquals(before, db.tileDao().getAllTiles())
+    }
+
+
+    @Test fun wrongTypeWallpaperSourceAndUriCannotAbortTileStyleSaveOrChangeWidgets() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "wallpaper_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 219, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putInt("wallpaper_source", 12)
+            .putBoolean("custom_wallpaper_uri", true).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(WallpaperSource.SYSTEM, recovered.wallpaperSource)
+        assertEquals("", recovered.customWallpaperUri)
+        assertEquals(12, prefs.getInt("wallpaper_source", -1))
+        assertTrue(prefs.getBoolean("custom_wallpaper_uri", false))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+
+    @Test fun wrongTypePowerPreferencesCannotAbortTileStyleSaveOrChangeWidgets() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity(
+            "power_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 220, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit().putString("battery_saver_threshold_pct", "30")
+            .putInt("auto_optimize_background_apps", 1).commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(25, recovered.batterySaverThresholdPct)
+        assertTrue(recovered.autoOptimizeBackgroundApps)
+        // A read must preserve the original legacy values and native widget binding.
+        assertEquals("30", prefs.getString("battery_saver_threshold_pct", null))
+        assertEquals(1, prefs.getInt("auto_optimize_background_apps", -1))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun mixedLegacyPreferenceTypesDoNotBlockHomeOrTileStyleSave() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val widget = TileEntity("legacy_widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 301, widgetProvider = "example/.Provider", gridX = 0, gridY = 0)
+        db.tileDao().insertOrUpdate(widget)
+        assertTrue(prefs.edit()
+            .putInt("all_apps_view_mode", 1)
+            .putBoolean("dynamic_accent_mode", false)
+            .putInt("accent_color", 123)
+            .putBoolean("quick_notes", true)
+            .putInt("custom_app_categories_json", 2)
+            .putBoolean("app_drawer_folders_json", false)
+            .putInt("app_drawer_custom_order_json", 3)
+            .putString("all_apps_grid_columns", "bad")
+            .putInt("all_apps_show_search_bar", 1)
+            .commit())
+
+        val recovered = repo.loadSettings()
+        assertEquals(AllAppsViewMode.METRO_LIST, recovered.allAppsViewMode)
+        assertEquals(4, recovered.allAppsGridColumns)
+        assertTrue(recovered.allAppsShowSearchBar)
+        assertEquals(1, prefs.getInt("all_apps_view_mode", -1))
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+        repo.saveSettingsWithReflow(recovered.copy(wp10TileStyle = Wp10TileStyle.CLASSIC_METRO))
+        assertEquals(Wp10TileStyle.CLASSIC_METRO, repo.loadSettings().wp10TileStyle)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
+    @Test fun malformedInitializationFlagsDoNotReseedDeliberatelyEmptyHome() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        assertTrue(prefs.edit()
+            .putString("home_initialized", "legacy")
+            .putInt("smart_folder_default_seeded_v1", 1)
+            .putBoolean("pending_restore_json", true)
+            .commit())
+
+        repo.ensureDefaultTiles()
+
+        assertTrue(db.tileDao().getAllTiles().isEmpty())
+        assertEquals("legacy", prefs.getString("home_initialized", null))
+        assertTrue(prefs.getBoolean("pending_restore_json", false))
+    }
 }
