@@ -81,20 +81,7 @@ fun CleanSettingsScreen(
     BackHandler { back() }
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
     fun chooseHome() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val role = ctx.getSystemService(RoleManager::class.java)
-                if (role != null && role.isRoleAvailable(RoleManager.ROLE_HOME) && !role.isRoleHeld(RoleManager.ROLE_HOME)) {
-                    roleLauncher.launch(role.createRequestRoleIntent(RoleManager.ROLE_HOME))
-                } else {
-                    ctx.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
-                }
-            } else {
-                ctx.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
-            }
-        } catch (_: Exception) {
-            Toast.makeText(ctx, "Không mở được cài đặt mặc định", Toast.LENGTH_SHORT).show()
-        }
+        launchHomeChooser(ctx) { intent -> roleLauncher.launch(intent) }
     }
     fun runSafe(action: suspend () -> Unit) {
         if (busy) return
@@ -287,6 +274,30 @@ fun CleanSettingsScreen(
             }) { Text("Khôi phục") } },
             dismissButton = { TextButton(onClick = { cloudConfirmation = null }) { Text("Hủy") } }
         )
+    }
+}
+
+
+/**
+ * Use the native HOME-role request on Android 10+, and the system HOME settings
+ * on Android 7–9. Kept outside Compose so API-level routing can be regression-tested.
+ */
+internal fun launchHomeChooser(context: Context, launchRoleRequest: (Intent) -> Unit) {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val role = context.getSystemService(RoleManager::class.java)
+            if (role != null && role.isRoleAvailable(RoleManager.ROLE_HOME) &&
+                !role.isRoleHeld(RoleManager.ROLE_HOME)
+            ) {
+                launchRoleRequest(role.createRequestRoleIntent(RoleManager.ROLE_HOME))
+            } else {
+                context.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+            }
+        } else {
+            context.startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+        }
+    } catch (_: Exception) {
+        Toast.makeText(context, "Không mở được cài đặt mặc định", Toast.LENGTH_SHORT).show()
     }
 }
 
