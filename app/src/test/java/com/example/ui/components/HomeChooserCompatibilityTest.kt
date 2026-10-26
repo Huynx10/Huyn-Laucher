@@ -1,9 +1,9 @@
 package com.example.ui.components
 
-import android.app.Application
+import android.app.Activity
 import android.content.Intent
 import android.provider.Settings
-import androidx.test.core.app.ApplicationProvider
+import org.robolectric.Robolectric
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -19,12 +19,12 @@ class HomeChooserCompatibilityTest {
     @Test
     @Config(sdk = [24, 26, 28])
     fun androidSevenToNineOpensSystemHomeSettingsWithoutRequestingRole() {
-        val application = ApplicationProvider.getApplicationContext<Application>()
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val roleRequests = mutableListOf<Intent>()
 
-        launchHomeChooser(application) { roleRequests.add(it) }
+        launchHomeChooser(activity) { roleRequests.add(it) }
 
-        val shadow = shadowOf(application)
+        val shadow = shadowOf(activity)
         val launched = shadow.nextStartedActivity
         assertNotNull("HOME settings should be opened on pre-Q Android", launched)
         assertEquals(Settings.ACTION_HOME_SETTINGS, launched.action)
