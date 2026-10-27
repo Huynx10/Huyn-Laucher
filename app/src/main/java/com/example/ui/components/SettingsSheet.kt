@@ -890,8 +890,11 @@ fun SettingsSheet(
                                                     }
                                                     wp10TileStyle = style
                                                     tileOpacity = nextOpacity
-                                                    // Commit both values together, independent of Compose recomposition.
-                                                    applyChanges(styleOverride = style, opacityOverride = nextOpacity)
+                                                    // Appearance changes must not reapply stale values from unrelated tabs.
+                                                    onSaveSettings(settings.copy(
+                                                        wp10TileStyle = style,
+                                                        tileOpacity = nextOpacity
+                                                    ))
                                                 }
                                                 .padding(vertical = 8.dp)
                                                 .testTag("wp10_tile_style_${style.name.lowercase()}"),
@@ -924,7 +927,10 @@ fun SettingsSheet(
                                         }
                                         tileOpacity = nextOpacity
                                         wp10TileStyle = nextStyle
-                                        applyChanges(styleOverride = nextStyle, opacityOverride = nextOpacity)
+                                        onSaveSettings(settings.copy(
+                                            wp10TileStyle = nextStyle,
+                                            tileOpacity = nextOpacity
+                                        ))
                                     }
                                 )
 
