@@ -896,14 +896,14 @@ fun SettingsSheet(
                                                         tileOpacity = nextOpacity
                                                     ))
                                                 }
-                                                .padding(vertical = 8.dp)
+                                                .height(48.dp)
                                                 .testTag("wp10_tile_style_${style.name.lowercase()}"),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = shortTitle,
                                                 color = Color.White,
-                                                fontSize = 11.sp,
+                                                fontSize = 12.sp,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                             )
                                         }
