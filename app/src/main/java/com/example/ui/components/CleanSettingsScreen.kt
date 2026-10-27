@@ -34,7 +34,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AllAppsViewMode
 import com.example.data.model.LauncherSettings
+import com.example.data.model.Wp10TileStyle
 import com.example.data.remote.CloudBackup
+import com.example.ui.theme.LumiaPalette
 import com.example.ui.viewmodel.CloudAuthState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -46,7 +48,6 @@ private enum class CleanSection(val label: String) {
 private val bg = Color(0xFF131316)
 private val primary = Color(0xFFF7F7F8)
 private val secondary = Color(0xFFB4B4BC)
-private val accent = Color(0xFF90B6FF)
 
 @Composable
 fun CleanSettingsScreen(
@@ -76,6 +77,7 @@ fun CleanSettingsScreen(
     var restoreData by remember { mutableStateOf("") }
     var cloudConfirmation by remember { mutableStateOf<CloudBackup?>(null) }
     var opacity by remember(settings.tileOpacity) { mutableFloatStateOf(settings.tileOpacity) }
+    val accent = LumiaPalette.resolveEffectiveAccent(settings).color
 
     fun back() { if (!busy) { if (section == null) onDismiss() else section = null } }
     BackHandler { back() }
@@ -95,6 +97,7 @@ fun CleanSettingsScreen(
         }
     }
 
+    MaterialTheme(colorScheme = darkColorScheme(primary = accent, background = bg, surface = bg)) {
     Box(Modifier.fillMaxSize().background(bg).statusBarsPadding().navigationBarsPadding()
         .testTag("clean_settings_screen")) {
         Column {
@@ -149,7 +152,17 @@ fun CleanSettingsScreen(
                             onSaveSettings(settings.copy(wp10RevealBorder = it))
                         } }
                         item { SettingSlider("Độ đậm nền ô", opacity, 0f..1f,
-                            { opacity = it }, { onSaveSettings(settings.copy(tileOpacity = opacity)) }) }
+                            { opacity = it }, {
+                                val style = when {
+                                    opacity <= 0.03f -> Wp10TileStyle.CRYSTAL_CLEAR
+                                    opacity >= 0.98f -> Wp10TileStyle.CLASSIC_METRO
+                                    settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR ||
+                                        settings.wp10TileStyle == Wp10TileStyle.CLASSIC_METRO ->
+                                        Wp10TileStyle.TINTED_TRANSLUCENT
+                                    else -> settings.wp10TileStyle
+                                }
+                                onSaveSettings(settings.copy(tileOpacity = opacity, wp10TileStyle = style))
+                            }) }
                     }
                     CleanSection.APPS -> {
                         item { Heading("Kiểu hiển thị") }
@@ -274,6 +287,7 @@ fun CleanSettingsScreen(
             }) { Text("Khôi phục") } },
             dismissButton = { TextButton(onClick = { cloudConfirmation = null }) { Text("Hủy") } }
         )
+    }
     }
 }
 
