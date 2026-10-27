@@ -55,7 +55,7 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
           test -n "$AAPT"
           "$AAPT" dump badging "$APK" > /tmp/lumia-trial-badging.txt
-          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.trial'" /tmp/lumia-trial-badging.txt
+          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.trial2'" /tmp/lumia-trial-badging.txt
           sha256sum "$APK"
 
       - name: Upload Debug APK Artifact

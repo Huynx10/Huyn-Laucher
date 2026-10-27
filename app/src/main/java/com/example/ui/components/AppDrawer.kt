@@ -1,9 +1,9 @@
 package com.example.ui.components
 
-import android.app.SearchManager
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -33,7 +33,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -231,27 +233,11 @@ fun AppDrawer(
         }
     }
 
-    fun launchAndroidDefaultSearch(query: String) {
+    fun launchSystemSearch(query: String) {
         try {
-            val intent = if (query.isNotBlank()) {
-                Intent(Intent.ACTION_WEB_SEARCH).apply {
-                    putExtra(SearchManager.QUERY, query)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            } else {
-                Intent("android.search.action.GLOBAL_SEARCH").apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            }
-            context.startActivity(intent)
+            context.startActivity(systemSearchIntent(query))
         } catch (_: Exception) {
-            try {
-                val fallback = Intent(Intent.ACTION_SEARCH).apply {
-                    putExtra(SearchManager.QUERY, query)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(fallback)
-            } catch (_: Exception) {}
+            Toast.makeText(context, "Không mở được tìm kiếm hệ thống trên máy này", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -532,6 +518,8 @@ fun AppDrawer(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
                 .padding(horizontal = 14.dp)
         ) {
             Spacer(modifier = Modifier.height(6.dp))
@@ -548,9 +536,8 @@ fun AppDrawer(
                         searchQuery = ""
                         keyboardController?.hide()
                     },
-                    onTriggerAndroidSystemSearch = {
-                        launchAndroidDefaultSearch(searchQuery)
-                    }
+                    onSubmitLocalSearch = { keyboardController?.hide() },
+                    onTriggerAndroidSystemSearch = { launchSystemSearch(searchQuery) }
                 )
             } else {
                 CleanAppDrawerHeaderBar(
@@ -630,7 +617,7 @@ fun AppDrawer(
                         searchQuery = searchQuery,
                         isAndroidSearchMode = inSearch,
                         accentColor = accent.color,
-                        onSearchAndroidSystem = { launchAndroidDefaultSearch(searchQuery) },
+                        onSearchAndroidSystem = { launchSystemSearch(searchQuery) },
                         onResetFilter = {
                             if (searchQuery.isNotBlank()) {
                                 searchQuery = ""
@@ -642,7 +629,7 @@ fun AppDrawer(
                 } else if (viewMode == AllAppsViewMode.METRO_LIST) {
                     LazyColumn(
                         state = listState,
-                        contentPadding = PaddingValues(bottom = 88.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
@@ -651,7 +638,7 @@ fun AppDrawer(
                                 AndroidDefaultSearchActionCard(
                                     query = searchQuery,
                                     accentColor = accent.color,
-                                    onClick = { launchAndroidDefaultSearch(searchQuery) }
+                                    onClick = { launchSystemSearch(searchQuery) }
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
@@ -705,7 +692,7 @@ fun AppDrawer(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(120.dp)
+                                    .height(24.dp)
                                     .pointerInput(isEditMode) {
                                         detectTapGestures(
                                             onLongPress = {
@@ -722,7 +709,7 @@ fun AppDrawer(
                     val cols = settings.allAppsGridColumns.coerceIn(3, 6)
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(cols),
-                        contentPadding = PaddingValues(top = 6.dp, bottom = 92.dp),
+                        contentPadding = PaddingValues(top = 6.dp, bottom = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         modifier = Modifier
@@ -737,7 +724,7 @@ fun AppDrawer(
                                 AndroidDefaultSearchActionCard(
                                     query = searchQuery,
                                     accentColor = accent.color,
-                                    onClick = { launchAndroidDefaultSearch(searchQuery) }
+                                    onClick = { launchSystemSearch(searchQuery) }
                                 )
                             }
                         }
@@ -1457,7 +1444,7 @@ private fun CleanAppDrawerHeaderBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Icon(Icons.Default.Settings, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
-                Text("Action Center", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text("Thao tác nhanh", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
 
             Spacer(modifier = Modifier.weight(1f))
@@ -1549,6 +1536,7 @@ private fun AndroidDefaultSearchBar(
     accentColor: Color,
     focusRequester: FocusRequester,
     onCloseSearch: () -> Unit,
+    onSubmitLocalSearch: () -> Unit,
     onTriggerAndroidSystemSearch: () -> Unit
 ) {
     Row(
@@ -1600,9 +1588,9 @@ private fun AndroidDefaultSearchBar(
                     fontWeight = FontWeight.Medium
                 ),
                 cursorBrush = SolidColor(accentColor),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(
-                    onSearch = { onTriggerAndroidSystemSearch() }
+                    onDone = { onSubmitLocalSearch() }
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1625,7 +1613,7 @@ private fun AndroidDefaultSearchBar(
             }
         }
 
-        // Launch Android System Default Search directly
+        // Opening device-wide search is explicit; typing an app name stays local.
         IconButton(
             onClick = onTriggerAndroidSystemSearch,
             modifier = Modifier
@@ -1634,7 +1622,7 @@ private fun AndroidDefaultSearchBar(
         ) {
             Icon(
                 imageVector = Icons.Default.OpenInNew,
-                contentDescription = "Mở tìm kiếm mặc định của Android",
+                contentDescription = "Tìm trên thiết bị bằng ứng dụng hệ thống",
                 tint = accentColor,
                 modifier = Modifier.size(17.dp)
             )
@@ -1671,7 +1659,7 @@ private fun AndroidDefaultSearchActionCard(
                 modifier = Modifier.size(18.dp)
             )
             Text(
-                text = "Tìm \"$query\" bằng Tìm kiếm mặc định Android",
+                text = "Tìm \"$query\" trên thiết bị",
                 color = Color.White,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,

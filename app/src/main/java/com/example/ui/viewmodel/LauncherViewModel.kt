@@ -872,6 +872,13 @@ class LauncherViewModel(
         pendingSettings.trySend(candidate)
     }
 
+    fun toggleHomeLayoutLock() {
+        val candidate = _settings.updateAndGet { current ->
+            current.copy(lockHomeLayout = !current.lockHomeLayout)
+        }
+        pendingSettings.trySend(candidate)
+    }
+
     fun updateSettings(newSettings: LauncherSettings) {
         val prevCustom = _settings.value.customAppCategories
         val syncedSettings = if (newSettings.autoWallpaperAccentEnabled) {

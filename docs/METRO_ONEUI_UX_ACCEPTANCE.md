@@ -4,8 +4,9 @@ Target reference device: **Samsung Galaxy S24 Ultra**, using the Android/One UI 
 
 ## Visual structure — App Drawer
 - List mode defaults to Windows Phone 10-inspired **A–Z logo + app name only**. No launcher-painted square behind a real app icon.
-- Header order: **Action Center** entry, A–Z shortcut when applicable, list/grid toggle, Search. Category filter chips occupy the next row, not the top controls row.
-- Search mode takes focus and displays a clear way back; results update. Grid/list switching must not discard folders, pin state or custom order.
+- Header order: **Thao tác nhanh** entry, A–Z shortcut when applicable, list/grid toggle, Search. Category filter chips occupy the next row, not the top controls row.
+- Search mode takes focus and displays a clear way back; results update. Enter/Done must keep app queries local; only the explicitly labeled device-search action may hand a query to Android's public global search provider. Do not promise Samsung Finder unless that provider is verified on the device. Grid/list switching must not discard folders, pin state or custom order.
+- All Apps draws its background edge to edge; app rows remain outside status, navigation and keyboard insets. No fixed oversized footer obscures the last app.
 - Large font and display scaling on S24 Ultra: ensure header does not wrap or clip in portrait with 4/6 tile columns. Accessibility labels and 44+ dp touch targets must be verified; target 48dp where practicable.
 
 ## Home behaviour
@@ -22,7 +23,7 @@ Target reference device: **Samsung Galaxy S24 Ultra**, using the Android/One UI 
 - Existing chosen custom/gradient wallpaper is preserved when migrating user settings.
 - Automatic accent attempts to use Android 12+ system accent when wallpaper source is SYSTEM.
 - On new installs don't seed synthetic weather/news/notes content; add real AppWidget providers using the Android widget picker. Old user tiles remain untouched to preserve data.
-- Glance displays clock and actual battery metrics, no hard-coded notification counts; Action Center never fakes Wi-Fi/Bluetooth connection or claims to close other apps.
+- Glance displays clock and actual battery metrics, no hard-coded notification counts; Thao tác nhanh contains only launcher shortcuts. Wi-Fi and Bluetooth stay in Android's system quick settings.
 
 ## UX writing — 3-pass code review
 1. **Meaning:** Labels match actual actions. Never say “Đóng app ngầm” for clearing launcher cache; use “Xóa bộ nhớ đệm”.

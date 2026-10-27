@@ -571,8 +571,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             modifier = Modifier
                 .fillMaxSize()
                 .then(if (isActionCenterOpen) Modifier.blur(18.dp) else Modifier)
-                .statusBarsPadding()
-                .navigationBarsPadding()
                 .testTag("launcher_horizontal_pager")
         ) { pageIndex ->
             val page = pages.getOrNull(pageIndex) ?: return@HorizontalPager
@@ -582,6 +580,11 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(
+                        if (page.pageType == PageType.HOME) {
+                            Modifier.statusBarsPadding().navigationBarsPadding()
+                        } else Modifier
+                    )
                     .padding(
                         start = pagerHorizontalPadding,
                         end = pagerHorizontalPadding,
@@ -919,7 +922,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         }
 
         // 3. Compact Floating Page Indicator (Floats at BottomCenter without stealing display height; supports drag-and-drop page reordering in Edit Mode)
-        OneUiPageDotsIndicator(
+        if (currentPage?.pageType == PageType.HOME || isEditMode) OneUiPageDotsIndicator(
             pages = pages,
             currentPageIndex = pagerState.currentPage,
             defaultHomePageId = settings.defaultHomePageId,
@@ -1071,12 +1074,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         if (isActionCenterOpen) {
             ActionCenterOverlay(
                 settings = settings,
-                telemetry = telemetry,
-                customWallpaperBitmap = customWallpaperBitmap,
-                onUpdateSettings = { viewModel.updateSettings(it) },
-                onUpdateTileAppearance = { style, opacity -> viewModel.updateTileAppearance(style, opacity) },
                 onCycleTileAppearance = { viewModel.cycleTileAppearance(acrylicOpacity = 0.38f, tintedOpacity = 0.42f) },
-                onOptimizeMemory = { viewModel.optimizeMemory() },
+                onToggleLayoutLock = { viewModel.toggleHomeLayoutLock() },
                 onOpenGlance = { viewModel.openGlanceScreen() },
                 onOpenFullSettings = { viewModel.openSettings() },
                 onDismiss = { isActionCenterOpen = false }
