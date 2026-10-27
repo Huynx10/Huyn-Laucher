@@ -48,8 +48,19 @@ jobs:
       - name: Assemble Debug APK
         run: gradle :app:assembleDebug
 
+      - name: Verify isolated trial package
+        run: |
+          APK="$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f -print -quit)"
+          test -n "$APK" && test -f "$APK"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
+          test -n "$AAPT"
+          "$AAPT" dump badging "$APK" > /tmp/lumia-trial-badging.txt
+          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.trial'" /tmp/lumia-trial-badging.txt
+          sha256sum "$APK"
+
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lumia-launcher-debug-apk
+          name: lumia-launcher-s24-trial-apk
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14

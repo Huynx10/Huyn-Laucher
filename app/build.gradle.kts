@@ -56,6 +56,10 @@ android {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
+      // Isolated test package: the prior debug APK uses an unrelated temporary key.
+      // Keep this only on the merged trial branch so installation cannot replace user data.
+      applicationIdSuffix = ".trial"
+      versionNameSuffix = "-s24-trial"
     }
   }
   compileOptions {
