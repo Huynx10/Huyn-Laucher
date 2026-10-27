@@ -13,14 +13,20 @@ test=app/src/test/java/com/example/ui/viewmodel/TileAppearanceStateTest.kt
 grep -Fq 'onUpdateTileAppearance(style, nextOpacity)' "$sheet"
 grep -Fq 'onUpdateTileAppearance(nextStyle, nextOpacity)' "$sheet"
 grep -Fq 'onUpdateTileAppearance(style, opacity)' "$clean"
-grep -Fq 'onUpdateTileAppearance(updatedStyle, newOpacity)' "$action"
-grep -Fq 'onCycleTileAppearance()' "$action"
+grep -Fq 'onClick = onCycleTileAppearance' "$action"
+if grep -Fq 'onUpdateSettings(settings.copy(' "$action"; then
+  echo 'Quick Actions must not save appearance from a stale settings snapshot' >&2
+  exit 1
+fi
 grep -Fq 'viewModel.cycleTileAppearance(' "$home"
 grep -Fq 'viewModel.updateTileAppearance(style, opacity)' "$home"
+grep -Fq 'viewModel.updateSettingsPreservingAppearance(it)' "$home"
 
 # ViewModel applies only style+opacity to the latest StateFlow value atomically.
 grep -Fq 'updateAndGet { current ->' "$vm"
 grep -Fq 'current.copy(wp10TileStyle = style, tileOpacity = opacity.coerceIn(0f, 1f))' "$vm"
 grep -Fq 'pendingSettings.trySend(candidate)' "$vm"
+grep -Fq 'newSettings.withAppearanceFrom(latest)' "$vm"
 grep -Fq 'unrelatedSettingChangeThenTransparentKeepsLatestLayoutAndWidgetPreferences' "$test"
+grep -Fq 'advancedSettingAfterTransparentPreservesLatestAppearance' "$test"
 echo "Tile appearance latest-state regression guards passed"

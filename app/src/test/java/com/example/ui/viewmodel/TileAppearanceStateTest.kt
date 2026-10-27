@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import com.example.data.model.LauncherSettings
 import com.example.data.model.Wp10TileStyle
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.updateAndGet
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -42,5 +43,20 @@ class TileAppearanceStateTest {
         assertEquals(Wp10TileStyle.FLUENT_ACRYLIC, state.value.wp10TileStyle)
         assertEquals(0f, state.value.tileOpacity)
         assertEquals("page_home_3", state.value.defaultHomePageId)
+    }
+
+    @Test
+    fun advancedSettingAfterTransparentPreservesLatestAppearance() {
+        val state = MutableStateFlow(LauncherSettings())
+        val staleAdvancedSnapshot = state.value
+
+        state.updateTileAppearanceFromLatest { Wp10TileStyle.CRYSTAL_CLEAR to 0f }
+        state.updateAndGet { latest ->
+            staleAdvancedSnapshot.copy(isDarkTheme = false).withAppearanceFrom(latest)
+        }
+
+        assertEquals(Wp10TileStyle.CRYSTAL_CLEAR, state.value.wp10TileStyle)
+        assertEquals(0f, state.value.tileOpacity)
+        assertEquals(false, state.value.isDarkTheme)
     }
 }

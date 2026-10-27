@@ -1183,7 +1183,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     }
                 },
                 onDeleteCloudBackup = { backupId -> viewModel.deleteCloudBackup(backupId) },
-                onSaveSettings = { viewModel.updateSettings(it) },
+                onSaveSettings = { viewModel.updateSettingsPreservingAppearance(it) },
                 onUpdateTileAppearance = { style, opacity -> viewModel.updateTileAppearance(style, opacity) },
                 onPickCustomWallpaper = { uri ->
                     viewModel.setCustomWallpaper(uri)
@@ -1195,7 +1195,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 },
                 onExportBackup = { viewModel.exportBackup() },
                 onRestoreBackup = { viewModel.restoreBackup(it) },
-                onResetDefaults = { viewModel.resetDefaults() },
                 onOptimizeMemory = { viewModel.optimizeMemory() },
                 onRefreshTelemetry = { viewModel.refreshTelemetry() },
                 onDismiss = { advancedSettingsOpen = false }

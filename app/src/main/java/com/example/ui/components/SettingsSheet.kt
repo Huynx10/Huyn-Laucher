@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -65,6 +66,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -73,6 +75,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
@@ -92,6 +95,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -151,7 +156,6 @@ fun SettingsSheet(
     onOpenPageManager: () -> Unit = {},
     onExportBackup: suspend () -> String,
     onRestoreBackup: suspend (String) -> Boolean,
-    onResetDefaults: () -> Unit,
     onOptimizeMemory: () -> SystemTelemetry = { telemetry },
     onRefreshTelemetry: () -> Unit = {},
     onDismiss: () -> Unit
@@ -270,10 +274,7 @@ fun SettingsSheet(
         }
     }
 
-    fun applyChanges(
-        styleOverride: Wp10TileStyle = wp10TileStyle,
-        opacityOverride: Float = tileOpacity
-    ) {
+    fun applyChanges() {
         val resolvedHex = if (autoWallpaperAccent) {
             DynamicAccentEngine.resolveAutoAccent(wallpaperIndex, dynamicAccentMode, dynamicSwatchIndex).hex
         } else {
@@ -286,8 +287,6 @@ fun SettingsSheet(
                 dynamicAccentMode = dynamicAccentMode,
                 dynamicSwatchIndex = dynamicSwatchIndex,
                 isDarkTheme = isDarkTheme,
-                tileOpacity = opacityOverride.coerceIn(0f, 1f),
-                wp10TileStyle = styleOverride,
                 wp10RevealBorder = wp10RevealBorder,
                 showMoreTiles = showMoreTiles,
                 tileCornerRadiusDp = tileCornerRadius,
@@ -318,6 +317,13 @@ fun SettingsSheet(
         )
     }
 
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = accent.color,
+            background = Color(0xFF131316),
+            surface = Color(0xFF131316)
+        )
+    ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -740,11 +746,15 @@ fun SettingsSheet(
                     SettingsCategoryTab.TILES_LAYOUT -> {
                         item {
                             MinimalGroupCard(title = "GIAO DIỆN Ô") {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Wp10TileStyle.entries.forEach { style ->
+                                    Wp10TileStyle.entries.chunked(2).forEach { rowStyles ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                    rowStyles.forEach { style ->
                                         val isSelected = wp10TileStyle == style
                                         val shortTitle = when (style) {
                                             Wp10TileStyle.CRYSTAL_CLEAR -> "Trong suốt"
@@ -760,7 +770,7 @@ fun SettingsSheet(
                                                     if (isSelected) accent.color
                                                     else Color.White.copy(alpha = 0.07f)
                                                 )
-                                                .clickable {
+                                                .clickable(role = androidx.compose.ui.semantics.Role.RadioButton) {
                                                     val nextOpacity = when (style) {
                                                         Wp10TileStyle.CRYSTAL_CLEAR -> 0f
                                                         Wp10TileStyle.CLASSIC_METRO -> 1f
@@ -772,17 +782,23 @@ fun SettingsSheet(
                                                     // Merge appearance with the latest ViewModel settings.
                                                     onUpdateTileAppearance(style, nextOpacity)
                                                 }
-                                                .height(48.dp)
+                                                .heightIn(min = 48.dp)
+                                                .semantics { selected = isSelected }
                                                 .testTag("wp10_tile_style_${style.name.lowercase()}"),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = shortTitle,
                                                 color = Color.White,
-                                                fontSize = 12.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                fontSize = 13.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                maxLines = 2,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.padding(horizontal = 6.dp)
                                             )
                                         }
+                                    }
+                                    }
                                     }
                                 }
 
@@ -1490,16 +1506,6 @@ fun SettingsSheet(
                                             ) {
                                                 Text("Khôi phục", fontSize = 11.sp)
                                             }
-                                            OutlinedButton(
-                                                onClick = {
-                                                    onResetDefaults()
-                                                    Toast.makeText(context, "Đã đặt lại bố cục", Toast.LENGTH_SHORT).show()
-                                                    onDismiss()
-                                                },
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Text("Đặt lại bố cục", color = Color(0xFFFF8A80), fontSize = 11.sp)
-                                            }
                                         }
                                     }
                                 }
@@ -1511,6 +1517,7 @@ fun SettingsSheet(
             }
         }
     }
+}
 }
 
 }

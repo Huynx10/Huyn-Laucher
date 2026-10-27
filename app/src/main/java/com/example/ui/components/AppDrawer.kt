@@ -1436,15 +1436,14 @@ private fun CleanAppDrawerHeaderBar(
         ) {
             Row(
                 modifier = Modifier
+                    .size(44.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .clickable { onOpenActionCenter() }
-                    .padding(horizontal = 8.dp, vertical = 10.dp)
                     .testTag("app_drawer_action_center"),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Default.Settings, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
-                Text("Thao tác nhanh", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Icon(Icons.Default.Settings, contentDescription = "Mở thao tác nhanh", tint = Color.White, modifier = Modifier.size(22.dp))
             }
 
             Spacer(modifier = Modifier.weight(1f))

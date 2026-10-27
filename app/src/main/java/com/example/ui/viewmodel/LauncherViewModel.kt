@@ -83,6 +83,9 @@ internal fun MutableStateFlow<LauncherSettings>.updateTileAppearanceFromLatest(
     current.copy(wp10TileStyle = style, tileOpacity = opacity.coerceIn(0f, 1f))
 }
 
+internal fun LauncherSettings.withAppearanceFrom(latest: LauncherSettings): LauncherSettings =
+    copy(wp10TileStyle = latest.wp10TileStyle, tileOpacity = latest.tileOpacity)
+
 class LauncherViewModel(
     private val repository: LauncherRepository,
     private val cloudSyncRepository: CloudSyncRepository?,
@@ -881,7 +884,22 @@ class LauncherViewModel(
 
     fun updateSettings(newSettings: LauncherSettings) {
         val prevCustom = _settings.value.customAppCategories
-        val syncedSettings = if (newSettings.autoWallpaperAccentEnabled) {
+        val syncedSettings = withResolvedAutoAccent(newSettings)
+        _settings.value = syncedSettings
+        publishSettingsChange(prevCustom, syncedSettings)
+    }
+
+    /** Advanced controls do not own appearance; keep a newer Quick Action/style update intact. */
+    fun updateSettingsPreservingAppearance(newSettings: LauncherSettings) {
+        val prevCustom = _settings.value.customAppCategories
+        val syncedSettings = _settings.updateAndGet { latest ->
+            withResolvedAutoAccent(newSettings.withAppearanceFrom(latest))
+        }
+        publishSettingsChange(prevCustom, syncedSettings)
+    }
+
+    private fun withResolvedAutoAccent(newSettings: LauncherSettings): LauncherSettings =
+        if (newSettings.autoWallpaperAccentEnabled) {
             val autoHex = com.example.ui.theme.DynamicAccentEngine.resolveAutoAccent(
                 wallpaperIndex = newSettings.wallpaperGradientIndex,
                 mode = newSettings.dynamicAccentMode,
@@ -891,7 +909,8 @@ class LauncherViewModel(
         } else {
             newSettings
         }
-        _settings.value = syncedSettings
+
+    private fun publishSettingsChange(prevCustom: Map<String, String>, syncedSettings: LauncherSettings) {
         if (prevCustom != syncedSettings.customAppCategories) {
             _apps.value = _apps.value.map { app ->
                 val overrideCat = syncedSettings.customAppCategories[app.packageName]
