@@ -23,6 +23,7 @@ import com.example.data.model.SystemTelemetry
 import com.example.data.model.TileEntity
 import com.example.data.model.TileSize
 import com.example.data.model.WidgetProviderItem
+import com.example.data.model.Wp10TileStyle
 import com.example.data.remote.CloudBackup
 import com.example.data.remote.UserProfile
 import com.example.data.repository.CloudSyncRepository
@@ -48,6 +49,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -71,6 +73,15 @@ data class SmartFolderOpenRequest(
     val pivotFractionX: Float = 0.5f,
     val pivotFractionY: Float = 0.5f
 )
+
+// Only the two appearance fields are replaced; all unrelated settings come from the
+// current StateFlow value, not from a potentially stale Compose settings snapshot.
+internal fun MutableStateFlow<LauncherSettings>.updateTileAppearanceFromLatest(
+    resolve: (LauncherSettings) -> Pair<Wp10TileStyle, Float>
+): LauncherSettings = updateAndGet { current ->
+    val (style, opacity) = resolve(current)
+    current.copy(wp10TileStyle = style, tileOpacity = opacity.coerceIn(0f, 1f))
+}
 
 class LauncherViewModel(
     private val repository: LauncherRepository,
@@ -840,6 +851,25 @@ class LauncherViewModel(
             repository.clearCustomWallpaper()
             updateSettings(_settings.value.copy(customWallpaperUri = "", wallpaperSource = com.example.data.model.WallpaperSource.SYSTEM))
         }
+    }
+
+    fun updateTileAppearance(style: Wp10TileStyle, opacity: Float) {
+        val candidate = _settings.updateTileAppearanceFromLatest { style to opacity }
+        pendingSettings.trySend(candidate)
+    }
+
+    fun cycleTileAppearance(acrylicOpacity: Float, tintedOpacity: Float) {
+        val candidate = _settings.updateTileAppearanceFromLatest { current ->
+            val nextStyle = current.wp10TileStyle.next()
+            val nextOpacity = when (nextStyle) {
+                Wp10TileStyle.CRYSTAL_CLEAR -> 0f
+                Wp10TileStyle.CLASSIC_METRO -> 1f
+                Wp10TileStyle.FLUENT_ACRYLIC -> acrylicOpacity
+                Wp10TileStyle.TINTED_TRANSLUCENT -> tintedOpacity
+            }
+            nextStyle to nextOpacity
+        }
+        pendingSettings.trySend(candidate)
     }
 
     fun updateSettings(newSettings: LauncherSettings) {

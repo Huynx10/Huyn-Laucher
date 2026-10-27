@@ -153,6 +153,7 @@ fun SettingsSheet(
     onRestoreCloudBackup: (CloudBackup) -> Unit = {},
     onDeleteCloudBackup: (String) -> Unit = {},
     onSaveSettings: (LauncherSettings) -> Unit,
+    onUpdateTileAppearance: (Wp10TileStyle, Float) -> Unit,
     onPickCustomWallpaper: (Uri) -> Unit = {},
     onClearCustomWallpaper: () -> Unit = {},
     onOpenPageManager: () -> Unit = {},
@@ -890,11 +891,8 @@ fun SettingsSheet(
                                                     }
                                                     wp10TileStyle = style
                                                     tileOpacity = nextOpacity
-                                                    // Appearance changes must not reapply stale values from unrelated tabs.
-                                                    onSaveSettings(settings.copy(
-                                                        wp10TileStyle = style,
-                                                        tileOpacity = nextOpacity
-                                                    ))
+                                                    // Merge appearance with the latest ViewModel settings.
+                                                    onUpdateTileAppearance(style, nextOpacity)
                                                 }
                                                 .height(48.dp)
                                                 .testTag("wp10_tile_style_${style.name.lowercase()}"),
@@ -927,10 +925,7 @@ fun SettingsSheet(
                                         }
                                         tileOpacity = nextOpacity
                                         wp10TileStyle = nextStyle
-                                        onSaveSettings(settings.copy(
-                                            wp10TileStyle = nextStyle,
-                                            tileOpacity = nextOpacity
-                                        ))
+                                        onUpdateTileAppearance(nextStyle, nextOpacity)
                                     }
                                 )
 

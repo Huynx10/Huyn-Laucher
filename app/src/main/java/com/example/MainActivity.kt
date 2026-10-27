@@ -960,20 +960,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 accentColor = accent.color,
                 wp10TileStyle = settings.wp10TileStyle,
                 onCycleTileTransparency = {
-                    val styles = Wp10TileStyle.entries
-                    val nextStyle = styles[(styles.indexOf(settings.wp10TileStyle) + 1) % styles.size]
-                    val nextOpacity = when (nextStyle) {
-                        Wp10TileStyle.CRYSTAL_CLEAR -> 0f
-                        Wp10TileStyle.CLASSIC_METRO -> 1f
-                        Wp10TileStyle.FLUENT_ACRYLIC -> 0.45f
-                        Wp10TileStyle.TINTED_TRANSLUCENT -> 0.35f
-                    }
-                    viewModel.updateSettings(
-                        settings.copy(
-                            wp10TileStyle = nextStyle,
-                            tileOpacity = nextOpacity
-                        )
-                    )
+                    viewModel.cycleTileAppearance(acrylicOpacity = 0.45f, tintedOpacity = 0.35f)
                 },
                 onAddTile = {
                     val current = pages.getOrNull(pagerState.currentPage)
@@ -1087,6 +1074,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 telemetry = telemetry,
                 customWallpaperBitmap = customWallpaperBitmap,
                 onUpdateSettings = { viewModel.updateSettings(it) },
+                onUpdateTileAppearance = { style, opacity -> viewModel.updateTileAppearance(style, opacity) },
+                onCycleTileAppearance = { viewModel.cycleTileAppearance(acrylicOpacity = 0.38f, tintedOpacity = 0.42f) },
                 onOptimizeMemory = { viewModel.optimizeMemory() },
                 onOpenGlance = { viewModel.openGlanceScreen() },
                 onOpenFullSettings = { viewModel.openSettings() },
@@ -1143,6 +1132,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     isCloudSyncing = isCloudSyncing,
                     isSavingSettings = isSavingSettings,
                     onSaveSettings = { viewModel.updateSettings(it) },
+                    onUpdateTileAppearance = { style, opacity -> viewModel.updateTileAppearance(style, opacity) },
                     onPickCustomWallpaper = { uri -> viewModel.setCustomWallpaper(uri) },
                     onExportBackup = { viewModel.exportBackup() },
                     onRestoreBackup = { viewModel.restoreBackup(it) },
@@ -1195,6 +1185,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 },
                 onDeleteCloudBackup = { backupId -> viewModel.deleteCloudBackup(backupId) },
                 onSaveSettings = { viewModel.updateSettings(it) },
+                onUpdateTileAppearance = { style, opacity -> viewModel.updateTileAppearance(style, opacity) },
                 onPickCustomWallpaper = { uri ->
                     viewModel.setCustomWallpaper(uri)
                     Toast.makeText(context, "Đã áp dụng hình nền mới!", Toast.LENGTH_SHORT).show()

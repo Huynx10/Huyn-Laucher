@@ -95,6 +95,8 @@ fun ActionCenterOverlay(
     telemetry: SystemTelemetry,
     customWallpaperBitmap: ImageBitmap? = null,
     onUpdateSettings: (LauncherSettings) -> Unit,
+    onUpdateTileAppearance: (Wp10TileStyle, Float) -> Unit,
+    onCycleTileAppearance: () -> Unit,
     onOptimizeMemory: () -> SystemTelemetry,
     onOpenGlance: () -> Unit,
     onOpenFullSettings: () -> Unit,
@@ -192,14 +194,7 @@ fun ActionCenterOverlay(
                 isActive = settings.wp10TileStyle != Wp10TileStyle.CLASSIC_METRO,
                 tag = "action_center_tile_transparency",
                 onClick = {
-                    val nextStyle = settings.wp10TileStyle.next()
-                    val nextOpacity = when (nextStyle) {
-                        Wp10TileStyle.CRYSTAL_CLEAR -> 0f
-                        Wp10TileStyle.CLASSIC_METRO -> 1f
-                        Wp10TileStyle.FLUENT_ACRYLIC -> 0.38f
-                        Wp10TileStyle.TINTED_TRANSLUCENT -> 0.42f
-                    }
-                    onUpdateSettings(settings.copy(wp10TileStyle = nextStyle, tileOpacity = nextOpacity))
+                    onCycleTileAppearance()
                 }
             ),
             QuickActionTileModel(
@@ -421,12 +416,7 @@ fun ActionCenterOverlay(
                                     settings.wp10TileStyle == Wp10TileStyle.CLASSIC_METRO -> Wp10TileStyle.FLUENT_ACRYLIC
                                     else -> settings.wp10TileStyle
                                 }
-                                onUpdateSettings(
-                                    settings.copy(
-                                        tileOpacity = newOpacity,
-                                        wp10TileStyle = updatedStyle
-                                    )
-                                )
+                                onUpdateTileAppearance(updatedStyle, newOpacity)
                             },
                             valueRange = 0f..1f,
                             colors = SliderDefaults.colors(

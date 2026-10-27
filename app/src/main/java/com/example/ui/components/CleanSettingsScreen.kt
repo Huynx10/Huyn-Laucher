@@ -57,6 +57,7 @@ fun CleanSettingsScreen(
     isCloudSyncing: Boolean,
     isSavingSettings: Boolean,
     onSaveSettings: (LauncherSettings) -> Unit,
+    onUpdateTileAppearance: (Wp10TileStyle, Float) -> Unit,
     onPickCustomWallpaper: (Uri) -> Unit,
     onExportBackup: suspend () -> String,
     onRestoreBackup: suspend (String) -> Boolean,
@@ -161,7 +162,7 @@ fun CleanSettingsScreen(
                                         Wp10TileStyle.TINTED_TRANSLUCENT
                                     else -> settings.wp10TileStyle
                                 }
-                                onSaveSettings(settings.copy(tileOpacity = opacity, wp10TileStyle = style))
+                                onUpdateTileAppearance(style, opacity)
                             }) }
                     }
                     CleanSection.APPS -> {
