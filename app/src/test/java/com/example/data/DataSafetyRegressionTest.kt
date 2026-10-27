@@ -73,6 +73,25 @@ class DataSafetyRegressionTest {
         assertTrue(repo.loadSettings().tileOpacity.isFinite())
     }
 
+    @Test fun transparentStyleSavePreservesExistingWidgetAndLayout() = runBlocking {
+        val widget = TileEntity(
+            "existing_widget", "Clock", tileType = TileType.WIDGET,
+            appWidgetId = 127, widgetProvider = "example/.Provider",
+            gridX = 2, gridY = 3
+        )
+        db.tileDao().insertOrUpdate(widget)
+
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(
+            wp10TileStyle = Wp10TileStyle.CRYSTAL_CLEAR,
+            tileOpacity = 0f
+        ))
+
+        val saved = repo.loadSettings()
+        assertEquals(Wp10TileStyle.CRYSTAL_CLEAR, saved.wp10TileStyle)
+        assertEquals(0f, saved.tileOpacity, 0f)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
     @Test fun wrongTypeHomeGridFlagsCannotAbortTileStyleSaveOrDeleteWidgets() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
