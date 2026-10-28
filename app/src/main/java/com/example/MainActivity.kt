@@ -620,24 +620,25 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 if (settings.wallpaperSource == WallpaperSource.LUMIA) Modifier.background(wallpaperBrush)
                 else Modifier.background(Color.Transparent)
             )
-            .pointerInput(isEditMode, selectedTileId) {
-                detectTapGestures(
-                    onTap = {
-                        when {
-                            selectedTileId != null -> viewModel.clearSelectedTile()
-                            isEditMode -> viewModel.closeEditMode()
+            .then(
+                // Home handles empty-space taps in a separate background sibling of its Tiles.
+                // An ancestor detectTapGestures would steal DOWN from long-press drag.
+                if (currentPage?.pageType == PageType.HOME) Modifier
+                else Modifier.pointerInput(isEditMode, selectedTileId) {
+                    detectTapGestures(
+                        onTap = {
+                            when {
+                                selectedTileId != null -> viewModel.clearSelectedTile()
+                                isEditMode -> viewModel.closeEditMode()
+                            }
+                        },
+                        onLongPress = {
+                            if (selectedTileId != null) viewModel.clearSelectedTile()
+                            else viewModel.enterEditMode()
                         }
-                    },
-                    onLongPress = {
-                        if (selectedTileId != null) {
-                            viewModel.clearSelectedTile()
-                        } else {
-                            // Long-pressing empty screen area enters One UI Home Screen Edit Mode
-                            viewModel.enterEditMode()
-                        }
-                    }
-                )
-            }
+                    )
+                }
+            )
     ) {
         if (settings.wallpaperSource == WallpaperSource.CUSTOM && customWallpaperBitmap != null) {
             Image(
