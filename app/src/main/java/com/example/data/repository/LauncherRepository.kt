@@ -864,6 +864,52 @@ class LauncherRepository(
         }
     }
 
+    /**
+     * Drop an existing Tile onto an exact empty cell of another HOME page.
+     * A failed/occupied/out-of-bounds drop is a no-op, including widget bindings.
+     */
+    suspend fun moveTileToPageAtGridPosition(
+        tileId: String,
+        targetPageId: String,
+        gridX: Int,
+        gridY: Int
+    ): Boolean = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            if (loadPages().none { it.id == targetPageId && it.pageType == PageType.HOME }) {
+                return@withTransaction false
+            }
+            val allTiles = tileDao.getAllTiles()
+            val tile = allTiles.find { it.id == tileId } ?: return@withTransaction false
+            if (tile.pageId == targetPageId) return@withTransaction false
+
+            val cols = if (loadSettings().showMoreTiles) 6 else 4
+            val spanX = tile.effectiveSpanX(cols)
+            val spanY = tile.effectiveSpanY()
+            if (gridX < 0 || gridX + spanX > cols || gridY !in 0..60) {
+                return@withTransaction false
+            }
+            val destination = allTiles.filter { it.pageId == targetPageId }
+            if (destination.any { other ->
+                    rectsOverlap(
+                        gridX, gridY, spanX, spanY,
+                        other.gridX.coerceAtLeast(0), other.gridY.coerceAtLeast(0),
+                        other.effectiveSpanX(cols), other.effectiveSpanY()
+                    )
+                }) {
+                return@withTransaction false
+            }
+            tileDao.update(
+                tile.copy(
+                    pageId = targetPageId,
+                    gridX = gridX,
+                    gridY = gridY,
+                    orderIndex = (destination.maxOfOrNull { it.orderIndex } ?: -1) + 1
+                )
+            )
+            true
+        }
+    }
+
     suspend fun reassignTilesFromDeletedPage(deletedPageId: String, fallbackPageId: String) = withContext(Dispatchers.IO) {
         require(deletedPageId != fallbackPageId) { "Cannot reassign tiles to the deleted Home page" }
         // Keep all widget moves atomic so a failed write cannot partially move a page.
