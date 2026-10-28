@@ -135,6 +135,7 @@ import com.example.data.model.WidgetProviderItem
 import com.example.ui.theme.LumiaPalette
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.UUID
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -355,7 +356,7 @@ fun AppDrawer(
 
     fun createManualFolder(app: AppItem) {
         val folder = AppFolder(
-            id = "folder_${System.currentTimeMillis()}",
+            id = "folder_${UUID.randomUUID()}",
             title = "Thư mục mới",
             appPackages = listOf(app.packageName),
             category = AppCategory.ALL,
@@ -537,7 +538,7 @@ fun AppDrawer(
                     showAzButton = settings.allAppsViewMode == AllAppsViewMode.METRO_LIST,
                     onSelectFolder = { id ->
                         if (id == "__new__") {
-                            val folder = AppFolder("folder_${System.currentTimeMillis()}",
+                            val folder = AppFolder("folder_${UUID.randomUUID()}",
                                 "Thư mục mới", emptyList(), AppCategory.ALL,
                                 settings.appDrawerFolders.size)
                             onUpdateSettings(settings.copy(appDrawerFolders = settings.appDrawerFolders + folder))

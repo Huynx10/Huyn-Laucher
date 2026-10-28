@@ -201,39 +201,19 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `test smart folder widget system and category grouping`() = runBlocking {
+  fun `new Home has no automatic folders and manual grouping preserves other tiles`() = runBlocking {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val db = LumiaDatabase.getDatabase(context)
     val repo = LauncherRepository(context, db.tileDao())
 
     repo.resetToDefaultTiles()
     val initialTiles = db.tileDao().getAllTiles()
-    assertTrue(initialTiles.any { it.tileType == TileType.SMART_FOLDER })
-
-    // Create a Smart Folder for MEDIA category absorbing matching tiles on page_home_1
-    val mediaFolder = repo.createSmartFolderByCategory(
-      category = com.example.data.model.AppCategory.MEDIA,
-      pageId = "page_home_1",
-      size = com.example.data.model.TileSize.MEDIUM,
-      absorbMatchingPageTiles = true
-    )
-    assertEquals(TileType.SMART_FOLDER, mediaFolder.tileType)
-
-    val parsedConfig = com.example.data.model.SmartFolderConfig.fromTile(mediaFolder)
-    assertEquals(com.example.data.model.AppCategory.MEDIA, parsedConfig.category)
-    assertEquals(com.example.data.model.SmartFolderLayoutMode.HYPEROS_PEEK, parsedConfig.layoutMode)
-
-    val effectiveItems = com.example.data.model.SmartFolderConfig.resolveEffectiveItems(
-      config = parsedConfig,
-      installedApps = emptyList()
-    )
-    assertEquals(parsedConfig.items, effectiveItems) // No invented apps to fill the preview.
-
-    // Group all remaining loose tiles on page_home_2 by category into Smart Folders
-    val groupedCount = repo.groupPageTilesByCategoryIntoSmartFolders("page_home_2")
-    assertTrue(groupedCount > 0)
-    val page2TilesAfterGroup = db.tileDao().getAllTiles().filter { it.pageId == "page_home_2" }
-    assertTrue(page2TilesAfterGroup.all { it.tileType == TileType.SMART_FOLDER })
+    assertTrue(initialTiles.none { it.tileType == TileType.SMART_FOLDER })
+    val apps = initialTiles.filter { it.tileType == TileType.APP && !it.hasBoundOrLinkedWidget() }
+    val folder = requireNotNull(repo.groupHomeTilesManually(apps[0].id, apps[1].id))
+    val items = com.example.data.model.SmartFolderConfig.fromTile(folder).items
+    assertEquals(setOf(apps[0].id, apps[1].id), items.mapNotNull { it.sourceTile?.id }.toSet())
+    assertEquals(initialTiles.size - 1, db.tileDao().getAllTiles().size)
   }
 
   @Test
