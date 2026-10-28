@@ -175,7 +175,7 @@ fun AppDrawer(
     onPinAppToPage: (AppItem, String) -> Unit,
     installedWidgets: List<WidgetProviderItem> = emptyList(),
     onPinWidgetToPage: (WidgetProviderItem, String) -> Unit = { _, _ -> },
-    onUpdateSettings: (LauncherSettings) -> Unit,
+    onMutateSettings: ((LauncherSettings) -> LauncherSettings) -> Unit,
     onEnterEditMode: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -365,37 +365,45 @@ fun AppDrawer(
             category = AppCategory.ALL,
             orderIndex = settings.appDrawerFolders.size
         )
-        val remaining = settings.appDrawerFolders.mapNotNull { old ->
-            val packages = old.appPackages.filterNot { it == app.packageName }
-            if (packages.isEmpty()) null else old.copy(appPackages = packages)
+        onMutateSettings { latest ->
+            val remaining = latest.appDrawerFolders.mapNotNull { old ->
+                val packages = old.appPackages.filterNot { it == app.packageName }
+                if (packages.isEmpty()) null else old.copy(appPackages = packages)
+            }
+            latest.copy(
+                appDrawerFolders = remaining + folder.copy(orderIndex = latest.appDrawerFolders.size),
+                appDrawerCustomOrder = latest.appDrawerCustomOrder + "folder:${folder.id}"
+            )
         }
-        onUpdateSettings(settings.copy(
-            appDrawerFolders = remaining + folder,
-            appDrawerCustomOrder = settings.appDrawerCustomOrder + "folder:${folder.id}"
-        ))
         activeFolderDialog = folder
     }
 
-    fun addAppToExistingFolder(sourceApp: AppItem, targetFolder: AppFolder) {
-        val updatedFolders = settings.appDrawerFolders.mapNotNull { f ->
-            when {
-                f.id == targetFolder.id -> f.copy(appPackages = (f.appPackages + sourceApp.packageName).distinct())
-                sourceApp.packageName in f.appPackages -> {
-                    val rem = f.appPackages.filterNot { it == sourceApp.packageName }
-                    if (rem.isEmpty()) null else f.copy(appPackages = rem)
+    fun addAppToExistingFolder(sourceApp: AppItem, targetFolderId: String) {
+        onMutateSettings { latest ->
+            if (latest.appDrawerFolders.none { it.id == targetFolderId }) latest else {
+                val updatedFolders = latest.appDrawerFolders.mapNotNull { f ->
+                    when {
+                        f.id == targetFolderId -> f.copy(appPackages = (f.appPackages + sourceApp.packageName).distinct())
+                        sourceApp.packageName in f.appPackages -> {
+                            val rem = f.appPackages.filterNot { it == sourceApp.packageName }
+                            if (rem.isEmpty()) null else f.copy(appPackages = rem)
+                        }
+                        else -> f
+                    }
                 }
-                else -> f
+                latest.copy(appDrawerFolders = updatedFolders)
             }
         }
-        onUpdateSettings(settings.copy(appDrawerFolders = updatedFolders))
     }
 
     fun removeAppFromFolder(app: AppItem) {
-        val updated = settings.appDrawerFolders.mapNotNull { folder ->
-            val remaining = folder.appPackages.filterNot { it == app.packageName }
-            if (remaining.isEmpty()) null else folder.copy(appPackages = remaining)
+        onMutateSettings { latest ->
+            val updated = latest.appDrawerFolders.mapNotNull { folder ->
+                val remaining = folder.appPackages.filterNot { it == app.packageName }
+                if (remaining.isEmpty()) null else folder.copy(appPackages = remaining)
+            }
+            latest.copy(appDrawerFolders = updated)
         }
-        onUpdateSettings(settings.copy(appDrawerFolders = updated))
     }
 
     fun reorderGridEntries(fromKey: String, toKey: String) {
@@ -403,27 +411,31 @@ fun AppDrawer(
         if (selectedFolderId != null) {
             val fromPkg = fromKey.removePrefix("app:")
             val toPkg = toKey.removePrefix("app:")
-            val updated = settings.appDrawerFolders.map { folder ->
-                if (folder.id != selectedFolderId) folder else {
-                    val packages = folder.appPackages.toMutableList()
-                    val fromIndex = packages.indexOf(fromPkg)
-                    val toIndex = packages.indexOf(toPkg)
-                    if (fromIndex >= 0 && toIndex >= 0) {
-                        packages.add(toIndex, packages.removeAt(fromIndex))
+            onMutateSettings { latest ->
+                val updated = latest.appDrawerFolders.map { folder ->
+                    if (folder.id != selectedFolderId) folder else {
+                        val packages = folder.appPackages.toMutableList()
+                        val fromIndex = packages.indexOf(fromPkg)
+                        val toIndex = packages.indexOf(toPkg)
+                        if (fromIndex >= 0 && toIndex >= 0) {
+                            packages.add(toIndex, packages.removeAt(fromIndex))
+                        }
+                        folder.copy(appPackages = packages)
                     }
-                    folder.copy(appPackages = packages)
                 }
+                latest.copy(appDrawerFolders = updated)
             }
-            onUpdateSettings(settings.copy(appDrawerFolders = updated))
             return
         }
-        val currentKeys = gridEntries.map { it.key }.toMutableList()
-        val fromIdx = currentKeys.indexOf(fromKey)
-        val toIdx = currentKeys.indexOf(toKey)
-        if (fromIdx != -1 && toIdx != -1) {
-            val item = currentKeys.removeAt(fromIdx)
-            currentKeys.add(toIdx, item)
-            onUpdateSettings(settings.copy(appDrawerCustomOrder = currentKeys))
+        onMutateSettings { latest ->
+            val currentKeys = (latest.appDrawerCustomOrder + gridEntries.map { it.key }).distinct().toMutableList()
+            val fromIdx = currentKeys.indexOf(fromKey)
+            val toIdx = currentKeys.indexOf(toKey)
+            if (fromIdx == -1 || toIdx == -1) latest else {
+                val item = currentKeys.removeAt(fromIdx)
+                currentKeys.add(toIdx, item)
+                latest.copy(appDrawerCustomOrder = currentKeys)
+            }
         }
     }
 
@@ -465,20 +477,16 @@ fun AppDrawer(
             GridDropIntent.GROUP_INTO_FOLDER -> if (app != null) {
                 val folderId = hoveredFolderId ?: hoveredTargetKey?.removePrefix("folder:")
                 if (folderId == "__new__") createManualFolder(app)
-                else settings.appDrawerFolders.firstOrNull { it.id == folderId }?.let {
-                    addAppToExistingFolder(app, it)
-                }
+                else if (folderId != null) addAppToExistingFolder(app, folderId)
             }
             GridDropIntent.REMOVE_FROM_FOLDER -> if (app != null && selectedFolderId != null) {
                 removeAppFromFolder(app)
             }
             GridDropIntent.DELETE_FOLDER -> if (dragged is GridDrawerEntry.FolderEntry) {
-                onUpdateSettings(settings.copy(
-                    appDrawerFolders = settings.appDrawerFolders.filterNot { it.id == dragged.folder.id },
-                    appDrawerCustomOrder = settings.appDrawerCustomOrder.filterNot {
-                        it == dragged.key
-                    }
-                ))
+                onMutateSettings { latest -> latest.copy(
+                    appDrawerFolders = latest.appDrawerFolders.filterNot { it.id == dragged.folder.id },
+                    appDrawerCustomOrder = latest.appDrawerCustomOrder.filterNot { it == dragged.key }
+                ) }
             }
             GridDropIntent.REORDER_SLOT -> hoveredTargetKey?.let { target ->
                 reorderGridEntries(dragged.key, target)
@@ -544,7 +552,10 @@ fun AppDrawer(
                             val folder = AppFolder("folder_${UUID.randomUUID()}",
                                 "Thư mục mới", emptyList(), AppCategory.ALL,
                                 settings.appDrawerFolders.size)
-                            onUpdateSettings(settings.copy(appDrawerFolders = settings.appDrawerFolders + folder))
+                            onMutateSettings { latest -> latest.copy(
+                                appDrawerFolders = latest.appDrawerFolders +
+                                    folder.copy(orderIndex = latest.appDrawerFolders.size)
+                            ) }
                             activeFolderDialog = folder
                         } else selectedFolderId = id
                     },
@@ -553,12 +564,14 @@ fun AppDrawer(
                     },
                     onOpenAzJump = { showJumpList = true },
                     onToggleViewMode = {
-                        val nextMode = if (settings.allAppsViewMode == AllAppsViewMode.METRO_LIST) {
-                            AllAppsViewMode.ONE_UI_GRID
-                        } else {
-                            AllAppsViewMode.METRO_LIST
+                        onMutateSettings { latest ->
+                            val nextMode = if (latest.allAppsViewMode == AllAppsViewMode.METRO_LIST) {
+                                AllAppsViewMode.ONE_UI_GRID
+                            } else {
+                                AllAppsViewMode.METRO_LIST
+                            }
+                            latest.copy(allAppsViewMode = nextMode)
                         }
-                        onUpdateSettings(settings.copy(allAppsViewMode = nextMode))
                     },
                     onOpenSearchMode = { launchFinder("") }
                 )
@@ -983,10 +996,11 @@ fun AppDrawer(
                             value = folderTitleText,
                             onValueChange = { newTitle ->
                                 folderTitleText = newTitle
-                                val updated = settings.appDrawerFolders.map {
-                                    if (it.id == freshFolder.id) it.copy(title = newTitle) else it
+                                onMutateSettings { latest ->
+                                    latest.copy(appDrawerFolders = latest.appDrawerFolders.map {
+                                        if (it.id == freshFolder.id) it.copy(title = newTitle) else it
+                                    })
                                 }
-                                onUpdateSettings(settings.copy(appDrawerFolders = updated))
                             },
                             label = { Text("Tên thư mục", color = Color.White.copy(alpha = 0.65f)) },
                             singleLine = true,
@@ -1002,11 +1016,12 @@ fun AppDrawer(
                         IconButton(
                             onClick = {
                                 // Dissolve folder (ungroup apps back to grid)
-                                val updated = settings.appDrawerFolders.filter { it.id != freshFolder.id }
-                                onUpdateSettings(settings.copy(appDrawerFolders = updated,
-                                    appDrawerCustomOrder = settings.appDrawerCustomOrder.filterNot {
+                                onMutateSettings { latest -> latest.copy(
+                                    appDrawerFolders = latest.appDrawerFolders.filter { it.id != freshFolder.id },
+                                    appDrawerCustomOrder = latest.appDrawerCustomOrder.filterNot {
                                         it == "folder:${freshFolder.id}"
-                                    }))
+                                    }
+                                ) }
                                 activeFolderDialog = null
                             }
                         ) {
@@ -1046,14 +1061,17 @@ fun AppDrawer(
                                         .background(Color.Black.copy(alpha = 0.72f))
                                         .clickable {
                                             val remainingPkgs = freshFolder.appPackages.filter { it != memberApp.packageName }
-                                            val updatedFolders = if (remainingPkgs.isEmpty()) {
-                                                settings.appDrawerFolders.filter { it.id != freshFolder.id }
-                                            } else {
-                                                settings.appDrawerFolders.map {
-                                                    if (it.id == freshFolder.id) it.copy(appPackages = remainingPkgs) else it
+                                            onMutateSettings { latest ->
+                                                val updatedFolders = latest.appDrawerFolders.mapNotNull { folder ->
+                                                    if (folder.id != freshFolder.id) folder else {
+                                                        val remaining = folder.appPackages.filterNot {
+                                                            it == memberApp.packageName
+                                                        }
+                                                        if (remaining.isEmpty()) null else folder.copy(appPackages = remaining)
+                                                    }
                                                 }
+                                                latest.copy(appDrawerFolders = updatedFolders)
                                             }
-                                            onUpdateSettings(settings.copy(appDrawerFolders = updatedFolders))
                                             if (remainingPkgs.isEmpty()) {
                                                 activeFolderDialog = null
                                             }
@@ -1124,7 +1142,7 @@ fun AppDrawer(
                             LazyColumn(modifier = Modifier.fillMaxWidth().height(240.dp)) {
                                 items(candidates, key = { it.packageName }) { candidate ->
                                     MenuActionRow(Icons.Default.Add, candidate.label, accent.color) {
-                                        addAppToExistingFolder(candidate, freshFolder)
+                                        addAppToExistingFolder(candidate, freshFolder.id)
                                     }
                                 }
                             }

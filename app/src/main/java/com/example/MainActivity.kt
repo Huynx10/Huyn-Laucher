@@ -855,7 +855,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 linkToTileId = null
                             )
                         },
-                        onUpdateSettings = { updated -> viewModel.updateSettings(updated) },
+                        onMutateSettings = { transform -> viewModel.mutateSettings(transform) },
                         onEnterEditMode = { viewModel.enterEditMode() }
                     )
                 }
