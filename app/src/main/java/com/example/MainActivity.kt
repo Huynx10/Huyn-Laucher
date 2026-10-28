@@ -454,6 +454,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     // Keep drag ownership above pager pages so page changes cannot reset the drag session.
     var draggingHomeTileId by remember { mutableStateOf<String?>(null) }
     var draggingHomeTileSourcePageId by remember { mutableStateOf<String?>(null) }
+    var crossPageDragCancelToken by remember { mutableIntStateOf(0) }
     var dragFingerX by remember { mutableFloatStateOf(0.5f) }
     var dragFingerY by remember { mutableFloatStateOf(0.5f) }
     val dragEdgeDirection = when {
@@ -489,6 +490,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 val sourceIndex = pages.indexOfFirst { it.id == draggingHomeTileSourcePageId }
                 draggingHomeTileId = null
                 draggingHomeTileSourcePageId = null
+                crossPageDragCancelToken++ // cancel the source pointer node before finger-up
                 if (sourceIndex >= 0) coroutineScope.launch { pagerState.scrollToPage(sourceIndex) }
             }
             activeSmartFolderRequest != null -> viewModel.closeSmartFolder()
@@ -823,6 +825,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                             }
                             crossed
                         },
+                        crossPageDragCancelToken = crossPageDragCancelToken,
                         onCrossPageDragCancel = { tileId ->
                             if (draggingHomeTileId == tileId) {
                                 val sourceIndex = pages.indexOfFirst { it.id == draggingHomeTileSourcePageId }
