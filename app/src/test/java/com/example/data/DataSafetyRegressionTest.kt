@@ -369,6 +369,42 @@ class DataSafetyRegressionTest {
         assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
     }
 
+    @Test fun crossPageDropMovesSameWidgetIdOnlyToEmptyCell() = runBlocking {
+        val widget = TileEntity(
+            "drag_widget", "Clock", tileType = TileType.WIDGET,
+            appWidgetId = 211, widgetProvider = "example/.Clock",
+            pageId = "page_home_1", orderIndex = 2, gridX = 0, gridY = 0
+        )
+        val occupied = TileEntity(
+            "occupied", "Other", pageId = "page_home_2",
+            orderIndex = 7, gridX = 0, gridY = 0
+        )
+        db.tileDao().insertAll(listOf(widget, occupied))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 0, 0))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", -1, 2))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 4, 2))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 2, 61))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_1", 2, 2))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_all_apps", 2, 2))
+        assertEquals(setOf(widget, occupied), db.tileDao().getAllTiles().toSet())
+
+        assertTrue(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 2, 3))
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(2, rows.size)
+        assertEquals(occupied, rows.single { it.id == occupied.id })
+        val moved = rows.single { it.id == widget.id }
+        assertEquals("page_home_2", moved.pageId)
+        assertEquals(2, moved.gridX)
+        assertEquals(3, moved.gridY)
+        assertEquals(8, moved.orderIndex)
+        assertEquals(widget.id, moved.id)
+        assertEquals(widget.appWidgetId, moved.appWidgetId)
+        assertEquals(widget.widgetProvider, moved.widgetProvider)
+        assertEquals(widget.size, moved.size)
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 1, 3))
+        assertEquals(rows.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
     @Test fun samePageReassignmentFailsFastWithoutChangingWidgetRows() = runBlocking {
         val widget = TileEntity("same_page_widget", "Widget", tileType = TileType.WIDGET,
             appWidgetId = 151, widgetProvider = "example/.Provider",
