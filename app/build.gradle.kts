@@ -58,8 +58,8 @@ android {
       signingConfig = signingConfigs.getByName("debugConfig")
       // Isolated test package: the prior debug APK uses an unrelated temporary key.
       // A new CI debug key cannot update the prior trial; use a distinct test identity.
-      applicationIdSuffix = ".trial2"
-      versionNameSuffix = "-s24-trial2"
+      applicationIdSuffix = ".trial3"
+      versionNameSuffix = "-s24-trial3"
     }
   }
   compileOptions {

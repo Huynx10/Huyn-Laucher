@@ -14,10 +14,11 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class SystemSearchTest {
     @Test
-    fun externalSearchUsesGlobalSearchInsteadOfWebSearch() {
-        val intent = systemSearchIntent("Máy ảnh")
+    fun finderSearchTargetsSamsungPackageInsteadOfWebProvider() {
+        val intent = finderSearchIntent("Máy ảnh")
 
         assertEquals(SearchManager.INTENT_ACTION_GLOBAL_SEARCH, intent.action)
+        assertEquals(SAMSUNG_FINDER_PACKAGE, intent.`package`)
         assertEquals("Máy ảnh", intent.getStringExtra(SearchManager.QUERY))
         assertFalse(intent.action == Intent.ACTION_WEB_SEARCH)
         assertTrue(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
@@ -25,7 +26,7 @@ class SystemSearchTest {
 
     @Test
     fun emptySearchOpensProviderWithoutAQuery() {
-        val intent = systemSearchIntent("")
+        val intent = finderSearchIntent("")
 
         assertFalse(intent.hasExtra(SearchManager.QUERY))
     }

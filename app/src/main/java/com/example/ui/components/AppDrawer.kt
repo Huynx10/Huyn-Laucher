@@ -233,11 +233,10 @@ fun AppDrawer(
         }
     }
 
-    fun launchSystemSearch(query: String) {
-        try {
-            context.startActivity(systemSearchIntent(query))
-        } catch (_: Exception) {
-            Toast.makeText(context, "Không mở được tìm kiếm hệ thống trên máy này", Toast.LENGTH_SHORT).show()
+    fun launchFinder(query: String) {
+        if (!launchSamsungFinder(context, query)) {
+            isAndroidSearchMode = true
+            Toast.makeText(context, "Không mở được Finder; tìm ứng dụng tại đây", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -537,7 +536,7 @@ fun AppDrawer(
                         keyboardController?.hide()
                     },
                     onSubmitLocalSearch = { keyboardController?.hide() },
-                    onTriggerAndroidSystemSearch = { launchSystemSearch(searchQuery) }
+                    onTriggerAndroidSystemSearch = { launchFinder(searchQuery) }
                 )
             } else {
                 CleanAppDrawerHeaderBar(
@@ -561,9 +560,7 @@ fun AppDrawer(
                         }
                         onUpdateSettings(settings.copy(allAppsViewMode = nextMode))
                     },
-                    onOpenSearchMode = {
-                        isAndroidSearchMode = true
-                    }
+                    onOpenSearchMode = { launchFinder("") }
                 )
             }
 
@@ -617,7 +614,7 @@ fun AppDrawer(
                         searchQuery = searchQuery,
                         isAndroidSearchMode = inSearch,
                         accentColor = accent.color,
-                        onSearchAndroidSystem = { launchSystemSearch(searchQuery) },
+                        onSearchAndroidSystem = { launchFinder(searchQuery) },
                         onResetFilter = {
                             if (searchQuery.isNotBlank()) {
                                 searchQuery = ""
@@ -638,7 +635,7 @@ fun AppDrawer(
                                 AndroidDefaultSearchActionCard(
                                     query = searchQuery,
                                     accentColor = accent.color,
-                                    onClick = { launchSystemSearch(searchQuery) }
+                                    onClick = { launchFinder(searchQuery) }
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                             }
@@ -724,7 +721,7 @@ fun AppDrawer(
                                 AndroidDefaultSearchActionCard(
                                     query = searchQuery,
                                     accentColor = accent.color,
-                                    onClick = { launchSystemSearch(searchQuery) }
+                                    onClick = { launchFinder(searchQuery) }
                                 )
                             }
                         }
@@ -1479,7 +1476,7 @@ private fun CleanAppDrawerHeaderBar(
                     .testTag("app_search_button"),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Search, contentDescription = "Tìm ứng dụng", tint = Color.White, modifier = Modifier.size(22.dp))
+                Icon(Icons.Default.Search, contentDescription = "Mở Samsung Finder", tint = Color.White, modifier = Modifier.size(22.dp))
             }
         }
 
@@ -1526,7 +1523,7 @@ private fun CleanAppDrawerHeaderBar(
 }
 
 /**
- * Clean Android Default Search Mode Bar with instant keyboard focus and native Android Search integration.
+ * Local app search used when Finder has no public launch entry on this device.
  */
 @Composable
 private fun AndroidDefaultSearchBar(
@@ -1612,7 +1609,7 @@ private fun AndroidDefaultSearchBar(
             }
         }
 
-        // Opening device-wide search is explicit; typing an app name stays local.
+        // This button tries Finder; typing an app name stays local.
         IconButton(
             onClick = onTriggerAndroidSystemSearch,
             modifier = Modifier
@@ -1621,7 +1618,7 @@ private fun AndroidDefaultSearchBar(
         ) {
             Icon(
                 imageVector = Icons.Default.OpenInNew,
-                contentDescription = "Tìm trên thiết bị bằng ứng dụng hệ thống",
+                contentDescription = "Mở Samsung Finder",
                 tint = accentColor,
                 modifier = Modifier.size(17.dp)
             )
@@ -1658,7 +1655,7 @@ private fun AndroidDefaultSearchActionCard(
                 modifier = Modifier.size(18.dp)
             )
             Text(
-                text = "Tìm \"$query\" trên thiết bị",
+                text = "Tìm \"$query\" bằng Finder",
                 color = Color.White,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
@@ -1727,7 +1724,7 @@ private fun EmptyCategoryPlaceholder(
                         .padding(horizontal = 16.dp, vertical = 9.dp)
                 ) {
                     Text(
-                        text = "Tìm \"$searchQuery\" trên Android Search",
+                        text = "Tìm \"$searchQuery\" bằng Finder",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold

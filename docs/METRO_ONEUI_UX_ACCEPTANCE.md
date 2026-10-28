@@ -5,7 +5,7 @@ Target reference device: **Samsung Galaxy S24 Ultra**, using the Android/One UI 
 ## Visual structure — App Drawer
 - List mode defaults to Windows Phone 10-inspired **A–Z logo + app name only**. No launcher-painted square behind a real app icon.
 - Header order: **Thao tác nhanh** entry, A–Z shortcut when applicable, list/grid toggle, Search. Category filter chips occupy the next row, not the top controls row.
-- Search mode takes focus and displays a clear way back; results update. Enter/Done must keep app queries local; only the explicitly labeled device-search action may hand a query to Android's public global search provider. Do not promise Samsung Finder unless that provider is verified on the device. Grid/list switching must not discard folders, pin state or custom order.
+- Tapping Search must try Samsung Finder immediately through a public exported search or launcher activity. If unavailable, show the launch failure and open local app search. Enter/Done in local search must keep the query in the launcher. Confirm Finder actually opens on the S24 Ultra; Android public APIs and the package probe alone do not prove OEM behavior. Grid/list switching must not discard folders, pin state or custom order.
 - All Apps draws its background edge to edge; app rows remain outside status, navigation and keyboard insets. No fixed oversized footer obscures the last app.
 - Large font and display scaling on S24 Ultra: ensure header does not wrap or clip in portrait with 4/6 tile columns. Accessibility labels and 44+ dp touch targets must be verified; target 48dp where practicable.
 
