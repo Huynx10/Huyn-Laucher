@@ -209,6 +209,7 @@ fun LumiaStartGrid(
     onCrossPageDragMove: (String, Float, Float) -> Unit = { _, _, _ -> },
     onCrossPageDragEnd: (String, Int, Int) -> Boolean = { _, _, _ -> false },
     onCrossPageDragCancel: (String) -> Unit = {},
+    crossPageDragCancelToken: Int = 0,
     onOpenWidgetSettings: (TileEntity) -> Unit = {},
     onPinNewTile: (TileEntity) -> Unit,
     onEnterEditMode: () -> Unit,
@@ -758,7 +759,7 @@ fun LumiaStartGrid(
                                             if (!settings.lockHomeLayout) {
                                                 if (isThisTileSelected) {
                                                     // Already selected single tile: allow immediate drag without waiting for another long-press
-                                                    Modifier.pointerInput(tile.id, positioned.gridX, positioned.gridY, totalCols) {
+                                                    Modifier.pointerInput(tile.id, positioned.gridX, positioned.gridY, totalCols, crossPageDragCancelToken) {
                                                         detectDragGestures(
                                                             onDragStart = { offset ->
                                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -812,7 +813,7 @@ fun LumiaStartGrid(
                                                     }
                                                 } else if (selectedTileId == null) {
                                                     // Long-press on a tile when NO tile is currently being edited: selects ONLY this 1 tile AND allows immediate free 2D drag
-                                                    Modifier.pointerInput(tile.id, positioned.gridX, positioned.gridY, totalCols) {
+                                                    Modifier.pointerInput(tile.id, positioned.gridX, positioned.gridY, totalCols, crossPageDragCancelToken) {
                                                         detectDragGesturesAfterLongPress(
                                                             onDragStart = { offset ->
                                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
