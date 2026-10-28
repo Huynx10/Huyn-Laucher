@@ -849,11 +849,12 @@ class LauncherViewModel(
             runLauncherBackgroundRead(onError = { Log.e(TAG, "App catalog scan failed", it) }) {
                 repository.getInstalledApps(pinned)
             }?.let { installed ->
-                _apps.value = installed
                 // Retry legacy folder conversion after a transiently empty startup catalog.
+                // Publish the catalog after the conversion to avoid one frame of auto grouping.
                 runLauncherBackgroundRead(onError = { Log.e(TAG, "Folder migration retry failed", it) }) {
                     repository.completeLegacyFolderMigration(installed)
                 }
+                _apps.value = installed
             }
             runLauncherBackgroundRead(onError = { Log.e(TAG, "Widget provider scan failed", it) }) {
                 repository.discoverInstalledWidgets()
