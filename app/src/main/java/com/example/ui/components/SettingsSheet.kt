@@ -14,12 +14,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,10 +24,10 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -53,8 +50,6 @@ import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
@@ -64,7 +59,6 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -72,6 +66,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -80,6 +75,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
@@ -93,13 +89,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -152,13 +149,13 @@ fun SettingsSheet(
     onSyncToCloudNow: (String) -> Unit = {},
     onRestoreCloudBackup: (CloudBackup) -> Unit = {},
     onDeleteCloudBackup: (String) -> Unit = {},
-    onSaveSettings: (LauncherSettings) -> Unit,
+    onSaveSettings: (LauncherSettings, LauncherSettings) -> Unit,
+    onUpdateTileAppearance: (Wp10TileStyle, Float) -> Unit,
     onPickCustomWallpaper: (Uri) -> Unit = {},
     onClearCustomWallpaper: () -> Unit = {},
     onOpenPageManager: () -> Unit = {},
     onExportBackup: suspend () -> String,
     onRestoreBackup: suspend (String) -> Boolean,
-    onResetDefaults: () -> Unit,
     onOptimizeMemory: () -> SystemTelemetry = { telemetry },
     onRefreshTelemetry: () -> Unit = {},
     onDismiss: () -> Unit
@@ -168,7 +165,6 @@ fun SettingsSheet(
 
     var selectedTab by remember { mutableStateOf<SettingsCategoryTab?>(null) }
     BackHandler { if (selectedTab != null) selectedTab = null else onDismiss() }
-    var isExpandedHeight by remember { mutableStateOf(false) }
 
     var selectedAccentHex by remember(settings.accentColorHex) { mutableStateOf(settings.accentColorHex) }
     var autoWallpaperAccent by remember(settings.autoWallpaperAccentEnabled) { mutableStateOf(settings.autoWallpaperAccentEnabled) }
@@ -217,17 +213,6 @@ fun SettingsSheet(
         selectedAccentHex
     }
     val accent = LumiaPalette.getAccent(effectiveAccentHex)
-    val glassStyle = rememberAdaptiveGlassStyle(
-        settings = settings.copy(
-            wallpaperGradientIndex = wallpaperIndex,
-            dynamicAccentMode = dynamicAccentMode,
-            dynamicSwatchIndex = dynamicSwatchIndex,
-            accentColorHex = effectiveAccentHex,
-            autoWallpaperAccentEnabled = autoWallpaperAccent,
-            isDarkTheme = isDarkTheme
-        ),
-        customWallpaperBitmap = customWallpaperBitmap
-    )
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -289,24 +274,18 @@ fun SettingsSheet(
         }
     }
 
-    fun applyChanges(
-        styleOverride: Wp10TileStyle = wp10TileStyle,
-        opacityOverride: Float = tileOpacity
-    ) {
+    fun applyChanges() {
         val resolvedHex = if (autoWallpaperAccent) {
             DynamicAccentEngine.resolveAutoAccent(wallpaperIndex, dynamicAccentMode, dynamicSwatchIndex).hex
         } else {
             selectedAccentHex
         }
-        onSaveSettings(
-            settings.copy(
+        onSaveSettings(settings, settings.copy(
                 accentColorHex = resolvedHex,
                 autoWallpaperAccentEnabled = autoWallpaperAccent,
                 dynamicAccentMode = dynamicAccentMode,
                 dynamicSwatchIndex = dynamicSwatchIndex,
                 isDarkTheme = isDarkTheme,
-                tileOpacity = opacityOverride.coerceIn(0f, 1f),
-                wp10TileStyle = styleOverride,
                 wp10RevealBorder = wp10RevealBorder,
                 showMoreTiles = showMoreTiles,
                 tileCornerRadiusDp = tileCornerRadius,
@@ -337,152 +316,57 @@ fun SettingsSheet(
         )
     }
 
-    val targetHeightFraction by animateFloatAsState(
-        targetValue = if (selectedTab == null || isExpandedHeight) 0.84f else 0.64f,
-        animationSpec = tween(durationMillis = 220),
-        label = "settingsDockHeight"
-    )
-
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = accent.color,
+            background = Color(0xFF131316),
+            surface = Color(0xFF131316)
+        )
+    ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFF131316))
             .zIndex(50f)
     ) {
-        // Upper Live-Preview Zone: completely transparent (no dark scrim!) so user sees real Home Screen changes immediately
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { onDismiss() }
-        ) {
-            Row(
+        // Advanced controls use the same full-screen surface as the main Settings screen.
+        CompositionLocalProvider(LocalSettingsGlassStyle provides null) {
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .fillMaxSize()
                     .statusBarsPadding()
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.62f))
-                    .border(0.8.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Visibility,
-                    contentDescription = null,
-                    tint = accent.color,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Chạm bên ngoài để đóng",
-                    color = Color.White.copy(alpha = 0.92f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        // Bottom Docked Minimalist Settings Panel with Dynamic Wallpaper-Adaptive Fluent Acrylic Glassmorphism
-        CompositionLocalProvider(LocalSettingsGlassStyle provides glassStyle) {
-            FluentGlassPanel(
-                glassStyle = glassStyle,
-                customWallpaperBitmap = customWallpaperBitmap,
-                shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
-                blurRadius = 28.dp,
-                borderWidth = 1.2.dp,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .fillMaxHeight(targetHeightFraction)
-                    .shadow(28.dp, RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { /* Consume clicks inside dock */ }
-                    .testTag("settings_fluent_glass_dock")
+                    .navigationBarsPadding()
+                    .testTag("settings_advanced_screen")
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .navigationBarsPadding()
                 ) {
-                    // Compact Top Header + Height Toggle + Close Button
+                    // Shared Settings header dimensions and typography.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 18.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .height(64.dp)
+                            .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (selectedTab != null) {
-                                IconButton(onClick = { selectedTab = null }, modifier = Modifier.size(44.dp)) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại cài đặt", tint = Color.White)
-                                }
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(accent.color)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = selectedTab?.title ?: "Cài đặt",
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = if (isExpandedHeight) "Mở rộng" else "Xem trước",
-                                        color = Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(50))
-                                            .background(glassStyle.activeTileGlassBrush)
-                                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                                    )
-                                }
-                                Text(
-                                    text = "Thay đổi được áp dụng ngay",
-                                    color = Color.White.copy(alpha = 0.68f),
-                                    fontSize = 10.sp,
-                                    modifier = Modifier.testTag("settings_glass_source_label")
-                                )
-                            }
+                        IconButton(
+                            onClick = { if (selectedTab == null) onDismiss() else selectedTab = null },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Quay lại", tint = Color.White)
                         }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { isExpandedHeight = !isExpandedHeight },
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .testTag("toggle_settings_height_button")
-                            ) {
-                        Icon(
-                            imageVector = if (isExpandedHeight) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                            contentDescription = if (isExpandedHeight) "Thu gọn để xem trực tiếp" else "Mở rộng bảng cài đặt",
-                            tint = Color.White.copy(alpha = 0.8f)
+                        Text(
+                            text = selectedTab?.title ?: "Tùy chỉnh nâng cao",
+                            color = Color.White,
+                            fontSize = 23.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f).padding(start = 8.dp)
                         )
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Default.Close, "Đóng cài đặt", tint = Color.White)
+                        }
                     }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Đóng cài đặt",
-                            tint = Color.White.copy(alpha = 0.8f)
-                        )
-                    }
-                }
-            }
 
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 
@@ -861,11 +745,15 @@ fun SettingsSheet(
                     SettingsCategoryTab.TILES_LAYOUT -> {
                         item {
                             MinimalGroupCard(title = "GIAO DIỆN Ô") {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Wp10TileStyle.entries.forEach { style ->
+                                    Wp10TileStyle.entries.chunked(2).forEach { rowStyles ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                    rowStyles.forEach { style ->
                                         val isSelected = wp10TileStyle == style
                                         val shortTitle = when (style) {
                                             Wp10TileStyle.CRYSTAL_CLEAR -> "Trong suốt"
@@ -881,7 +769,7 @@ fun SettingsSheet(
                                                     if (isSelected) accent.color
                                                     else Color.White.copy(alpha = 0.07f)
                                                 )
-                                                .clickable {
+                                                .clickable(role = androidx.compose.ui.semantics.Role.RadioButton) {
                                                     val nextOpacity = when (style) {
                                                         Wp10TileStyle.CRYSTAL_CLEAR -> 0f
                                                         Wp10TileStyle.CLASSIC_METRO -> 1f
@@ -890,20 +778,26 @@ fun SettingsSheet(
                                                     }
                                                     wp10TileStyle = style
                                                     tileOpacity = nextOpacity
-                                                    // Commit both values together, independent of Compose recomposition.
-                                                    applyChanges(styleOverride = style, opacityOverride = nextOpacity)
+                                                    // Merge appearance with the latest ViewModel settings.
+                                                    onUpdateTileAppearance(style, nextOpacity)
                                                 }
-                                                .padding(vertical = 8.dp)
+                                                .heightIn(min = 48.dp)
+                                                .semantics { selected = isSelected }
                                                 .testTag("wp10_tile_style_${style.name.lowercase()}"),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = shortTitle,
                                                 color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                fontSize = 13.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                maxLines = 2,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.padding(horizontal = 6.dp)
                                             )
                                         }
+                                    }
+                                    }
                                     }
                                 }
 
@@ -924,7 +818,7 @@ fun SettingsSheet(
                                         }
                                         tileOpacity = nextOpacity
                                         wp10TileStyle = nextStyle
-                                        applyChanges(styleOverride = nextStyle, opacityOverride = nextOpacity)
+                                        onUpdateTileAppearance(nextStyle, nextOpacity)
                                     }
                                 )
 
@@ -1611,16 +1505,6 @@ fun SettingsSheet(
                                             ) {
                                                 Text("Khôi phục", fontSize = 11.sp)
                                             }
-                                            OutlinedButton(
-                                                onClick = {
-                                                    onResetDefaults()
-                                                    Toast.makeText(context, "Đã đặt lại bố cục", Toast.LENGTH_SHORT).show()
-                                                    onDismiss()
-                                                },
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Text("Đặt lại bố cục", color = Color(0xFFFF8A80), fontSize = 11.sp)
-                                            }
                                         }
                                     }
                                 }
@@ -1633,6 +1517,7 @@ fun SettingsSheet(
         }
     }
 }
+}
 
 }
 
@@ -1642,7 +1527,7 @@ private fun MinimalGroupCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val glassStyle = LocalSettingsGlassStyle.current
-    val cardShape = RoundedCornerShape(18.dp)
+    val cardShape = RoundedCornerShape(14.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1653,19 +1538,16 @@ private fun MinimalGroupCard(
                         .background(glassStyle.cardBackgroundBrush)
                         .border(1.dp, glassStyle.cardBorderBrush, cardShape)
                 } else {
-                    Modifier
-                        .background(Color.White.copy(alpha = 0.045f))
-                        .border(1.dp, Color.White.copy(alpha = 0.07f), cardShape)
+                    Modifier.background(Color(0xFF222228))
                 }
             )
-            .padding(14.dp)
+            .padding(16.dp)
     ) {
         Text(
             text = title,
-            color = Color.White.copy(alpha = 0.68f),
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.8.sp
+            color = Color(0xFFB4B4BC),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
         )
         Spacer(modifier = Modifier.height(10.dp))
         content()
@@ -1690,13 +1572,13 @@ private fun LiveSliderRow(
             Text(
                 text = label,
                 color = Color.White,
-                fontSize = 12.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(
                 text = valueText,
                 color = accentColor,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -1738,13 +1620,13 @@ private fun MinimalSwitchRow(
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium
             )
             Text(
                 text = subtitle,
-                color = Color.White.copy(alpha = 0.58f),
-                fontSize = 10.sp
+                color = Color(0xFFB4B4BC),
+                fontSize = 12.sp
             )
         }
         Spacer(modifier = Modifier.width(8.dp))

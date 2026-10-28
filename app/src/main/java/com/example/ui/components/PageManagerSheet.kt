@@ -831,14 +831,9 @@ private fun MiniScreenPreviewCard(
                         var idx = 0
                         while (idx < previewTiles.size) {
                             val t = previewTiles[idx]
-                            val isClear = t.colorOverrideHex.equals("TRANSPARENT", ignoreCase = true) ||
-                                settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR ||
+                            val isClear = settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR ||
                                 settings.tileOpacity <= 0.03f
-                            val baseColor = if (t.colorOverrideHex != null && !t.colorOverrideHex.equals("TRANSPARENT", ignoreCase = true)) {
-                                LumiaPalette.getAccent(t.colorOverrideHex).color
-                            } else {
-                                accentColor
-                            }
+                            val baseColor = accentColor
                             val fillAlpha = when {
                                 isClear -> 0.06f
                                 settings.wp10TileStyle == Wp10TileStyle.FLUENT_ACRYLIC -> (settings.tileOpacity * 0.45f).coerceIn(0.12f, 0.65f)
@@ -871,15 +866,12 @@ private fun MiniScreenPreviewCard(
                                             .border(0.5.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(3.dp))
                                     )
                                     if (nextTile != null && nextTile.size != TileSize.WIDE && nextTile.size != TileSize.LARGE) {
-                                        val nextColor = if (nextTile.colorOverrideHex != null && !nextTile.colorOverrideHex.equals("TRANSPARENT", ignoreCase = true)) {
-                                            LumiaPalette.getAccent(nextTile.colorOverrideHex).color
-                                        } else accentColor
                                         Box(
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .height(18.dp)
                                                 .clip(RoundedCornerShape(3.dp))
-                                                .background(nextColor.copy(alpha = fillAlpha))
+                                                .background(accentColor.copy(alpha = fillAlpha))
                                                 .border(0.5.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(3.dp))
                                         )
                                         idx += 2

@@ -96,6 +96,11 @@ fun WidgetTileContent(
 
         when (val state = hostState) {
             is WidgetHostState.Ready -> {
+                val providerLabel = remember(state.providerInfo, context, tile.title) {
+                    runCatching { state.providerInfo.loadLabel(context.packageManager)?.toString() }
+                        .getOrNull()
+                        ?.takeIf { it.isNotBlank() } ?: tile.title
+                }
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
                         factory = { ctx ->
@@ -144,7 +149,7 @@ fun WidgetTileContent(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = tile.title,
+                                text = providerLabel,
                                 color = Color.White,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -201,7 +206,7 @@ fun WidgetTileContent(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
-                                    text = tile.title.ifBlank { item.label },
+                                    text = item.label.ifBlank { tile.title },
                                     color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,

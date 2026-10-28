@@ -52,10 +52,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderSpecial
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
-import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Widgets
@@ -89,6 +88,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -110,7 +110,7 @@ import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import com.example.ui.theme.LumiaPalette
 import com.example.ui.widget.WidgetPickerGrouping
-import com.example.ui.widget.DefaultWidgetMatcher
+import com.example.ui.widget.LumiaWidgetHostManager
 import kotlin.math.roundToInt
 
 private val DropFootprintSpringSpec = spring<Dp>(
@@ -147,6 +147,38 @@ private data class PositionedTile(
     val spanY: Int
 )
 
+private fun findManualFolderDropTarget(
+    source: PositionedTile,
+    candidates: List<PositionedTile>,
+    offsetX: Float,
+    offsetY: Float,
+    cellStepPx: Float
+): PositionedTile? {
+    if (source.tile.tileType != TileType.APP || source.tile.hasBoundOrLinkedWidget()) return null
+    val centerX = source.gridX + source.spanX / 2f + offsetX / cellStepPx
+    val centerY = source.gridY + source.spanY / 2f + offsetY / cellStepPx
+    return candidates.firstOrNull { target ->
+        target.tile.id != source.tile.id && !target.tile.hasBoundOrLinkedWidget() &&
+            (target.tile.tileType == TileType.APP || target.tile.tileType == TileType.SMART_FOLDER) &&
+            centerX in (target.gridX + target.spanX * 0.25f)..(target.gridX + target.spanX * 0.75f) &&
+            centerY in (target.gridY + target.spanY * 0.25f)..(target.gridY + target.spanY * 0.75f)
+    }
+}
+
+private fun tileDisplayName(
+    tile: TileEntity,
+    installedApps: List<AppItem>,
+    installedWidgets: List<WidgetProviderItem>
+): String = when {
+    tile.hasBoundOrLinkedWidget() -> installedWidgets
+        .firstOrNull { it.providerComponent == tile.widgetProvider }?.label
+        ?.takeIf { it.isNotBlank() } ?: tile.title
+    tile.tileType == TileType.APP -> installedApps
+        .firstOrNull { it.packageName == tile.packageName }?.label
+        ?.takeIf { it.isNotBlank() } ?: tile.title
+    else -> tile.title
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LumiaStartGrid(
@@ -165,13 +197,15 @@ fun LumiaStartGrid(
     onResizeTile: (String) -> Unit,
     onStepTileSize: (String, Boolean) -> Unit = { id, _ -> onResizeTile(id) },
     onSetTileSize: (String, TileSize) -> Unit = { id, _ -> onResizeTile(id) },
+    onSetTileSpans: (String, Int, Int) -> Unit = { _, _, _ -> },
+    onGroupTilesManually: (String, String) -> Unit = { _, _ -> },
     onUnpinTile: (String) -> Unit,
     onMoveTile: (String, Boolean) -> Unit,
     onMoveTileToGrid: (String, Int, Int, Int) -> Unit,
     onNudgeTile: (String, Int, Int, Int) -> Unit,
     onReorderTiles: (Int, Int) -> Unit,
     onMoveTileToPage: (String, String) -> Unit,
-    onCustomizeTile: (String, String?, String, Boolean) -> Unit,
+    onOpenWidgetSettings: (TileEntity) -> Unit = {},
     onPinNewTile: (TileEntity) -> Unit,
     onEnterEditMode: () -> Unit,
     onExitEditMode: () -> Unit = {},
@@ -180,22 +214,18 @@ fun LumiaStartGrid(
     installedWidgets: List<WidgetProviderItem> = emptyList(),
     onPickAndBindWidget: (WidgetProviderItem, String, String?) -> Unit = { _, _, _ -> },
     onRequestRebindWidget: (TileEntity) -> Unit = {},
-    onUnlinkWidgetFromTile: (String) -> Unit = {},
     onOpenSmartFolder: (TileEntity, Float, Float) -> Unit = { _, _, _ -> },
     onLaunchSmartFolderItem: (SmartFolderItem) -> Unit = {},
-    onCreateSmartFolderByCategory: (AppCategory, Boolean) -> Unit = { _, _ -> },
-    onGroupPageTilesByCategory: () -> Unit = {},
-    onConvertTileToSmartFolder: (String) -> Unit = {},
-    onCycleSmartFolderMode: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val accent = LumiaPalette.resolveEffectiveAccent(settings)
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val widgetHostManager = remember(context) { LumiaWidgetHostManager.getInstance(context) }
 
     var tileToMoveAcrossPages by remember { mutableStateOf<TileEntity?>(null) }
-    var tileToCustomize by remember { mutableStateOf<TileEntity?>(null) }
 
     var draggingTileId by remember { mutableStateOf<String?>(null) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
@@ -273,8 +303,8 @@ fun LumiaStartGrid(
         val positionedTiles = remember(tiles, totalCols) {
             val placed = mutableListOf<PositionedTile>()
             tiles.forEach { tile ->
-                val spanX = tile.size.effectiveSpanX(totalCols)
-                val spanY = tile.size.effectiveSpanY()
+                val spanX = tile.effectiveSpanX(totalCols)
+                val spanY = tile.effectiveSpanY()
                 if (tile.gridX >= 0 && tile.gridY >= 0) {
                     val clampedX = tile.gridX.coerceIn(0, (totalCols - spanX).coerceAtLeast(0))
                     val clampedY = tile.gridY.coerceAtLeast(0)
@@ -356,7 +386,7 @@ fun LumiaStartGrid(
 
             // One UI Contextual Floating Action Pill when editing a SINGLE tile (does not cover the screen)
             AnimatedVisibility(
-                visible = selectedTileOnThisPage != null && !isEditMode,
+                visible = selectedTileOnThisPage?.hasBoundOrLinkedWidget() == true && !isEditMode,
                 enter = slideInVertically(
                     animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
                     initialOffsetY = { -it }
@@ -367,26 +397,17 @@ fun LumiaStartGrid(
                 ) + fadeOut()
             ) {
                 selectedTileOnThisPage?.let { activeTile ->
-                    SingleTileContextualBar(
-                        tile = activeTile,
-                        accentColor = accent.color,
-                        canMovePage = allHomePages.size > 1,
-                        isLocked = settings.lockHomeLayout,
-                        onCustomize = { tileToCustomize = activeTile },
-                        onMoveToPage = { tileToMoveAcrossPages = activeTile },
-                        onGroupToSmartFolder = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onConvertTileToSmartFolder(activeTile.id)
-                        },
-                        onCycleSmartFolderMode = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onCycleSmartFolderMode(activeTile.id)
-                        },
-                        onOpenSmartFolder = {
-                            onOpenSmartFolder(activeTile, 0.5f, 0.5f)
-                        },
-                        onUnpin = { onUnpinTile(activeTile.id) }
-                    )
+                    // Capability may change after provider removal/rebind without a tile ID change.
+                    val canConfigureWidget = remember(activeTile.id, activeTile.appWidgetId,
+                        activeTile.widgetProvider) { widgetHostManager.canReconfigureTile(activeTile) }
+                    if (canConfigureWidget && !settings.lockHomeLayout) {
+                        SingleTileContextualBar(
+                            tile = activeTile,
+                            displayName = tileDisplayName(activeTile, installedApps, installedWidgets),
+                            accentColor = accent.color,
+                            onWidgetSettings = { onOpenWidgetSettings(activeTile) }
+                        )
+                    }
                 }
             }
 
@@ -521,40 +542,54 @@ fun LumiaStartGrid(
                                         shape = RoundedCornerShape(settings.tileCornerRadiusDp.coerceAtLeast(4).dp)
                                     )
                             )
+                            val folderTarget = findManualFolderDropTarget(
+                                activeDraggingPositioned, positionedTiles,
+                                dragOffsetX, dragOffsetY, cellStepPx)
+                            if (folderTarget != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = horizontalPadding + cellStepDp * folderTarget.gridX,
+                                            y = topPadding + cellStepDp * folderTarget.gridY)
+                                        .width(unitSize * folderTarget.spanX + tileSpacing * (folderTarget.spanX - 1))
+                                        .height(unitSize * folderTarget.spanY + tileSpacing * (folderTarget.spanY - 1))
+                                        .border(3.dp, accent.color, RoundedCornerShape(settings.tileCornerRadiusDp.dp))
+                                        .testTag("home_folder_drop_target"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("Thả vào thư mục", color = Color.White, fontSize = 11.sp,
+                                        modifier = Modifier.background(Color.Black.copy(alpha = 0.75f))
+                                            .padding(horizontal = 5.dp, vertical = 2.dp))
+                                }
+                            }
                         }
 
                         // Live Border-Drag Resize Preview Frame with Spring Morphing & Haptic Step Ticks
                         val activeResizingPositioned = positionedTiles.find { it.tile.id == resizingTileId }
                         if (activeResizingPositioned != null) {
                             val stepThresholdPx = (cellStepPx * 0.6f).coerceAtLeast(1f)
-                            val previewSize by remember(activeResizingPositioned, stepThresholdPx) {
+                            val previewSpans by remember(activeResizingPositioned, stepThresholdPx, totalCols) {
                                 derivedStateOf {
                                     val deltaCols = (resizeOffsetX / stepThresholdPx).roundToInt()
                                     val deltaRows = (resizeOffsetY / stepThresholdPx).roundToInt()
-                                    val rawSpanX = (activeResizingPositioned.spanX + deltaCols).coerceIn(1, 4)
-                                    val rawSpanY = (activeResizingPositioned.spanY + deltaRows).coerceIn(1, 4)
-                                    val candidate = TileSize.fromTargetSpans(rawSpanX, rawSpanY)
-                                    val allowed = activeResizingPositioned.tile.allowedSizesForTile()
-                                    when {
-                                        candidate in allowed -> candidate
-                                        else -> allowed.minByOrNull {
-                                            kotlin.math.abs(it.spanX - candidate.spanX) + kotlin.math.abs(it.spanY - candidate.spanY)
-                                        } ?: activeResizingPositioned.tile.size
-                                    }
+                                    activeResizingPositioned.tile.constrainedResizeSpans(
+                                        activeResizingPositioned.spanX + deltaCols,
+                                        activeResizingPositioned.spanY + deltaRows,
+                                        totalCols
+                                    )
                                 }
                             }
-                            val previewSpanX = previewSize.effectiveSpanX(totalCols)
-                            val previewSpanY = previewSize.effectiveSpanY()
+                            val previewSpanX = previewSpans.first
+                            val previewSpanY = previewSpans.second
                             val previewGridX = activeResizingPositioned.gridX
                                 .coerceIn(0, (totalCols - previewSpanX).coerceAtLeast(0))
                             val previewGridY = activeResizingPositioned.gridY.coerceAtLeast(0)
 
                             var lastPreviewSize by remember(activeResizingPositioned.tile.id) {
-                                mutableStateOf(activeResizingPositioned.tile.size)
+                                mutableStateOf(activeResizingPositioned.spanX to activeResizingPositioned.spanY)
                             }
-                            LaunchedEffect(previewSize) {
-                                if (previewSize != lastPreviewSize) {
-                                    lastPreviewSize = previewSize
+                            LaunchedEffect(previewSpans) {
+                                if (previewSpans != lastPreviewSize) {
+                                    lastPreviewSize = previewSpans
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
                             }
@@ -585,12 +620,7 @@ fun LumiaStartGrid(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = when (previewSize) {
-                                        TileSize.SMALL -> "1x1 (Nhỏ)"
-                                        TileSize.MEDIUM -> "2x2 (Vừa)"
-                                        TileSize.WIDE -> "4x2 (Rộng)"
-                                        TileSize.LARGE -> "4x4 (Lớn)"
-                                    },
+                                    text = "${previewSpanX}×${previewSpanY}",
                                     color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -723,6 +753,8 @@ fun LumiaStartGrid(
                                                                 dragVelY = 0f
                                                             },
                                                             onDragEnd = {
+                                                                val folderTarget = findManualFolderDropTarget(
+                                                                    positioned, positionedTiles, dragOffsetX, dragOffsetY, cellStepPx)
                                                                 val targetX = (positioned.gridX + (dragOffsetX / cellStepPx).roundToInt())
                                                                     .coerceIn(0, (totalCols - positioned.spanX).coerceAtLeast(0))
                                                                 val targetY = (positioned.gridY + (dragOffsetY / cellStepPx).roundToInt())
@@ -732,7 +764,8 @@ fun LumiaStartGrid(
                                                                 dragOffsetY = 0f
                                                                 dragVelX = 0f
                                                                 dragVelY = 0f
-                                                                onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
+                                                                if (folderTarget != null) onGroupTilesManually(tile.id, folderTarget.tile.id)
+                                                                else onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
                                                             },
                                                             onDragCancel = {
                                                                 draggingTileId = null
@@ -764,6 +797,8 @@ fun LumiaStartGrid(
                                                                 dragVelY = 0f
                                                             },
                                                             onDragEnd = {
+                                                                val folderTarget = findManualFolderDropTarget(
+                                                                    positioned, positionedTiles, dragOffsetX, dragOffsetY, cellStepPx)
                                                                 val deltaCellsX = (dragOffsetX / cellStepPx).roundToInt()
                                                                 val deltaCellsY = (dragOffsetY / cellStepPx).roundToInt()
                                                                 val targetX = (positioned.gridX + deltaCellsX)
@@ -775,7 +810,9 @@ fun LumiaStartGrid(
                                                                 dragOffsetY = 0f
                                                                 dragVelX = 0f
                                                                 dragVelY = 0f
-                                                                if (deltaCellsX != 0 || deltaCellsY != 0) {
+                                                                if (folderTarget != null) {
+                                                                    onGroupTilesManually(tile.id, folderTarget.tile.id)
+                                                                } else if (deltaCellsX != 0 || deltaCellsY != 0) {
                                                                     onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
                                                                 }
                                                             },
@@ -875,20 +912,16 @@ fun LumiaStartGrid(
                                             val stepThresholdPx = (cellStepPx * 0.6f).coerceAtLeast(1f)
                                             val deltaCols = (resizeOffsetX / stepThresholdPx).roundToInt()
                                             val deltaRows = (resizeOffsetY / stepThresholdPx).roundToInt()
-                                            val rawSpanX = (positioned.spanX + deltaCols).coerceIn(1, 4)
-                                            val rawSpanY = (positioned.spanY + deltaRows).coerceIn(1, 4)
-                                            val candidate = TileSize.fromTargetSpans(rawSpanX, rawSpanY)
-                                            val allowed = tile.allowedSizesForTile()
-                                            val newSize = if (candidate in allowed) candidate else {
-                                                allowed.minByOrNull {
-                                                    kotlin.math.abs(it.spanX - candidate.spanX) + kotlin.math.abs(it.spanY - candidate.spanY)
-                                                } ?: tile.size
-                                            }
+                                            val (newSpanX, newSpanY) = tile.constrainedResizeSpans(
+                                                positioned.spanX + deltaCols,
+                                                positioned.spanY + deltaRows,
+                                                totalCols
+                                            )
                                             resizingTileId = null
                                             resizeOffsetX = 0f
                                             resizeOffsetY = 0f
-                                            if (newSize != tile.size) {
-                                                onSetTileSize(tile.id, newSize)
+                                            if (newSpanX != positioned.spanX || newSpanY != positioned.spanY) {
+                                                onSetTileSpans(tile.id, newSpanX, newSpanY)
                                             }
                                         },
                                         onResizeDragCancel = {
@@ -913,16 +946,12 @@ fun LumiaStartGrid(
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             onNudgeTile(tile.id, 0, 1, totalCols)
                                         },
-                                        onMoveToPage = if (allHomePages.size > 1) {
-                                            { tileToMoveAcrossPages = tile }
-                                        } else null,
-                                        onCustomizeTile = { tileToCustomize = tile },
                                         onFinishSingleEdit = { onSelectTileForEdit(null) },
                                         onRequestBindWidgetPermission = { targetTile ->
                                             onRequestRebindWidget(targetTile)
                                         },
                                         onReplaceMissingWidget = { targetTile ->
-                                            tileToCustomize = targetTile
+                                            onRequestRebindWidget(targetTile)
                                         },
                                         modifier = Modifier.fillMaxSize()
                                     )
@@ -930,321 +959,6 @@ fun LumiaStartGrid(
                             }
                         }
                     }
-                }
-            }
-        }
-
-        // Modal Sheet: Customize Individual Tile (Color Override & Label)
-        tileToCustomize?.let { tile ->
-            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            var customLabel by remember(tile.id) { mutableStateOf(tile.title) }
-            var selectedColorHex by remember(tile.id) { mutableStateOf(tile.colorOverrideHex) }
-            var showAdvancedTileOptions by remember(tile.id) { mutableStateOf(false) }
-            val recommendedWidget = remember(tile, installedWidgets) {
-                DefaultWidgetMatcher.recommend(tile, installedWidgets)
-            }
-
-            ModalBottomSheet(
-                onDismissRequest = { tileToCustomize = null },
-                sheetState = sheetState,
-                containerColor = Color(0xFF17171B),
-                contentColor = Color.White
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = tile.title,
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    if (recommendedWidget != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(accent.color.copy(alpha = 0.18f))
-                                .clickable {
-                                    tileToCustomize = null
-                                    onPickAndBindWidget(recommendedWidget, currentPage.id, tile.id)
-                                }
-                                .padding(horizontal = 16.dp, vertical = 15.dp)
-                                .testTag("connect_recommended_widget"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(Icons.Default.Widgets, contentDescription = null, tint = accent.color)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Kết nối widget", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    "${recommendedWidget.appName} · ${recommendedWidget.label}",
-                                    fontSize = 12.sp,
-                                    color = Color.White.copy(alpha = 0.72f),
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Icon(Icons.Default.Link, contentDescription = "Kết nối widget đề xuất", tint = Color.White)
-                        }
-                    } else if (tile.hasBoundOrLinkedWidget()) {
-                        Text("Đã liên kết với widget trên điện thoại", color = Color.White.copy(alpha = 0.72f), fontSize = 13.sp)
-                    } else if (tile.tileType == TileType.PERFORMANCE || tile.tileType == TileType.BATTERY) {
-                        Text("Ô này dùng dữ liệu hệ thống. Không cần kết nối widget khác.",
-                            color = Color.White.copy(alpha = 0.72f), fontSize = 13.sp)
-                    } else if (tile.id == "tile_clock_calendar") {
-                        Text("Ô này đang dùng giờ từ thiết bị.", color = Color.White.copy(alpha = 0.72f), fontSize = 13.sp)
-                    }
-                    OutlinedButton(
-                        onClick = { showAdvancedTileOptions = !showAdvancedTileOptions },
-                        modifier = Modifier.fillMaxWidth().testTag("toggle_advanced_tile_options")
-                    ) {
-                        Text(if (showAdvancedTileOptions) "Thu gọn" else "Tùy chỉnh thêm")
-                    }
-                    if (showAdvancedTileOptions) {
-                    OutlinedTextField(
-                        value = customLabel,
-                        onValueChange = { newText ->
-                            customLabel = newText
-                            onCustomizeTile(tile.id, selectedColorHex, newText, tile.isLiveEnabled)
-                        },
-                        label = { Text("Tên ô", color = Color.White.copy(alpha = 0.7f)) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = accent.color,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Text(
-                        text = "Màu ô",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    val isClearTileSelected = selectedColorHex.equals("TRANSPARENT", ignoreCase = true)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isClearTileSelected) accent.color.copy(alpha = 0.25f)
-                                else Color.White.copy(alpha = 0.07f)
-                            )
-                            .border(
-                                width = if (isClearTileSelected) 1.5.dp else 1.dp,
-                                color = if (isClearTileSelected) accent.color else Color.White.copy(alpha = 0.22f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable {
-                                selectedColorHex = "TRANSPARENT"
-                                onCustomizeTile(tile.id, "TRANSPARENT", customLabel, tile.isLiveEnabled)
-                            }
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Trong suốt",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Hiển thị hình nền qua ô",
-                                color = Color.White.copy(alpha = 0.65f),
-                                fontSize = 11.sp
-                            )
-                        }
-                        if (isClearTileSelected) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = accent.color,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(6),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(106.dp)
-                    ) {
-                        items(LumiaPalette.Accents) { acc ->
-                            val isSelected = selectedColorHex != null && acc.hex.equals(selectedColorHex, ignoreCase = true)
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(acc.color)
-                                    .border(
-                                        width = if (isSelected) 2.dp else 0.dp,
-                                        color = if (isSelected) Color.White else Color.Transparent,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable {
-                                        selectedColorHex = acc.hex
-                                        onCustomizeTile(tile.id, acc.hex, customLabel, tile.isLiveEnabled)
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            selectedColorHex = null
-                            onCustomizeTile(tile.id, null, customLabel, tile.isLiveEnabled)
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Dùng màu chủ đề mặc định", color = Color.White)
-                    }
-
-                    // Link / Unlink Native Android AppWidget to this Start Screen Tile
-                    if (tile.tileType != TileType.SMART_FOLDER) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Widgets,
-                                contentDescription = null,
-                                tint = accent.color,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "CHỌN WIDGET KHÁC",
-                                color = accent.color,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.8.sp
-                            )
-                        }
-
-                        if (tile.hasBoundOrLinkedWidget()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFE81123).copy(alpha = 0.18f))
-                                    .border(1.dp, Color(0xFFE81123).copy(alpha = 0.6f), RoundedCornerShape(10.dp))
-                                    .clickable {
-                                        onUnlinkWidgetFromTile(tile.id)
-                                        tileToCustomize = null
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                                    .testTag("unlink_widget_from_tile_button"),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Gỡ widget",
-                                        color = Color.White,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "Quay lại ô ứng dụng",
-                                        color = Color.White.copy(alpha = 0.68f),
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Icon(
-                                    imageVector = Icons.Default.LinkOff,
-                                    contentDescription = "Gỡ liên kết Widget",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-
-                        val prioritizedWidgets = remember(installedWidgets, tile.packageName) {
-                            val sameApp = installedWidgets.filter { it.packageName == tile.packageName }
-                            val others = installedWidgets.filter { it.packageName != tile.packageName }
-                            (sameApp + others).take(8)
-                        }
-
-                        if (prioritizedWidgets.isNotEmpty()) {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(140.dp)
-                                    .verticalScroll(rememberScrollState())
-                            ) {
-                                prioritizedWidgets.forEach { wItem ->
-                                    val isSamePkg = wItem.packageName == tile.packageName && tile.packageName.isNotBlank()
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(
-                                                if (isSamePkg) accent.color.copy(alpha = 0.22f)
-                                                else Color.White.copy(alpha = 0.06f)
-                                            )
-                                            .clickable {
-                                                tileToCustomize = null
-                                                onPickAndBindWidget(wItem, currentPage.id, tile.id)
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                                            .testTag("link_widget_option_${wItem.providerComponent}"),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "${wItem.appName} • ${wItem.label}",
-                                                color = Color.White,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = "Cỡ chuẩn: ${wItem.targetCellWidth}x${wItem.targetCellHeight} ô",
-                                                color = Color.White.copy(alpha = 0.65f),
-                                                fontSize = 10.sp
-                                            )
-                                        }
-                                        Icon(
-                                            imageVector = Icons.Default.Link,
-                                            contentDescription = "Liên kết Widget",
-                                            tint = accent.color,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    } // Advanced: name, appearance and alternate widget providers
-                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
@@ -1271,7 +985,7 @@ fun LumiaStartGrid(
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "Chọn trang Home đích cho \"${tile.title}\":",
+                        text = "Chọn trang cho \"${tileDisplayName(tile, installedApps, installedWidgets)}\":",
                         color = Color.White.copy(alpha = 0.75f),
                         fontSize = 14.sp
                     )
@@ -1330,8 +1044,7 @@ fun LumiaStartGrid(
         // Modal Sheet: Unified Widget Picker, App Tile Picker & Smart Folders
         if (showAddTileSheet) {
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            var absorbExistingTiles by remember { mutableStateOf(false) }
-            var activePickerTab by remember { mutableIntStateOf(0) } // 0 = Widgets & Apps, 1 = Smart Folders
+            val activePickerTab = 0
             var pickerSearchQuery by remember { mutableStateOf("") }
             var expandedWidgetApp by remember { mutableStateOf<String?>(null) }
             var selectedNewAppTileSize by remember { mutableStateOf(TileSize.MEDIUM) }
@@ -1359,40 +1072,8 @@ fun LumiaStartGrid(
                 ) {
                     item(key = "picker_header", contentType = "header") {
                         Column {
-                    // Header Tabs: 0 = Widget & App Tile, 1 = Smart Folders
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val tabs = listOf(
-                            0 to "Widget & Ứng dụng",
-                            1 to "Thư mục Thông minh"
-                        )
-                        tabs.forEach { (idx, title) ->
-                            val selected = activePickerTab == idx
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(if (selected) accent.color else Color.Transparent)
-                                    .clickable { activePickerTab = idx }
-                                    .padding(vertical = 8.dp)
-                                    .testTag(if (idx == 0) "add_sheet_tab_widgets" else "add_sheet_tab_folders"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = title,
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
+                    Text("Thêm ô", color = Color.White, fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold)
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -1742,196 +1423,6 @@ fun LumiaStartGrid(
                             }
                         }
                         }
-                    } else {
-                        item(key = "folder_controls", contentType = "controls") {
-                            Column {
-                    // Section 2: Smart Folder Widget System (MIUI / HyperOS)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FolderSpecial,
-                            contentDescription = null,
-                            tint = accent.color,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "THƯ MỤC THÔNG MINH (MIUI / HYPEROS PEEK)",
-                            color = accent.color,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
-                    Text(
-                        text = "Nhóm các Tile theo danh mục kèm góc xem trước Folder-Peek & hiệu ứng mở bung mượt mà",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // One-Tap Auto-Group Current Page Tiles by Category
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(accent.color.copy(alpha = 0.22f))
-                            .border(1.dp, accent.color.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
-                            .clickable {
-                                onGroupPageTilesByCategory()
-                                onDismissAddTileSheet()
-                            }
-                            .padding(horizontal = 14.dp, vertical = 11.dp)
-                            .testTag("group_page_tiles_by_category_button"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(accent.color),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = "Tự động gom các Tile trên trang theo Danh mục",
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "Phân loại & gom gọn toàn bộ Tile rời trên ${currentPage.title} vào các Smart Folder",
-                                    color = Color.White.copy(alpha = 0.72f),
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Toggle: Absorb matching page tiles when creating a category folder
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .clickable { absorbExistingTiles = !absorbExistingTiles }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                            .testTag("toggle_absorb_matching_tiles"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Thu gọn luôn các Tile cùng danh mục đang có trên trang",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 12.sp
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(if (absorbExistingTiles) accent.color else Color.White.copy(alpha = 0.16f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (absorbExistingTiles) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Category Smart Folder Quick-Create Row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AppCategory.assignableCategories.forEach { cat ->
-                            val catColor = parseHexColorSafe(cat.badgeColorHex, accent.color)
-                            Column(
-                                modifier = Modifier
-                                    .width(108.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(catColor.copy(alpha = 0.18f))
-                                    .border(1.dp, catColor.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        onCreateSmartFolderByCategory(cat, absorbExistingTiles)
-                                        onDismissAddTileSheet()
-                                    }
-                                    .padding(10.dp)
-                                    .testTag("add_smart_folder_cat_${cat.name.lowercase()}"),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(26.dp)
-                                            .clip(RoundedCornerShape(7.dp))
-                                            .background(catColor),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = resolveCategoryIcon(cat),
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = "3+1 Peek",
-                                        color = Color.White.copy(alpha = 0.7f),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                Text(
-                                    text = cat.shortLabel,
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Ghim thư mục",
-                                    color = Color.White.copy(alpha = 0.65f),
-                                    fontSize = 10.sp
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                            }
-                        }
                     }
                     item(key = "bottom_space") { Spacer(modifier = Modifier.height(20.dp)) }
                 }
@@ -1943,17 +1434,11 @@ fun LumiaStartGrid(
 @Composable
 private fun SingleTileContextualBar(
     tile: TileEntity,
+    displayName: String,
     accentColor: Color,
-    canMovePage: Boolean,
-    isLocked: Boolean,
-    onCustomize: () -> Unit,
-    onMoveToPage: () -> Unit,
-    onGroupToSmartFolder: () -> Unit = {},
-    onCycleSmartFolderMode: () -> Unit = {},
-    onOpenSmartFolder: () -> Unit = {},
-    onUnpin: () -> Unit
+    onWidgetSettings: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -1962,12 +1447,11 @@ private fun SingleTileContextualBar(
             .border(1.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .testTag("single_tile_contextual_bar"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Text(
-                text = tile.title,
+                text = displayName,
                 color = Color.White,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
@@ -1975,7 +1459,7 @@ private fun SingleTileContextualBar(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = if (isLocked) "Bố cục đang khóa" else "${tile.size.spanX}×${tile.size.spanY} • Kéo viền để đổi cỡ • Tự động lưu",
+                text = "Kéo viền để đổi cỡ",
                 color = Color.White.copy(alpha = 0.65f),
                 fontSize = 10.sp,
                 maxLines = 1,
@@ -1983,57 +1467,19 @@ private fun SingleTileContextualBar(
             )
         }
 
-        if (!isLocked) {
             Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                if (tile.tileType == TileType.SMART_FOLDER) {
                     SingleTilePillAction(
-                        icon = Icons.Default.GridView,
-                        label = "Kiểu Peek",
-                        bgColor = accentColor.copy(alpha = 0.35f),
-                        onClick = onCycleSmartFolderMode,
-                        testTag = "contextual_bar_smart_folder_mode"
-                    )
-                    SingleTilePillAction(
-                        icon = Icons.Default.FolderSpecial,
-                        label = "Mở",
-                        bgColor = Color.White.copy(alpha = 0.14f),
-                        onClick = onOpenSmartFolder,
-                        testTag = "contextual_bar_open_smart_folder"
-                    )
-                } else if (!tile.hasBoundOrLinkedWidget()) {
-                    SingleTilePillAction(
-                        icon = Icons.Default.FolderSpecial,
-                        label = "Gom nhóm",
-                        bgColor = accentColor.copy(alpha = 0.32f),
-                        onClick = onGroupToSmartFolder,
-                        testTag = "contextual_bar_group_smart_folder"
-                    )
-                }
-                SingleTilePillAction(
-                    icon = Icons.Default.Palette,
-                    label = "Màu",
-                    bgColor = Color.White.copy(alpha = 0.12f),
-                    onClick = onCustomize
-                )
-                if (canMovePage) {
-                    SingleTilePillAction(
-                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
-                        label = "Trang",
+                        icon = Icons.Default.Settings,
+                        label = "Cài đặt widget",
                         bgColor = Color.White.copy(alpha = 0.12f),
-                        onClick = onMoveToPage
+                        onClick = onWidgetSettings,
+                        testTag = "contextual_bar_widget_settings"
                     )
-                }
-                SingleTilePillAction(
-                    icon = Icons.Default.Delete,
-                    label = "Bỏ ghim",
-                    bgColor = Color(0xFFE81123).copy(alpha = 0.85f),
-                    onClick = onUnpin
-                )
             }
-        }
     }
 }
 
@@ -2047,24 +1493,25 @@ private fun SingleTilePillAction(
 ) {
     Row(
         modifier = Modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
             .clickable { onClick() }
             .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
-            .padding(horizontal = 8.dp, vertical = 5.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = Color.White,
-            modifier = Modifier.size(13.dp)
+            modifier = Modifier.size(18.dp)
         )
         Text(
             text = label,
             color = Color.White,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1
         )

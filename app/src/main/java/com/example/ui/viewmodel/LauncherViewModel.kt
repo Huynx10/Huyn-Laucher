@@ -23,6 +23,7 @@ import com.example.data.model.SystemTelemetry
 import com.example.data.model.TileEntity
 import com.example.data.model.TileSize
 import com.example.data.model.WidgetProviderItem
+import com.example.data.model.Wp10TileStyle
 import com.example.data.remote.CloudBackup
 import com.example.data.remote.UserProfile
 import com.example.data.repository.CloudSyncRepository
@@ -48,6 +49,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -70,6 +72,56 @@ data class SmartFolderOpenRequest(
     val tileId: String,
     val pivotFractionX: Float = 0.5f,
     val pivotFractionY: Float = 0.5f
+)
+
+// Only the two appearance fields are replaced; all unrelated settings come from the
+// current StateFlow value, not from a potentially stale Compose settings snapshot.
+internal fun MutableStateFlow<LauncherSettings>.updateTileAppearanceFromLatest(
+    resolve: (LauncherSettings) -> Pair<Wp10TileStyle, Float>
+): LauncherSettings = updateAndGet { current ->
+    val (style, opacity) = resolve(current)
+    current.copy(wp10TileStyle = style, tileOpacity = opacity.coerceIn(0f, 1f))
+}
+
+internal fun LauncherSettings.withAppearanceFrom(latest: LauncherSettings): LauncherSettings =
+    copy(wp10TileStyle = latest.wp10TileStyle, tileOpacity = latest.tileOpacity)
+
+/** Merge only Advanced controls actually changed against their Compose baseline. */
+internal fun LauncherSettings.mergeAdvancedEdits(
+    baseline: LauncherSettings,
+    edited: LauncherSettings
+): LauncherSettings = copy(
+    accentColorHex = if (edited.accentColorHex != baseline.accentColorHex) edited.accentColorHex else accentColorHex,
+    autoWallpaperAccentEnabled = if (edited.autoWallpaperAccentEnabled != baseline.autoWallpaperAccentEnabled) edited.autoWallpaperAccentEnabled else autoWallpaperAccentEnabled,
+    dynamicAccentMode = if (edited.dynamicAccentMode != baseline.dynamicAccentMode) edited.dynamicAccentMode else dynamicAccentMode,
+    dynamicSwatchIndex = if (edited.dynamicSwatchIndex != baseline.dynamicSwatchIndex) edited.dynamicSwatchIndex else dynamicSwatchIndex,
+    isDarkTheme = if (edited.isDarkTheme != baseline.isDarkTheme) edited.isDarkTheme else isDarkTheme,
+    wp10RevealBorder = if (edited.wp10RevealBorder != baseline.wp10RevealBorder) edited.wp10RevealBorder else wp10RevealBorder,
+    showMoreTiles = if (edited.showMoreTiles != baseline.showMoreTiles) edited.showMoreTiles else showMoreTiles,
+    tileCornerRadiusDp = if (edited.tileCornerRadiusDp != baseline.tileCornerRadiusDp) edited.tileCornerRadiusDp else tileCornerRadiusDp,
+    tileSpacingDp = if (edited.tileSpacingDp != baseline.tileSpacingDp) edited.tileSpacingDp else tileSpacingDp,
+    useRealAppIcons = if (edited.useRealAppIcons != baseline.useRealAppIcons) edited.useRealAppIcons else useRealAppIcons,
+    miuiGlassBorder = if (edited.miuiGlassBorder != baseline.miuiGlassBorder) edited.miuiGlassBorder else miuiGlassBorder,
+    pageTransitionEffect = if (edited.pageTransitionEffect != baseline.pageTransitionEffect) edited.pageTransitionEffect else pageTransitionEffect,
+    doubleTapToGlance = if (edited.doubleTapToGlance != baseline.doubleTapToGlance) edited.doubleTapToGlance else doubleTapToGlance,
+    lockHomeLayout = if (edited.lockHomeLayout != baseline.lockHomeLayout) edited.lockHomeLayout else lockHomeLayout,
+    autoArrangeTiles = if (edited.autoArrangeTiles != baseline.autoArrangeTiles) edited.autoArrangeTiles else autoArrangeTiles,
+    wallpaperSource = if (edited.wallpaperSource != baseline.wallpaperSource) edited.wallpaperSource else wallpaperSource,
+    wallpaperGradientIndex = if (edited.wallpaperGradientIndex != baseline.wallpaperGradientIndex) edited.wallpaperGradientIndex else wallpaperGradientIndex,
+    wallpaperDimAlpha = if (edited.wallpaperDimAlpha != baseline.wallpaperDimAlpha) edited.wallpaperDimAlpha else wallpaperDimAlpha,
+    turnstileAnimationEnabled = if (edited.turnstileAnimationEnabled != baseline.turnstileAnimationEnabled) edited.turnstileAnimationEnabled else turnstileAnimationEnabled,
+    glanceScreenEnabled = if (edited.glanceScreenEnabled != baseline.glanceScreenEnabled) edited.glanceScreenEnabled else glanceScreenEnabled,
+    batterySaverMode = if (edited.batterySaverMode != baseline.batterySaverMode) edited.batterySaverMode else batterySaverMode,
+    batterySaverThresholdPct = if (edited.batterySaverThresholdPct != baseline.batterySaverThresholdPct) edited.batterySaverThresholdPct else batterySaverThresholdPct,
+    autoOptimizeBackgroundApps = if (edited.autoOptimizeBackgroundApps != baseline.autoOptimizeBackgroundApps) edited.autoOptimizeBackgroundApps else autoOptimizeBackgroundApps,
+    showPageHeaderTitle = if (edited.showPageHeaderTitle != baseline.showPageHeaderTitle) edited.showPageHeaderTitle else showPageHeaderTitle,
+    allAppsViewMode = if (edited.allAppsViewMode != baseline.allAppsViewMode) edited.allAppsViewMode else allAppsViewMode,
+    allAppsGridColumns = if (edited.allAppsGridColumns != baseline.allAppsGridColumns) edited.allAppsGridColumns else allAppsGridColumns,
+    allAppsSortOrder = if (edited.allAppsSortOrder != baseline.allAppsSortOrder) edited.allAppsSortOrder else allAppsSortOrder,
+    allAppsShowSearchBar = if (edited.allAppsShowSearchBar != baseline.allAppsShowSearchBar) edited.allAppsShowSearchBar else allAppsShowSearchBar,
+    allAppsShowLetterHeaders = if (edited.allAppsShowLetterHeaders != baseline.allAppsShowLetterHeaders) edited.allAppsShowLetterHeaders else allAppsShowLetterHeaders,
+    allAppsCategorizedEnabled = if (edited.allAppsCategorizedEnabled != baseline.allAppsCategorizedEnabled) edited.allAppsCategorizedEnabled else allAppsCategorizedEnabled,
+    quickNotes = if (edited.quickNotes != baseline.quickNotes) edited.quickNotes else quickNotes
 )
 
 class LauncherViewModel(
@@ -560,6 +612,16 @@ class LauncherViewModel(
         }
     }
 
+    fun setTileSpans(tileId: String, spanX: Int, spanY: Int) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch { repository.setTileSpans(tileId, spanX, spanY) }
+    }
+
+    fun groupHomeTilesManually(sourceId: String, targetId: String) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch { repository.groupHomeTilesManually(sourceId, targetId) }
+    }
+
     fun updateTileCustomization(
         tileId: String,
         colorOverrideHex: String?,
@@ -786,7 +848,14 @@ class LauncherViewModel(
             val pinned = tiles.value.map { it.packageName }.filter { it.isNotEmpty() }.toSet()
             runLauncherBackgroundRead(onError = { Log.e(TAG, "App catalog scan failed", it) }) {
                 repository.getInstalledApps(pinned)
-            }?.let { _apps.value = it }
+            }?.let { installed ->
+                // Retry legacy folder conversion after a transiently empty startup catalog.
+                // Publish the catalog after the conversion to avoid one frame of auto grouping.
+                runLauncherBackgroundRead(onError = { Log.e(TAG, "Folder migration retry failed", it) }) {
+                    repository.completeLegacyFolderMigration(installed)
+                }
+                _apps.value = installed
+            }
             runLauncherBackgroundRead(onError = { Log.e(TAG, "Widget provider scan failed", it) }) {
                 repository.discoverInstalledWidgets()
             }?.let { _installedWidgets.value = it }
@@ -842,9 +911,60 @@ class LauncherViewModel(
         }
     }
 
+    fun updateTileAppearance(style: Wp10TileStyle, opacity: Float) {
+        val candidate = _settings.updateTileAppearanceFromLatest { style to opacity }
+        pendingSettings.trySend(candidate)
+    }
+
+    fun cycleTileAppearance(acrylicOpacity: Float, tintedOpacity: Float) {
+        val candidate = _settings.updateTileAppearanceFromLatest { current ->
+            val nextStyle = current.wp10TileStyle.next()
+            val nextOpacity = when (nextStyle) {
+                Wp10TileStyle.CRYSTAL_CLEAR -> 0f
+                Wp10TileStyle.CLASSIC_METRO -> 1f
+                Wp10TileStyle.FLUENT_ACRYLIC -> acrylicOpacity
+                Wp10TileStyle.TINTED_TRANSLUCENT -> tintedOpacity
+            }
+            nextStyle to nextOpacity
+        }
+        pendingSettings.trySend(candidate)
+    }
+
+    fun toggleHomeLayoutLock() {
+        val candidate = _settings.updateAndGet { current ->
+            current.copy(lockHomeLayout = !current.lockHomeLayout)
+        }
+        pendingSettings.trySend(candidate)
+    }
+
     fun updateSettings(newSettings: LauncherSettings) {
         val prevCustom = _settings.value.customAppCategories
-        val syncedSettings = if (newSettings.autoWallpaperAccentEnabled) {
+        val syncedSettings = withResolvedAutoAccent(newSettings)
+        _settings.value = syncedSettings
+        publishSettingsChange(prevCustom, syncedSettings)
+    }
+
+    /** Apply a small UI edit to the current state so delayed Compose callbacks cannot restore stale fields. */
+    fun mutateSettings(transform: (LauncherSettings) -> LauncherSettings): LauncherSettings {
+        val prevCustom = _settings.value.customAppCategories
+        val syncedSettings = _settings.updateAndGet { latest ->
+            withResolvedAutoAccent(transform(latest))
+        }
+        publishSettingsChange(prevCustom, syncedSettings)
+        return syncedSettings
+    }
+
+    /** Apply only Advanced edits to the newest state, never a whole Compose snapshot. */
+    fun updateAdvancedSettings(baseline: LauncherSettings, edited: LauncherSettings) {
+        val prevCustom = _settings.value.customAppCategories
+        val syncedSettings = _settings.updateAndGet { latest ->
+            withResolvedAutoAccent(latest.mergeAdvancedEdits(baseline, edited))
+        }
+        publishSettingsChange(prevCustom, syncedSettings)
+    }
+
+    private fun withResolvedAutoAccent(newSettings: LauncherSettings): LauncherSettings =
+        if (newSettings.autoWallpaperAccentEnabled) {
             val autoHex = com.example.ui.theme.DynamicAccentEngine.resolveAutoAccent(
                 wallpaperIndex = newSettings.wallpaperGradientIndex,
                 mode = newSettings.dynamicAccentMode,
@@ -854,7 +974,8 @@ class LauncherViewModel(
         } else {
             newSettings
         }
-        _settings.value = syncedSettings
+
+    private fun publishSettingsChange(prevCustom: Map<String, String>, syncedSettings: LauncherSettings) {
         if (prevCustom != syncedSettings.customAppCategories) {
             _apps.value = _apps.value.map { app ->
                 val overrideCat = syncedSettings.customAppCategories[app.packageName]

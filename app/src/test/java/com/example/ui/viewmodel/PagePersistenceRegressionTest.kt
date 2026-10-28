@@ -8,10 +8,13 @@ import com.example.data.db.LumiaDatabase
 import com.example.data.model.PageType
 import com.example.data.model.TileEntity
 import com.example.data.model.TileType
+import com.example.data.model.Wp10TileStyle
 import com.example.data.repository.LauncherRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.resetMain
@@ -163,5 +166,50 @@ class PagePersistenceRegressionTest {
         assertEquals(raw, prefs.getString("launcher_pages_json", null))
         // Even malformed input must not remove the terminal All Apps destination.
         assertEquals(PageType.ALL_APPS, repo.loadPages().last().pageType)
+    }
+
+    @Test fun advancedSaveAfterAppearanceAndOtherSettingsPersistsAcrossRepositoryReopen() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val widget = TileEntity(
+            id = "advanced_widget", title = "Clock", tileType = TileType.WIDGET,
+            appWidgetId = 127, widgetProvider = "example/.Provider",
+            pageId = "page_home_1", gridX = 1, gridY = 2
+        )
+        db.tileDao().insertOrUpdate(widget)
+        val staleAdvanced = vm.settings.value
+
+        // Exercise the real ViewModel entrypoints in a fixed, reproducible order.
+        vm.updateTileAppearance(Wp10TileStyle.CRYSTAL_CLEAR, 0f)
+        vm.updateSettings(vm.settings.value.copy(defaultHomePageId = "page_home_2", cloudSyncState = "newer sync"))
+        vm.updateAdvancedSettings(staleAdvanced, staleAdvanced.copy(isDarkTheme = false))
+        vm.updateAdvancedSettings(staleAdvanced, staleAdvanced.copy(quickNotes = "Advanced note"))
+
+        assertEquals(Wp10TileStyle.CRYSTAL_CLEAR, vm.settings.value.wp10TileStyle)
+        assertEquals(false, vm.settings.value.isDarkTheme)
+        assertEquals("Advanced note", vm.settings.value.quickNotes)
+        assertEquals("page_home_2", vm.settings.value.defaultHomePageId)
+        assertEquals("newer sync", vm.settings.value.cloudSyncState)
+
+        // The settings writer is conflated: await the final snapshot rather than timing a delay.
+        withTimeout(15_000) {
+            while (repo.loadSettings().let { saved ->
+                    saved.wp10TileStyle != Wp10TileStyle.CRYSTAL_CLEAR ||
+                        saved.tileOpacity != 0f ||
+                        saved.isDarkTheme ||
+                        saved.quickNotes != "Advanced note" ||
+                        saved.defaultHomePageId != "page_home_2" ||
+                        saved.cloudSyncState != "newer sync"
+                }) {
+                delay(10)
+            }
+        }
+        val reopened = LauncherRepository(context, db.tileDao(), db).loadSettings()
+        assertEquals(Wp10TileStyle.CRYSTAL_CLEAR, reopened.wp10TileStyle)
+        assertEquals(0f, reopened.tileOpacity, 0f)
+        assertFalse(reopened.isDarkTheme)
+        assertEquals("Advanced note", reopened.quickNotes)
+        assertEquals("page_home_2", reopened.defaultHomePageId)
+        assertEquals("newer sync", reopened.cloudSyncState)
+        assertEquals(widget, db.tileDao().getAllTiles().single { it.id == widget.id })
     }
 }

@@ -73,6 +73,25 @@ class DataSafetyRegressionTest {
         assertTrue(repo.loadSettings().tileOpacity.isFinite())
     }
 
+    @Test fun transparentStyleSavePreservesExistingWidgetAndLayout() = runBlocking {
+        val widget = TileEntity(
+            "existing_widget", "Clock", tileType = TileType.WIDGET,
+            appWidgetId = 127, widgetProvider = "example/.Provider",
+            gridX = 2, gridY = 3
+        )
+        db.tileDao().insertOrUpdate(widget)
+
+        repo.saveSettingsWithReflow(repo.loadSettings().copy(
+            wp10TileStyle = Wp10TileStyle.CRYSTAL_CLEAR,
+            tileOpacity = 0f
+        ))
+
+        val saved = repo.loadSettings()
+        assertEquals(Wp10TileStyle.CRYSTAL_CLEAR, saved.wp10TileStyle)
+        assertEquals(0f, saved.tileOpacity, 0f)
+        assertEquals(listOf(widget), db.tileDao().getAllTiles())
+    }
+
     @Test fun wrongTypeHomeGridFlagsCannotAbortTileStyleSaveOrDeleteWidgets() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
@@ -654,6 +673,33 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(original), db.tileDao().getAllTiles())
     }
 
+    @Test fun legacyAutoFolderWaitsForCatalogThenFreezesMembersWithoutMovingTile() = runBlocking {
+        val legacy = TileEntity(
+            id = "old_folder", title = "Nhạc", tileType = TileType.SMART_FOLDER,
+            packageName = SmartFolderConfig(
+                category = AppCategory.MEDIA, autoSyncCategory = true,
+                items = listOf(SmartFolderItem("saved", "Saved", "example.saved"))
+            ).toJsonString(), gridX = 2, gridY = 6, pageId = "page_home_1"
+        )
+        db.tileDao().insertOrUpdate(legacy)
+
+        repo.completeLegacyFolderMigration(emptyList())
+        assertEquals(legacy, db.tileDao().getAllTiles().single())
+
+        val installed = listOf(AppItem("Music", "example.music", category = AppCategory.MEDIA))
+        repo.completeLegacyFolderMigration(installed)
+        val frozen = db.tileDao().getAllTiles().single()
+        val config = SmartFolderConfig.fromTile(frozen)
+        assertEquals(legacy.id, frozen.id)
+        assertEquals(legacy.gridX, frozen.gridX)
+        assertEquals(legacy.gridY, frozen.gridY)
+        assertFalse(config.autoSyncCategory)
+        assertEquals(setOf("example.saved", "example.music"),
+            config.items.map { it.packageName }.toSet())
+        repo.completeLegacyFolderMigration(installed)
+        assertEquals(frozen, db.tileDao().getAllTiles().single())
+    }
+
     @Test fun deliberatelyEmptyInitializedHomeStaysEmptyAfterLegacyUpgrade() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
@@ -675,7 +721,8 @@ class DataSafetyRegressionTest {
             old.version = 2
         }
         val migrated = Room.databaseBuilder(context, LumiaDatabase::class.java, name)
-            .addMigrations(LumiaDatabase.MIGRATION_2_4).allowMainThreadQueries().build()
+            .addMigrations(LumiaDatabase.MIGRATION_2_4, LumiaDatabase.MIGRATION_4_5)
+            .allowMainThreadQueries().build()
         try {
             val tile = migrated.tileDao().getAllTiles().single()
             assertEquals("Saved title", tile.title)
@@ -683,10 +730,59 @@ class DataSafetyRegressionTest {
             assertEquals(6, tile.gridY)
             assertEquals(-1, tile.appWidgetId)
             assertEquals("", tile.widgetProvider)
+            assertEquals(0, tile.customSpanX)
+            assertEquals(0, tile.customSpanY)
         } finally {
             migrated.close()
             context.deleteDatabase(name)
         }
+    }
+
+    @Test fun freeResizePreservesIndependentSpansAndWidgetAxisRules() = runBlocking {
+        val app = TileEntity("resizable", "App", gridX = 0, gridY = 0)
+        val widget = TileEntity("widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 123, widgetProvider = "example/.Widget", size = TileSize.MEDIUM,
+            widgetMinSpanX = 2, widgetMinSpanY = 2, widgetResizeMode = 1,
+            gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(app, widget))
+        repo.setTileSpans(app.id, 3, 5)
+        repo.setTileSpans(widget.id, 4, 5)
+        val after = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(3, after.getValue(app.id).effectiveSpanX(4))
+        assertEquals(5, after.getValue(app.id).effectiveSpanY())
+        assertEquals(4, after.getValue(widget.id).effectiveSpanX(4))
+        assertEquals(2, after.getValue(widget.id).effectiveSpanY())
+        val backup = repo.exportBackupJson()
+        assertTrue(repo.restoreFromJson(backup))
+        val restored = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(3, restored.getValue(app.id).customSpanX)
+        assertEquals(5, restored.getValue(app.id).customSpanY)
+        assertEquals(-1, restored.getValue(widget.id).appWidgetId)
+        assertEquals(4, restored.getValue(widget.id).customSpanX)
+        assertEquals(2, restored.getValue(widget.id).customSpanY)
+    }
+
+    @Test fun manualHomeFolderAbsorbsOnlyDroppedAppsAndRestoresTheirSpans() = runBlocking {
+        val first = TileEntity("first", "First", packageName = "example.first",
+            customSpanX = 3, customSpanY = 2, gridX = 0, gridY = 0)
+        val second = TileEntity("second", "Second", packageName = "example.second",
+            gridX = 2, gridY = 3)
+        val unrelated = TileEntity("other", "Other", packageName = "example.other",
+            gridX = 0, gridY = 6)
+        val widget = TileEntity("widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 91, widgetProvider = "example/.Provider", gridX = 2, gridY = 6)
+        db.tileDao().insertAll(listOf(first, second, unrelated, widget))
+        assertNull(repo.groupHomeTilesManually(widget.id, second.id))
+        val folder = requireNotNull(repo.groupHomeTilesManually(first.id, second.id))
+        val config = SmartFolderConfig.fromTile(folder)
+        assertFalse(config.autoSyncCategory)
+        assertEquals(listOf("second", "first"), config.items.map { it.sourceTile?.id })
+        assertEquals(setOf(folder.id, unrelated.id, widget.id), db.tileDao().getAllTiles().map { it.id }.toSet())
+        repo.ungroupSmartFolderToTiles(folder.id)
+        val restored = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(3, restored.getValue(first.id).customSpanX)
+        assertEquals(2, restored.getValue(first.id).customSpanY)
+        assertEquals(widget, restored.getValue(widget.id))
     }
 
     @Test fun ungroupRestoresAllItemsBeyondPreviewLimit() = runBlocking {

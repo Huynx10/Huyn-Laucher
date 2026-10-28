@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import android.view.Gravity
+import android.widget.TextClock
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -49,14 +51,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.data.model.AppCategory
 import com.example.data.model.AppItem
 import com.example.data.model.SystemTelemetry
 import com.example.data.model.TileEntity
 import com.example.data.model.TileSize
 import com.example.data.model.TileType
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 /**
@@ -128,6 +129,11 @@ fun AppDrivenLiveTileContent(
     useRealAppIcons: Boolean,
     isHighlyTransparent: Boolean
 ) {
+    if (tile.tileType == TileType.CLOCK_CALENDAR) {
+        MetroDigitalClockTile(tile.size, isHighlyTransparent)
+        return
+    }
+
     val linkedApp = remember(tile.id, tile.packageName, tile.tileType, installedApps) {
         resolveLinkedAppForTile(tile, installedApps)
     }
@@ -137,8 +143,12 @@ fun AppDrivenLiveTileContent(
         rememberAppIcon(effectivePackage)
     } else null
 
-    val displayTitle = remember(tile.title, linkedApp?.label) {
-        tile.title.ifBlank { linkedApp?.label ?: "Ứng dụng" }
+    val displayTitle = remember(tile.title, tile.tileType, linkedApp?.label) {
+        if (tile.tileType == TileType.APP) {
+            linkedApp?.label ?: tile.title.ifBlank { "Ứng dụng" }
+        } else {
+            tile.title.ifBlank { linkedApp?.label ?: "Ứng dụng" }
+        }
     }
 
     val categoryBadge = remember(tile.tileType, linkedApp?.category) {
@@ -168,10 +178,6 @@ fun AppDrivenLiveTileContent(
                 "Pin ${telemetry.batteryPct}% (${telemetry.batteryTempC}°C) • ${if (telemetry.isCharging) "Đang sạc" else "Sẵn sàng"}"
             tile.tileType == TileType.PERFORMANCE ->
                 "RAM trống ${telemetry.availableRamMb} MB (${100 - telemetry.ramUsagePct}%) • ${telemetry.backgroundAppsCount} app ngầm"
-            tile.tileType == TileType.CLOCK_CALENDAR -> {
-                val df = SimpleDateFormat("HH:mm • EEE, dd/MM", Locale.getDefault())
-                df.format(Date())
-            }
             linkedApp != null -> "${linkedApp.label} • ${linkedApp.category.label}"
             else -> "Chạm để mở ứng dụng"
         }
@@ -386,6 +392,49 @@ fun AppDrivenLiveTileContent(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MetroDigitalClockTile(size: TileSize, isHighlyTransparent: Boolean) {
+    val clockSizeSp = when (size) {
+        TileSize.SMALL -> 21f
+        TileSize.MEDIUM -> 32f
+        TileSize.WIDE -> 42f
+        TileSize.LARGE -> 56f
+    }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(if (size == TileSize.SMALL) 5.dp else 10.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        AndroidView(
+            factory = { context ->
+                TextClock(context).apply {
+                    setTextColor(android.graphics.Color.WHITE)
+                    gravity = Gravity.CENTER_VERTICAL
+                    includeFontPadding = false
+                    isClickable = false
+                }
+            },
+            update = { clock ->
+                clock.textSize = clockSizeSp
+                if (isHighlyTransparent) {
+                    clock.setShadowLayer(4f, 0f, 1.5f, android.graphics.Color.BLACK)
+                } else {
+                    clock.setShadowLayer(0f, 0f, 0f, android.graphics.Color.TRANSPARENT)
+                }
+            },
+            modifier = Modifier.fillMaxWidth().weight(1f)
+        )
+        if (size != TileSize.SMALL) {
+            Text(
+                text = "Đồng hồ",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
         }
     }
 }

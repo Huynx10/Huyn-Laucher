@@ -23,7 +23,9 @@ object DefaultWidgetMatcher {
             "com.sec.android.app.clockpackage",
             "com.google.android.deskclock"
         ),
-        names = listOf("clock", "đồng hồ", "digital", "analog", "time")
+        // A native replacement is offered only when its provider is clearly digital.
+        // Otherwise the launcher-owned TextClock remains the single default clock.
+        names = listOf("digital", "đồng hồ số")
     )
 
     private val photos = Rule(

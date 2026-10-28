@@ -4,6 +4,7 @@ import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -104,11 +105,11 @@ import com.example.data.model.LauncherPage
 import com.example.data.model.PageTransitionEffect
 import com.example.data.model.PageType
 import com.example.data.model.TileType
+import com.example.data.model.TileEntity
 import com.example.data.model.WidgetProviderItem
 import com.example.data.model.WallpaperSource
 import com.example.data.model.Wp10TileStyle
 import com.example.ui.auth.GoogleSignInHelper
-import com.example.ui.components.ActionCenterOverlay
 import com.example.ui.components.AppDrawer
 import com.example.ui.components.GlanceScreenOverlay
 import com.example.ui.components.LumiaStartGrid
@@ -129,6 +130,28 @@ import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     private val viewModel: LauncherViewModel by viewModels { LauncherViewModel.Factory }
+
+    @Suppress("DEPRECATION")
+    fun openWidgetSettings(tile: TileEntity) {
+        val manager = LumiaWidgetHostManager.getInstance(this)
+        val result = manager.startWidgetReconfiguration(tile) { boundId ->
+            manager.appWidgetHost.startAppWidgetConfigureActivityForResult(
+                this, boundId, 0, 8201, null
+            )
+        }
+        // A canceled provider screen has no pin/rebind callback: retain widget ID and layout.
+        val message = when (result) {
+            com.example.ui.widget.WidgetReconfigureResult.ACTIVITY_MISSING ->
+                "Ứng dụng không mở được cài đặt widget."
+            com.example.ui.widget.WidgetReconfigureResult.ACCESS_DENIED ->
+                "Ứng dụng không cho mở cài đặt widget."
+            com.example.ui.widget.WidgetReconfigureResult.FAILED ->
+                "Không mở được cài đặt widget."
+            com.example.ui.widget.WidgetReconfigureResult.STARTED,
+            com.example.ui.widget.WidgetReconfigureResult.UNSUPPORTED -> null
+        }
+        message?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -426,14 +449,12 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         pages.filter { it.pageType == PageType.HOME }
     }
 
-    var isActionCenterOpen by remember { mutableStateOf(false) }
 
     // Back press handling: exit Action Center -> exit Smart Folder -> exit Glance -> deselect single tile -> exit Home Edit Mode -> return to Default Home Page
     BackHandler(
-        enabled = isActionCenterOpen || activeSmartFolderRequest != null || isGlanceScreenOpen || selectedTileId != null || isEditMode || pagerState.currentPage != defaultPageIndex
+        enabled = activeSmartFolderRequest != null || isGlanceScreenOpen || selectedTileId != null || isEditMode || pagerState.currentPage != defaultPageIndex
     ) {
         when {
-            isActionCenterOpen -> isActionCenterOpen = false
             activeSmartFolderRequest != null -> viewModel.closeSmartFolder()
             isGlanceScreenOpen -> viewModel.closeGlanceScreen()
             selectedTileId != null -> viewModel.clearSelectedTile()
@@ -461,7 +482,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     }
     val editModeZoomSpring = remember {
         androidx.compose.animation.core.spring<androidx.compose.ui.unit.Dp>(
-            dampingRatio = 0.76f,
+            dampingRatio = 1f,
             stiffness = 360f
         )
     }
@@ -515,6 +536,11 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         )
         v
     }
+    val safePagerHorizontalPadding = nonNegativeLayoutDp(pagerHorizontalPadding)
+    val safePagerTopPadding = nonNegativeLayoutDp(pagerTopPadding)
+    val safePagerBottomPadding = nonNegativeLayoutDp(pagerBottomPadding)
+    val safePagerCornerRadius = nonNegativeLayoutDp(pagerCornerRadius)
+    val safeFloatingIndicatorBottomPadding = nonNegativeLayoutDp(floatingIndicatorBottomPadding)
 
     // State for direct drag-and-drop page reordering on zoomed-out page card
     var draggingPageIndex by remember { mutableIntStateOf(-1) }
@@ -570,9 +596,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             key = { idx -> pages.getOrNull(idx)?.id ?: "page_$idx" },
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (isActionCenterOpen) Modifier.blur(18.dp) else Modifier)
-                .statusBarsPadding()
-                .navigationBarsPadding()
                 .testTag("launcher_horizontal_pager")
         ) { pageIndex ->
             val page = pages.getOrNull(pageIndex) ?: return@HorizontalPager
@@ -582,18 +605,23 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(
+                        if (page.pageType == PageType.HOME) {
+                            Modifier.statusBarsPadding().navigationBarsPadding()
+                        } else Modifier
+                    )
                     .padding(
-                        start = pagerHorizontalPadding,
-                        end = pagerHorizontalPadding,
-                        top = pagerTopPadding,
-                        bottom = pagerBottomPadding
+                        start = safePagerHorizontalPadding,
+                        end = safePagerHorizontalPadding,
+                        top = safePagerTopPadding,
+                        bottom = safePagerBottomPadding
                     )
                     .zIndex(if (isThisPageDragging) 10f else 1f)
                     .then(
                         if (isThisPageDragging) {
                             Modifier
                                 .offset { IntOffset(pageDragOffsetX.roundToInt(), 0) }
-                                .shadow(24.dp, RoundedCornerShape(pagerCornerRadius))
+                                .shadow(24.dp, RoundedCornerShape(safePagerCornerRadius))
                         } else Modifier
                     )
                     .graphicsLayer {
@@ -628,7 +656,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                             }
                         }
                     }
-                    .clip(RoundedCornerShape(pagerCornerRadius))
+                    .clip(RoundedCornerShape(safePagerCornerRadius))
                     .then(
                         if (isEditMode) {
                             Modifier
@@ -637,7 +665,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     width = if (isPageDefaultHome) 2.dp else 1.2.dp,
                                     color = if (isPageDefaultHome) accent.color.copy(alpha = 0.9f)
                                     else Color.White.copy(alpha = 0.38f),
-                                    shape = RoundedCornerShape(pagerCornerRadius)
+                                    shape = RoundedCornerShape(safePagerCornerRadius)
                                 )
                         } else Modifier
                     )
@@ -678,7 +706,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                             Intent(Intent.ACTION_POWER_USAGE_SUMMARY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                         )
                                     } catch (_: Exception) {
-                                        isActionCenterOpen = true
+                                        viewModel.openSettings()
                                     }
                                 }
                                 linkedApp != null -> {
@@ -694,7 +722,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     }
                                 }
                                 else -> {
-                                    isActionCenterOpen = true
+                                    Toast.makeText(context, "Không thể mở mục này", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
@@ -705,6 +733,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onResizeTile = { id -> viewModel.resizeTile(id) },
                         onStepTileSize = { id, increase -> viewModel.stepTileSize(id, increase) },
                         onSetTileSize = { id, newSize -> viewModel.setTileSize(id, newSize) },
+                        onSetTileSpans = { id, spanX, spanY -> viewModel.setTileSpans(id, spanX, spanY) },
+                        onGroupTilesManually = { sourceId, targetId ->
+                            viewModel.groupHomeTilesManually(sourceId, targetId)
+                        },
                         onUnpinTile = { id -> viewModel.unpinTile(id) },
                         onMoveTile = { id, up -> viewModel.moveTileInPage(id, page.id, up) },
                         onMoveTileToGrid = { id, gx, gy, cols ->
@@ -717,8 +749,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onMoveTileToPage = { tileId, targetPageId ->
                             viewModel.moveTileToPage(tileId, targetPageId)
                         },
-                        onCustomizeTile = { tileId, colorHex, customTitle, isLive ->
-                            viewModel.updateTileCustomization(tileId, colorHex, customTitle, isLive)
+                        onOpenWidgetSettings = { tile ->
+                            (context as? MainActivity)?.openWidgetSettings(tile)
                         },
                         onPinNewTile = { tile -> viewModel.pinTile(tile) },
                         onEnterEditMode = { viewModel.enterEditMode() },
@@ -757,10 +789,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 linkToTileId = targetTile.id,
                                 existingWidgetId = targetTile.appWidgetId
                             )
-                        },
-                        onUnlinkWidgetFromTile = { tileId ->
-                            viewModel.unlinkWidgetFromTile(tileId)
-                            Toast.makeText(context, "Đã gỡ liên kết Widget khỏi ô Tile.", Toast.LENGTH_SHORT).show()
                         },
                         onOpenSmartFolder = { folderTile, pivotX, pivotY ->
                             viewModel.openSmartFolder(folderTile.id, pivotX, pivotY)
@@ -808,38 +836,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 }
                             }
                         },
-                        onCreateSmartFolderByCategory = { category, absorbExisting ->
-                            viewModel.createSmartFolderByCategory(
-                                category = category,
-                                pageId = page.id,
-                                absorbMatchingPageTiles = absorbExisting
-                            )
-                            Toast.makeText(
-                                context,
-                                "Đã thêm Thư mục Thông minh: ${category.label}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        onGroupPageTilesByCategory = {
-                            viewModel.groupPageTilesByCategory(page.id) { count ->
-                                Toast.makeText(
-                                    context,
-                                    "Đã tự động gom $count Thư mục Thông minh theo danh mục!",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        },
-                        onConvertTileToSmartFolder = { tileId ->
-                            viewModel.convertTileIntoSmartFolder(tileId, absorbSameCategoryOnPage = true)
-                            Toast.makeText(
-                                context,
-                                "Đã gom các Tile cùng danh mục vào Thư mục Thông minh!",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        onCycleSmartFolderMode = { tileId ->
-                            viewModel.cycleSmartFolderLayoutMode(tileId)
-                        }
                     )
                 } else {
                     AppDrawer(
@@ -859,9 +855,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 linkToTileId = null
                             )
                         },
-                        onUpdateSettings = { updated -> viewModel.updateSettings(updated) },
-                        onEnterEditMode = { viewModel.enterEditMode() },
-                        onOpenActionCenter = { isActionCenterOpen = true }
+                        onMutateSettings = { transform -> viewModel.mutateSettings(transform) },
+                        onEnterEditMode = { viewModel.enterEditMode() }
                     )
                 }
             }
@@ -919,7 +914,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         }
 
         // 3. Compact Floating Page Indicator (Floats at BottomCenter without stealing display height; supports drag-and-drop page reordering in Edit Mode)
-        OneUiPageDotsIndicator(
+        if (currentPage?.pageType == PageType.HOME || isEditMode) OneUiPageDotsIndicator(
             pages = pages,
             currentPageIndex = pagerState.currentPage,
             defaultHomePageId = settings.defaultHomePageId,
@@ -944,7 +939,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = floatingIndicatorBottomPadding)
+                .padding(bottom = safeFloatingIndicatorBottomPadding)
         )
 
         // 4. One UI Bottom Edit Bar (Floating at BottomCenter in Home Screen Edit Mode — 3 clean items: Trong suốt, Tiện ích, Cài đặt)
@@ -960,20 +955,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 accentColor = accent.color,
                 wp10TileStyle = settings.wp10TileStyle,
                 onCycleTileTransparency = {
-                    val styles = Wp10TileStyle.entries
-                    val nextStyle = styles[(styles.indexOf(settings.wp10TileStyle) + 1) % styles.size]
-                    val nextOpacity = when (nextStyle) {
-                        Wp10TileStyle.CRYSTAL_CLEAR -> 0f
-                        Wp10TileStyle.CLASSIC_METRO -> 1f
-                        Wp10TileStyle.FLUENT_ACRYLIC -> 0.45f
-                        Wp10TileStyle.TINTED_TRANSLUCENT -> 0.35f
-                    }
-                    viewModel.updateSettings(
-                        settings.copy(
-                            wp10TileStyle = nextStyle,
-                            tileOpacity = nextOpacity
-                        )
-                    )
+                    viewModel.cycleTileAppearance(acrylicOpacity = 0.45f, tintedOpacity = 0.35f)
                 },
                 onAddTile = {
                     val current = pages.getOrNull(pagerState.currentPage)
@@ -984,17 +966,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         }
                     } else {
                         viewModel.openAddTileSheet()
-                    }
-                },
-                onGroupSmartFolders = {
-                    val targetPageId = currentPage?.takeIf { it.pageType == PageType.HOME }?.id
-                        ?: settings.defaultHomePageId
-                    viewModel.groupPageTilesByCategory(targetPageId) { count ->
-                        Toast.makeText(
-                            context,
-                            "Đã gom $count Thư mục Thông minh theo danh mục!",
-                            Toast.LENGTH_SHORT
-                        ).show()
                     }
                 },
                 onOpenSettings = { viewModel.openSettings() }
@@ -1079,21 +1050,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             )
         }
 
-        // Action Center is launched from the App Drawer header, not a floating Home pill.
-        // Windows 11 / W10M Fluent Acrylic Action Center Overlay
-        if (isActionCenterOpen) {
-            ActionCenterOverlay(
-                settings = settings,
-                telemetry = telemetry,
-                customWallpaperBitmap = customWallpaperBitmap,
-                onUpdateSettings = { viewModel.updateSettings(it) },
-                onOptimizeMemory = { viewModel.optimizeMemory() },
-                onOpenGlance = { viewModel.openGlanceScreen() },
-                onOpenFullSettings = { viewModel.openSettings() },
-                onDismiss = { isActionCenterOpen = false }
-            )
-        }
-
         // Glance Screen Overlay
         if (isGlanceScreenOpen) {
             GlanceScreenOverlay(
@@ -1143,6 +1099,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     isCloudSyncing = isCloudSyncing,
                     isSavingSettings = isSavingSettings,
                     onSaveSettings = { viewModel.updateSettings(it) },
+                    onUpdateTileAppearance = { style, opacity -> viewModel.updateTileAppearance(style, opacity) },
                     onPickCustomWallpaper = { uri -> viewModel.setCustomWallpaper(uri) },
                     onExportBackup = { viewModel.exportBackup() },
                     onRestoreBackup = { viewModel.restoreBackup(it) },
@@ -1194,7 +1151,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     }
                 },
                 onDeleteCloudBackup = { backupId -> viewModel.deleteCloudBackup(backupId) },
-                onSaveSettings = { viewModel.updateSettings(it) },
+                onSaveSettings = { baseline, edited -> viewModel.updateAdvancedSettings(baseline, edited) },
+                onUpdateTileAppearance = { style, opacity -> viewModel.updateTileAppearance(style, opacity) },
                 onPickCustomWallpaper = { uri ->
                     viewModel.setCustomWallpaper(uri)
                     Toast.makeText(context, "Đã áp dụng hình nền mới!", Toast.LENGTH_SHORT).show()
@@ -1205,7 +1163,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 },
                 onExportBackup = { viewModel.exportBackup() },
                 onRestoreBackup = { viewModel.restoreBackup(it) },
-                onResetDefaults = { viewModel.resetDefaults() },
                 onOptimizeMemory = { viewModel.optimizeMemory() },
                 onRefreshTelemetry = { viewModel.refreshTelemetry() },
                 onDismiss = { advancedSettingsOpen = false }
@@ -1484,7 +1441,6 @@ private fun OneUiBottomEditBar(
     wp10TileStyle: Wp10TileStyle,
     onCycleTileTransparency: () -> Unit,
     onAddTile: () -> Unit,
-    onGroupSmartFolders: () -> Unit = {},
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1507,14 +1463,6 @@ private fun OneUiBottomEditBar(
             accentHighlight = if (wp10TileStyle != Wp10TileStyle.CLASSIC_METRO) accentColor.copy(alpha = 0.5f) else null,
             onClick = onCycleTileTransparency,
             testTag = "cycle_tile_transparency_button"
-        )
-
-        OneUiBottomActionItem(
-            icon = Icons.Default.FolderSpecial,
-            label = "Gom Nhóm",
-            accentHighlight = accentColor.copy(alpha = 0.42f),
-            onClick = onGroupSmartFolders,
-            testTag = "group_smart_folders_bar_button"
         )
 
         OneUiBottomActionItem(

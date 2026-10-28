@@ -28,10 +28,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -106,42 +104,29 @@ fun TileView(
     onNudgeRight: () -> Unit = {},
     onNudgeUp: () -> Unit = {},
     onNudgeDown: () -> Unit = {},
-    onMoveToPage: (() -> Unit)? = null,
-    onCustomizeTile: (() -> Unit)? = null,
     onFinishSingleEdit: (() -> Unit)? = null,
     installedApps: List<AppItem> = emptyList(),
     onLaunchSmartFolderItem: (SmartFolderItem) -> Unit = {},
     onOpenSmartFolder: () -> Unit = onClick,
     onRequestBindWidgetPermission: (TileEntity) -> Unit = {},
-    onReplaceMissingWidget: (TileEntity) -> Unit = { onCustomizeTile?.invoke() },
+    onReplaceMissingWidget: (TileEntity) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
-    val isPerTileClear = remember(tile.colorOverrideHex) {
-        tile.colorOverrideHex.equals("TRANSPARENT", ignoreCase = true)
-    }
     val accent = remember(
-        tile.colorOverrideHex,
         settings.accentColorHex,
         settings.autoWallpaperAccentEnabled,
         settings.wallpaperGradientIndex,
         settings.dynamicAccentMode,
         settings.dynamicSwatchIndex
     ) {
-        val themeAccent = LumiaPalette.resolveEffectiveAccent(settings)
-        val effectiveColorHex = if (isPerTileClear || tile.colorOverrideHex.isNullOrBlank()) {
-            themeAccent.hex
-        } else {
-            tile.colorOverrideHex
-        }
-        LumiaPalette.getAccent(effectiveColorHex)
+        LumiaPalette.resolveEffectiveAccent(settings)
     }
     val cornerShape = remember(settings.tileCornerRadiusDp) {
         RoundedCornerShape(settings.tileCornerRadiusDp.dp)
     }
 
     val effectiveOpacity = when {
-        isPerTileClear -> 0f
         settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR -> 0f
         settings.wp10TileStyle == Wp10TileStyle.CLASSIC_METRO -> 1f
         else -> settings.tileOpacity.coerceIn(0f, 1f)
@@ -152,13 +137,12 @@ fun TileView(
         settings.wp10TileStyle == Wp10TileStyle.FLUENT_ACRYLIC
 
     val tileBackgroundBrush: Brush = remember(
-        isPerTileClear,
         settings.wp10TileStyle,
         effectiveOpacity,
         accent.color
     ) {
         when {
-            isPerTileClear || settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR -> {
+            settings.wp10TileStyle == Wp10TileStyle.CRYSTAL_CLEAR -> {
                 ClearTileGradientBrush
             }
             settings.wp10TileStyle == Wp10TileStyle.FLUENT_ACRYLIC -> {
@@ -275,11 +259,7 @@ fun TileView(
                 enabled = settings.turnstileAnimationEnabled && !isBatterySaverActive && !isTileSelected && !isHomeEditMode,
                 onLongClick = onLongClick,
                 onClick = {
-                    if (isTileSelected) {
-                        onCustomizeTile?.invoke()
-                    } else {
-                        onClick()
-                    }
+                    if (isTileSelected) onFinishSingleEdit?.invoke() else onClick()
                 }
             )
     ) {
@@ -392,71 +372,27 @@ fun TileView(
                         )
                     }
                 } else {
-                    // Unpin only: never uninstall the underlying application.
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(4.dp)
-                            .size(if (tile.size == TileSize.SMALL) 22.dp else 26.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFE81123))
-                            .clickable { onUnpin() },
-                        contentAlignment = Alignment.Center
+                            .size(48.dp)
+                            .clickable { onUnpin() }
+                            .testTag("tile_remove_${tile.id}"),
+                        contentAlignment = Alignment.TopEnd
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Bỏ khỏi màn hình chính",
-                            tint = Color.White,
-                            modifier = Modifier.size(if (tile.size == TileSize.SMALL) 13.dp else 15.dp)
-                        )
-                    }
-
-                    // Bottom-left: Customize Tile Color/Transparency + Move to another Home Page
-                    if (tile.size != TileSize.SMALL) {
-                        Row(
+                        Box(
                             modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .padding(4.dp)
+                                .padding(5.dp)
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.82f))
+                                .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (onCustomizeTile != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF881798))
-                                        .clickable { onCustomizeTile() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Palette,
-                                        contentDescription = "Đổi màu & độ trong suốt ô Tile",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
-
-                            if (onMoveToPage != null) {
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF107C41))
-                                        .clickable { onMoveToPage() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.DriveFileMove,
-                                        contentDescription = "Chuyển sang trang Home khác",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
+                            Icon(Icons.Default.Close, contentDescription = "Bỏ ô khỏi trang",
+                                tint = Color.White, modifier = Modifier.size(16.dp))
                         }
                     }
-
                     // Interactive Border/Edge Drag Handles (One UI style resize handles along borders)
                     val handlePillLength by animateDpAsState(
                         targetValue = when {
@@ -617,7 +553,7 @@ fun TileView(
 
                 if (tile.size != TileSize.SMALL) {
                     Text(
-                        text = "${tile.size.spanX}×${tile.size.spanY} • Kéo viền để đổi cỡ",
+                        text = "${tile.customSpanX.takeIf { it > 0 } ?: tile.size.spanX}×${tile.effectiveSpanY()} • Kéo viền để đổi cỡ",
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,

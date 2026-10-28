@@ -104,6 +104,14 @@ class LauncherRepository(
                 return@withContext
             }
         }
+        // Keep a legacy folder untouched if the app catalog is temporarily empty.
+        // refreshApps retries the conversion when package discovery succeeds.
+        if (tileDao.getAllTiles().any { tile ->
+                tile.tileType == TileType.SMART_FOLDER &&
+                    SmartFolderConfig.fromTile(tile).autoSyncCategory
+            }) {
+            completeLegacyFolderMigration(getInstalledApps(emptySet()))
+        }
         if (tileDao.getCount() == 0 && !readHomeBoolean("home_initialized", prefs.contains("home_initialized"))) {
             val defaults = createDefaultTiles()
             tileDao.insertAll(defaults)
@@ -127,8 +135,8 @@ class LauncherRepository(
                         } else {
                             val (gx, gy) = findFirstFreeGridPosition(
                                 existingPageTiles = placed,
-                                spanX = tile.size.effectiveSpanX(totalCols),
-                                spanY = tile.size.effectiveSpanY(),
+                                spanX = tile.effectiveSpanX(totalCols),
+                                spanY = tile.effectiveSpanY(),
                                 totalCols = totalCols
                             )
                             val withCoords = tile.copy(gridX = gx, gridY = gy)
@@ -145,6 +153,24 @@ class LauncherRepository(
         prefs.edit().putBoolean("home_initialized", true).commit()
     }
 
+    /** Freeze old category folders once installed apps can be resolved, without changing their IDs or layout. */
+    suspend fun completeLegacyFolderMigration(installed: List<AppItem>) = withContext(Dispatchers.IO) {
+        if (installed.isEmpty()) return@withContext
+        val customCategories = loadSettings().customAppCategories
+        database.withTransaction {
+            val converted = tileDao.getAllTiles().mapNotNull { tile ->
+                if (tile.tileType != TileType.SMART_FOLDER) return@mapNotNull null
+                val config = SmartFolderConfig.fromTile(tile)
+                if (!config.autoSyncCategory) return@mapNotNull null
+                tile.copy(packageName = config.copy(
+                    items = SmartFolderConfig.resolveEffectiveItems(config, installed, customCategories),
+                    autoSyncCategory = false
+                ).toJsonString())
+            }
+            if (converted.isNotEmpty()) tileDao.insertAll(converted)
+        }
+    }
+
     fun findFirstFreeGridPosition(
         existingPageTiles: List<TileEntity>,
         spanX: Int,
@@ -156,15 +182,15 @@ class LauncherRepository(
         val effSpanY = spanY.coerceAtLeast(1)
         require(totalCols in 1..12)
         val finalRow = maxOf(startY.coerceAtLeast(0), existingPageTiles.maxOfOrNull {
-            it.gridY.coerceAtLeast(0) + it.size.effectiveSpanY()
+            it.gridY.coerceAtLeast(0) + it.effectiveSpanY()
         } ?: 0)
         for (y in startY.coerceAtLeast(0)..finalRow) {
             for (x in 0..(totalCols - effSpanX)) {
                 val overlaps = existingPageTiles.any { other ->
                     val ox = other.gridX.coerceAtLeast(0)
                     val oy = other.gridY.coerceAtLeast(0)
-                    val oSpanX = other.size.effectiveSpanX(totalCols)
-                    val oSpanY = other.size.effectiveSpanY()
+                    val oSpanX = other.effectiveSpanX(totalCols)
+                    val oSpanY = other.effectiveSpanY()
                     rectsOverlap(x, y, effSpanX, effSpanY, ox, oy, oSpanX, oSpanY)
                 }
                 if (!overlaps) {
@@ -354,43 +380,6 @@ class LauncherRepository(
                 gridY = 8,
                 customIconName = "settings"
             ),
-            TileEntity(
-                id = "tile_smart_folder_tools",
-                title = "Công cụ & Tiện ích",
-                packageName = SmartFolderConfig(
-                    category = AppCategory.TOOLS,
-                    autoSyncCategory = true,
-                    layoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
-                    items = SmartFolderConfig.defaultSeedItemsForCategory(AppCategory.TOOLS)
-                ).toJsonString(),
-                tileType = TileType.SMART_FOLDER,
-                size = TileSize.MEDIUM,
-                orderIndex = 8,
-                pageId = "page_home_1",
-                gridX = 0,
-                gridY = 10,
-                customIconName = AppCategory.TOOLS.name.lowercase(),
-                isLiveEnabled = true
-            ),
-            TileEntity(
-                id = "tile_smart_folder_comm",
-                title = "Liên lạc nhanh",
-                packageName = SmartFolderConfig(
-                    category = AppCategory.COMMUNICATION,
-                    autoSyncCategory = true,
-                    layoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
-                    items = SmartFolderConfig.defaultSeedItemsForCategory(AppCategory.COMMUNICATION)
-                ).toJsonString(),
-                tileType = TileType.SMART_FOLDER,
-                size = TileSize.MEDIUM,
-                orderIndex = 9,
-                pageId = "page_home_1",
-                gridX = 2,
-                gridY = 10,
-                customIconName = AppCategory.COMMUNICATION.name.lowercase(),
-                isLiveEnabled = true
-            ),
-
             // Page 2: Photos, Battery, Performance, Notes, Quotes
             TileEntity(
                 id = "tile_photos",
@@ -463,8 +452,8 @@ class LauncherRepository(
                 items.forEachIndexed { index, tile ->
                     val (x, y) = findFirstFreeGridPosition(
                         existingPageTiles = placed,
-                        spanX = tile.size.effectiveSpanX(4),
-                        spanY = tile.size.effectiveSpanY(),
+                        spanX = tile.effectiveSpanX(4),
+                        spanY = tile.effectiveSpanY(),
                         totalCols = 4
                     )
                     placed.add(tile.copy(gridX = x, gridY = y, orderIndex = index))
@@ -528,9 +517,26 @@ class LauncherRepository(
         } else {
             newSize
         }
-        if (effectiveSize != target.size) {
+        if (effectiveSize != target.size || target.customSpanX > 0 || target.customSpanY > 0) {
             setTileSizeInternal(tiles, target, effectiveSize)
         }
+    }
+
+    suspend fun setTileSpans(tileId: String, requestedX: Int, requestedY: Int) = withContext(Dispatchers.IO) {
+        val tiles = tileDao.getAllTiles()
+        val target = tiles.find { it.id == tileId } ?: return@withContext
+        val totalCols = if (loadSettings().showMoreTiles) 6 else 4
+        val (spanX, spanY) = target.constrainedResizeSpans(requestedX, requestedY, totalCols)
+        if (spanX == target.effectiveSpanX(totalCols) && spanY == target.effectiveSpanY()) return@withContext
+        val resized = target.copy(
+            customSpanX = spanX,
+            customSpanY = spanY,
+            gridX = target.gridX.coerceAtLeast(0).coerceAtMost(totalCols - spanX),
+            gridY = target.gridY.coerceAtLeast(0)
+        )
+        val others = tiles.filter { it.pageId == target.pageId && it.id != tileId }
+        tileDao.insertAll(resolveCollisionsOnly(resized, others, totalCols))
+        autoArrangeIfEnabled(target.pageId)
     }
 
     private suspend fun setTileSizeInternal(
@@ -542,7 +548,8 @@ class LauncherRepository(
         val newSpanX = newSize.effectiveSpanX(totalCols)
         val clampedX = target.gridX.coerceAtLeast(0).coerceAtMost((totalCols - newSpanX).coerceAtLeast(0))
         val clampedY = target.gridY.coerceAtLeast(0)
-        val resizedTarget = target.copy(size = newSize, gridX = clampedX, gridY = clampedY)
+        val resizedTarget = target.copy(size = newSize, customSpanX = 0, customSpanY = 0,
+            gridX = clampedX, gridY = clampedY)
 
         // Resolve direct overlaps on the same page without auto-packing empty spaces
         val pageOthers = tiles.filter { it.pageId == target.pageId && it.id != target.id }
@@ -559,8 +566,8 @@ class LauncherRepository(
     ) = withContext(Dispatchers.IO) {
         val tiles = tileDao.getAllTiles()
         val target = tiles.find { it.id == tileId } ?: return@withContext
-        val spanX = target.size.effectiveSpanX(totalCols)
-        val spanY = target.size.effectiveSpanY()
+        val spanX = target.effectiveSpanX(totalCols)
+        val spanY = target.effectiveSpanY()
         val clampedX = targetGridX.coerceIn(0, (totalCols - spanX).coerceAtLeast(0))
         val clampedY = targetGridY.coerceIn(0, 60)
 
@@ -572,14 +579,14 @@ class LauncherRepository(
             rectsOverlap(
                 clampedX, clampedY, spanX, spanY,
                 other.gridX.coerceAtLeast(0), other.gridY.coerceAtLeast(0),
-                other.size.effectiveSpanX(totalCols), other.size.effectiveSpanY()
+                other.effectiveSpanX(totalCols), other.effectiveSpanY()
             )
         }
 
         if (colliding.size == 1 && target.gridX >= 0 && target.gridY >= 0) {
             val single = colliding.first()
-            val singleSpanX = single.size.effectiveSpanX(totalCols)
-            val singleSpanY = single.size.effectiveSpanY()
+            val singleSpanX = single.effectiveSpanX(totalCols)
+            val singleSpanY = single.effectiveSpanY()
             val swapX = target.gridX.coerceIn(0, (totalCols - singleSpanX).coerceAtLeast(0))
             val swapY = target.gridY.coerceAtLeast(0)
             val rest = pageOthers.filter { it.id != single.id }
@@ -588,7 +595,7 @@ class LauncherRepository(
                     rectsOverlap(
                         swapX, swapY, singleSpanX, singleSpanY,
                         r.gridX.coerceAtLeast(0), r.gridY.coerceAtLeast(0),
-                        r.size.effectiveSpanX(totalCols), r.size.effectiveSpanY()
+                        r.effectiveSpanX(totalCols), r.effectiveSpanY()
                     )
                 }
             if (canSwapCleanly) {
@@ -615,14 +622,14 @@ class LauncherRepository(
 
         val px = primaryTile.gridX.coerceAtLeast(0)
         val py = primaryTile.gridY.coerceAtLeast(0)
-        val pw = primaryTile.size.effectiveSpanX(totalCols)
-        val ph = primaryTile.size.effectiveSpanY()
+        val pw = primaryTile.effectiveSpanX(totalCols)
+        val ph = primaryTile.effectiveSpanY()
 
         for (other in otherPageTiles) {
             val ox = other.gridX.coerceAtLeast(0)
             val oy = other.gridY.coerceAtLeast(0)
-            val ow = other.size.effectiveSpanX(totalCols)
-            val oh = other.size.effectiveSpanY()
+            val ow = other.effectiveSpanX(totalCols)
+            val oh = other.effectiveSpanY()
             if (rectsOverlap(px, py, pw, ph, ox, oy, ow, oh)) {
                 colliding.add(other)
             } else {
@@ -634,8 +641,8 @@ class LauncherRepository(
 
         // Only relocate tiles that directly collided with primaryTile, placing them at the nearest free spot at or below their current Y
         for (colTile in colliding.sortedWith(compareBy({ it.gridY }, { it.gridX }))) {
-            val cw = colTile.size.effectiveSpanX(totalCols)
-            val ch = colTile.size.effectiveSpanY()
+            val cw = colTile.effectiveSpanX(totalCols)
+            val ch = colTile.effectiveSpanY()
             val (newX, newY) = findFirstFreeGridPosition(
                 existingPageTiles = placed,
                 spanX = cw,
@@ -679,8 +686,8 @@ class LauncherRepository(
             tiles.forEachIndexed { index, tile ->
                 val (x, y) = findFirstFreeGridPosition(
                     existingPageTiles = placed,
-                    spanX = tile.size.effectiveSpanX(totalCols),
-                    spanY = tile.size.effectiveSpanY(),
+                    spanX = tile.effectiveSpanX(totalCols),
+                    spanY = tile.effectiveSpanY(),
                     totalCols = totalCols
                 )
                 placed.add(tile.copy(gridX = x, gridY = y, orderIndex = index))
@@ -814,7 +821,7 @@ class LauncherRepository(
     suspend fun nudgeTileByDelta(tileId: String, deltaX: Int, deltaY: Int, totalCols: Int = 4) = withContext(Dispatchers.IO) {
         val allTiles = tileDao.getAllTiles()
         val target = allTiles.find { it.id == tileId } ?: return@withContext
-        val spanX = target.size.effectiveSpanX(totalCols)
+        val spanX = target.effectiveSpanX(totalCols)
         val newX = (target.gridX.coerceAtLeast(0) + deltaX).coerceIn(0, (totalCols - spanX).coerceAtLeast(0))
         val newY = (target.gridY.coerceAtLeast(0) + deltaY).coerceIn(0, 60)
         moveTileToGridPosition(tileId, newX, newY, totalCols)
@@ -841,8 +848,8 @@ class LauncherRepository(
             val targetPageTiles = allTiles.filter { it.pageId == targetPageId }
             val (freeX, freeY) = findFirstFreeGridPosition(
                 existingPageTiles = targetPageTiles,
-                spanX = target.size.effectiveSpanX(totalCols),
-                spanY = target.size.effectiveSpanY(),
+                spanX = target.effectiveSpanX(totalCols),
+                spanY = target.effectiveSpanY(),
                 totalCols = totalCols
             )
             tileDao.update(
@@ -868,8 +875,8 @@ class LauncherRepository(
             val affected = allTiles.filter { it.pageId == deletedPageId }.map { tile ->
                 val (gx, gy) = findFirstFreeGridPosition(
                     existingPageTiles = placedOnFallback,
-                    spanX = tile.size.effectiveSpanX(totalCols),
-                    spanY = tile.size.effectiveSpanY(),
+                    spanX = tile.effectiveSpanX(totalCols),
+                    spanY = tile.effectiveSpanY(),
                     totalCols = totalCols
                 )
                 val moved = tile.copy(
@@ -925,8 +932,8 @@ class LauncherRepository(
             } else {
                 findFirstFreeGridPosition(
                     existingPageTiles = pageTiles,
-                    spanX = tile.size.effectiveSpanX(totalCols),
-                    spanY = tile.size.effectiveSpanY(),
+                    spanX = tile.effectiveSpanX(totalCols),
+                    spanY = tile.effectiveSpanY(),
                     totalCols = totalCols
                 )
             }
@@ -1009,7 +1016,7 @@ class LauncherRepository(
                 rectsOverlap(
                     clampedX, anchorTile.gridY, size.effectiveSpanX(totalCols), size.effectiveSpanY(),
                     other.gridX.coerceAtLeast(0), other.gridY.coerceAtLeast(0),
-                    other.size.effectiveSpanX(totalCols), other.size.effectiveSpanY()
+                    other.effectiveSpanX(totalCols), other.effectiveSpanY()
                 )
             }
             if (!overlaps) clampedX to anchorTile.gridY
@@ -1020,7 +1027,7 @@ class LauncherRepository(
 
         val config = SmartFolderConfig(
             category = category,
-            autoSyncCategory = true,
+            autoSyncCategory = false,
             layoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
             items = mergedItems
         )
@@ -1107,7 +1114,7 @@ class LauncherRepository(
                 )
                 val config = SmartFolderConfig(
                     category = cat,
-                    autoSyncCategory = true,
+                    autoSyncCategory = false,
                     layoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
                     items = combined
                 )
@@ -1171,7 +1178,7 @@ class LauncherRepository(
             rectsOverlap(
                 preferredX, preferredY, spanX, spanY,
                 other.gridX.coerceAtLeast(0), other.gridY.coerceAtLeast(0),
-                other.size.effectiveSpanX(totalCols), other.size.effectiveSpanY()
+                other.effectiveSpanX(totalCols), other.effectiveSpanY()
             )
         }
         val (gx, gy) = if (!overlaps) {
@@ -1194,7 +1201,7 @@ class LauncherRepository(
 
         val config = SmartFolderConfig(
             category = cat,
-            autoSyncCategory = true,
+            autoSyncCategory = false,
             layoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
             items = items
         )
@@ -1217,6 +1224,54 @@ class LauncherRepository(
         folderTile
         }
     }
+
+    suspend fun groupHomeTilesManually(sourceId: String, targetId: String): TileEntity? =
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                val tiles = tileDao.getAllTiles()
+                val source = tiles.find { it.id == sourceId } ?: return@withTransaction null
+                val target = tiles.find { it.id == targetId } ?: return@withTransaction null
+                if (source.id == target.id || source.pageId != target.pageId ||
+                    source.tileType != TileType.APP || source.hasBoundOrLinkedWidget() ||
+                    target.hasBoundOrLinkedWidget() ||
+                    target.tileType !in setOf(TileType.APP, TileType.SMART_FOLDER)
+                ) return@withTransaction null
+
+                fun item(tile: TileEntity) = SmartFolderItem(
+                    id = "item_${tile.id}", title = tile.title,
+                    packageName = tile.packageName, tileType = tile.tileType,
+                    customIconName = tile.customIconName,
+                    category = AppCategory.ALL, sourceTile = tile
+                )
+
+                val folder = if (target.tileType == TileType.SMART_FOLDER) {
+                    val config = SmartFolderConfig.fromTile(target)
+                    if (config.autoSyncCategory) return@withTransaction null
+                    target.copy(packageName = config.copy(
+                        autoSyncCategory = false,
+                        items = config.items + item(source)
+                    ).toJsonString())
+                } else {
+                    val config = SmartFolderConfig(
+                        category = AppCategory.ALL,
+                        autoSyncCategory = false,
+                        items = listOf(item(target), item(source))
+                    )
+                    target.copy(
+                        id = allocateUniqueTileId("manual_folder", tiles),
+                        title = "Thư mục",
+                        tileType = TileType.SMART_FOLDER,
+                        packageName = config.toJsonString(),
+                        colorOverrideHex = null,
+                        customIconName = ""
+                    )
+                }
+                tileDao.deleteById(source.id)
+                if (target.tileType == TileType.APP) tileDao.deleteById(target.id)
+                tileDao.insertOrUpdate(folder)
+                folder
+            }
+        }
 
     suspend fun updateSmartFolderConfig(
         tileId: String,
@@ -1251,8 +1306,8 @@ class LauncherRepository(
                 !it.hasBoundOrLinkedWidget() && it.tileType == item.tileType
             }
             val tileSize = source?.size ?: TileSize.MEDIUM
-            val spanX = tileSize.effectiveSpanX(totalCols)
-            val spanY = tileSize.effectiveSpanY()
+            val spanX = source?.effectiveSpanX(totalCols) ?: tileSize.effectiveSpanX(totalCols)
+            val spanY = source?.effectiveSpanY() ?: tileSize.effectiveSpanY()
             val originalX = source?.gridX ?: -1
             val originalY = source?.gridY ?: -1
             val originalPositionFree = originalX >= 0 && originalY >= 0 &&
@@ -1260,7 +1315,7 @@ class LauncherRepository(
                 placed.none { other ->
                     rectsOverlap(originalX, originalY, spanX, spanY,
                         other.gridX.coerceAtLeast(0), other.gridY.coerceAtLeast(0),
-                        other.size.effectiveSpanX(totalCols), other.size.effectiveSpanY())
+                        other.effectiveSpanX(totalCols), other.effectiveSpanY())
                 }
             val (gx, gy) = if (originalPositionFree) originalX to originalY else
                 findFirstFreeGridPosition(
@@ -1934,6 +1989,8 @@ class LauncherRepository(
                 put("packageName", tile.packageName)
                 put("tileType", tile.tileType.name)
                 put("size", tile.size.name)
+                put("customSpanX", tile.customSpanX)
+                put("customSpanY", tile.customSpanY)
                 put("orderIndex", tile.orderIndex)
                 put("pageId", tile.pageId)
                 put("gridX", tile.gridX)
@@ -2080,6 +2137,8 @@ class LauncherRepository(
                             packageName = obj.optString("packageName", ""),
                             tileType = parsedType,
                             size = parsedSize,
+                            customSpanX = obj.optInt("customSpanX", 0).coerceIn(0, 6),
+                            customSpanY = obj.optInt("customSpanY", 0).coerceIn(0, 8),
                             orderIndex = obj.optInt("orderIndex", i),
                             pageId = obj.optString("pageId", "page_home_1"),
                             gridX = obj.optInt("gridX", -1),
@@ -2131,11 +2190,11 @@ class LauncherRepository(
         tiles.groupBy { it.pageId }.flatMap { (_, page) ->
             val placed = mutableListOf<TileEntity>()
             page.sortedBy { it.orderIndex }.forEach { tile ->
-                val w = tile.size.effectiveSpanX(columns)
-                val h = tile.size.effectiveSpanY()
+                val w = tile.effectiveSpanX(columns)
+                val h = tile.effectiveSpanY()
                 val valid = tile.gridX >= 0 && tile.gridY >= 0 && tile.gridX + w <= columns &&
                     placed.none { rectsOverlap(tile.gridX, tile.gridY, w, h, it.gridX, it.gridY,
-                        it.size.effectiveSpanX(columns), it.size.effectiveSpanY()) }
+                        it.effectiveSpanX(columns), it.effectiveSpanY()) }
                 val (x, y) = if (valid) tile.gridX to tile.gridY else findFirstFreeGridPosition(placed, w, h, columns)
                 placed.add(tile.copy(gridX = x, gridY = y))
             }
