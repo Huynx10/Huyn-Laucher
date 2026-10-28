@@ -872,7 +872,8 @@ class LauncherRepository(
         tileId: String,
         targetPageId: String,
         gridX: Int,
-        gridY: Int
+        gridY: Int,
+        totalCols: Int = 4
     ): Boolean = withContext(Dispatchers.IO) {
         database.withTransaction {
             if (loadPages().none { it.id == targetPageId && it.pageType == PageType.HOME }) {
@@ -882,7 +883,12 @@ class LauncherRepository(
             val tile = allTiles.find { it.id == tileId } ?: return@withTransaction false
             if (tile.pageId == targetPageId) return@withTransaction false
 
-            val cols = if (loadSettings().showMoreTiles) 6 else 4
+            // Match the actual viewport grid (4/6/8), including wide screens.
+            // Never silently reinterpret a valid UI drop using a narrower grid.
+            if (totalCols != 4 && totalCols != 6 && totalCols != 8) {
+                return@withTransaction false
+            }
+            val cols = totalCols
             val spanX = tile.effectiveSpanX(cols)
             val spanY = tile.effectiveSpanY()
             if (gridX < 0 || gridX + spanX > cols || gridY !in 0..60) {
