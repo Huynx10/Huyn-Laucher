@@ -73,6 +73,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -91,6 +92,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -114,6 +117,7 @@ import com.example.ui.auth.GoogleSignInHelper
 import com.example.ui.components.AppDrawer
 import com.example.ui.components.GlanceScreenOverlay
 import com.example.ui.components.LumiaStartGrid
+import com.example.ui.components.HomePageDropGeometry
 import com.example.ui.components.SettingsSheet
 import com.example.ui.components.CleanSettingsScreen
 import com.example.ui.components.SmartFolderExpandedOverlay
@@ -457,6 +461,23 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     var crossPageDragCancelToken by remember { mutableIntStateOf(0) }
     var dragFingerX by remember { mutableFloatStateOf(0.5f) }
     var dragFingerY by remember { mutableFloatStateOf(0.5f) }
+    var dragFingerRootX by remember { mutableFloatStateOf(0f) }
+    var dragFingerRootY by remember { mutableFloatStateOf(0f) }
+    var dragGrabOffsetX by remember { mutableFloatStateOf(0f) }
+    var dragGrabOffsetY by remember { mutableFloatStateOf(0f) }
+    var launcherRootX by remember { mutableFloatStateOf(0f) }
+    var launcherRootY by remember { mutableFloatStateOf(0f) }
+    var launcherRootWidth by remember { mutableFloatStateOf(1f) }
+    var launcherRootHeight by remember { mutableFloatStateOf(1f) }
+    val homeDropGeometries = remember { mutableStateMapOf<String, HomePageDropGeometry>() }
+
+    fun updateFingerRoot(rootX: Float, rootY: Float) {
+        dragFingerRootX = rootX
+        dragFingerRootY = rootY
+        dragFingerX = ((rootX - launcherRootX) / launcherRootWidth).coerceIn(0f, 1f)
+        dragFingerY = ((rootY - launcherRootY) / launcherRootHeight).coerceIn(0f, 1f)
+    }
+
     val dragEdgeDirection = when {
         draggingHomeTileId == null || settings.lockHomeLayout -> 0
         dragFingerX <= 0.10f -> -1
@@ -588,6 +609,13 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onGloballyPositioned {
+                val root = it.positionInRoot()
+                launcherRootX = root.x
+                launcherRootY = root.y
+                launcherRootWidth = it.size.width.toFloat().coerceAtLeast(1f)
+                launcherRootHeight = it.size.height.toFloat().coerceAtLeast(1f)
+            }
             .then(
                 if (settings.wallpaperSource == WallpaperSource.LUMIA) Modifier.background(wallpaperBrush)
                 else Modifier.background(Color.Transparent)
@@ -791,38 +819,57 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onMoveTileToPage = { tileId, targetPageId ->
                             viewModel.moveTileToPage(tileId, targetPageId)
                         },
-                        onCrossPageDragStart = { tileId, fractionX, fractionY ->
+                        onCrossPageGridGeometry = { geometry ->
+                            if (homeDropGeometries[geometry.pageId] != geometry) {
+                                homeDropGeometries[geometry.pageId] = geometry
+                            }
+                        },
+                        onCrossPageDragStart = { tileId, rootX, rootY, grabX, grabY ->
                             if (!settings.lockHomeLayout && homePages.size > 1) {
                                 draggingHomeTileId = tileId
                                 draggingHomeTileSourcePageId = page.id
-                                dragFingerX = fractionX
-                                dragFingerY = fractionY
+                                dragGrabOffsetX = grabX
+                                dragGrabOffsetY = grabY
+                                updateFingerRoot(rootX, rootY)
                             }
                         },
-                        onCrossPageDragMove = { tileId, fractionX, fractionY ->
+                        onCrossPageDragMove = { tileId, rootX, rootY ->
                             if (draggingHomeTileId == tileId) {
-                                dragFingerX = fractionX
-                                dragFingerY = fractionY
+                                updateFingerRoot(rootX, rootY)
                             }
                         },
-                        onCrossPageDragEnd = { tileId, gridX, gridY ->
+                        onCrossPageDragEnd = { tileId ->
                             val targetPage = pages.getOrNull(pagerState.currentPage)
                             val crossed = draggingHomeTileId == tileId &&
                                 draggingHomeTileSourcePageId == page.id &&
                                 targetPage != null && targetPage.pageType == PageType.HOME &&
                                 targetPage.id != page.id
-                            draggingHomeTileId = null
-                            draggingHomeTileSourcePageId = null
                             if (crossed && targetPage != null) {
-                                viewModel.moveTileToPageAtGridPosition(
-                                    tileId, targetPage.id, gridX, gridY
-                                ) { moved ->
-                                    if (!moved) {
-                                        Toast.makeText(context, "Vị trí này không trống. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
+                                val targetGeometry = homeDropGeometries[targetPage.id]
+                                val draggedTile = tiles.firstOrNull { it.id == tileId }
+                                val dropCell = if (targetGeometry != null && draggedTile != null) {
+                                    targetGeometry.resolveDrop(
+                                        dragFingerRootX - dragGrabOffsetX,
+                                        dragFingerRootY - dragGrabOffsetY,
+                                        draggedTile.effectiveSpanX(targetGeometry.columns)
+                                    )
+                                } else null
+                                if (dropCell == null) {
+                                    Toast.makeText(context, "Vị trí thả không hợp lệ. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    viewModel.moveTileToPageAtGridPosition(
+                                        tileId, targetPage.id, dropCell.first, dropCell.second,
+                                        targetGeometry!!.columns
+                                    ) { moved ->
+                                        if (!moved) {
+                                            Toast.makeText(context, "Vị trí này không trống. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 }
                                 viewModel.clearSelectedTile()
                             }
+                            draggingHomeTileId = null
+                            draggingHomeTileSourcePageId = null
                             crossed
                         },
                         crossPageDragCancelToken = crossPageDragCancelToken,
