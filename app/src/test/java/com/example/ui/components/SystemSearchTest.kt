@@ -4,6 +4,7 @@ import android.app.SearchManager
 import android.content.Intent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,6 +20,7 @@ class SystemSearchTest {
 
         assertEquals(SearchManager.INTENT_ACTION_GLOBAL_SEARCH, intent.action)
         assertEquals(SAMSUNG_FINDER_PACKAGE, intent.`package`)
+        assertNull(intent.component)
         assertEquals("Máy ảnh", intent.getStringExtra(SearchManager.QUERY))
         assertFalse(intent.action == Intent.ACTION_WEB_SEARCH)
         assertTrue(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)

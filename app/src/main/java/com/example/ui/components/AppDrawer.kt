@@ -66,7 +66,6 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
@@ -236,6 +235,7 @@ fun AppDrawer(
     fun launchFinder(query: String) {
         if (!launchSamsungFinder(context, query)) {
             isAndroidSearchMode = true
+            selectedCategory = AppCategory.ALL
             Toast.makeText(context, "Không mở được Finder; tìm ứng dụng tại đây", Toast.LENGTH_SHORT).show()
         }
     }
@@ -535,8 +535,7 @@ fun AppDrawer(
                         searchQuery = ""
                         keyboardController?.hide()
                     },
-                    onSubmitLocalSearch = { keyboardController?.hide() },
-                    onTriggerAndroidSystemSearch = { launchFinder(searchQuery) }
+                    onSubmitLocalSearch = { keyboardController?.hide() }
                 )
             } else {
                 CleanAppDrawerHeaderBar(
@@ -614,7 +613,6 @@ fun AppDrawer(
                         searchQuery = searchQuery,
                         isAndroidSearchMode = inSearch,
                         accentColor = accent.color,
-                        onSearchAndroidSystem = { launchFinder(searchQuery) },
                         onResetFilter = {
                             if (searchQuery.isNotBlank()) {
                                 searchQuery = ""
@@ -630,17 +628,6 @@ fun AppDrawer(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        if (inSearch && searchQuery.isNotBlank()) {
-                            item(key = "android_default_search_row") {
-                                AndroidDefaultSearchActionCard(
-                                    query = searchQuery,
-                                    accentColor = accent.color,
-                                    onClick = { launchFinder(searchQuery) }
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                            }
-                        }
-
                         itemsIndexed(processedApps, key = { _, item -> item.packageName }) { index, app ->
                             val currentChar = app.label.firstOrNull()?.uppercaseChar() ?: '#'
                             val currentGroupChar = if (currentChar in 'A'..'Z') currentChar else '#'
@@ -713,19 +700,6 @@ fun AppDrawer(
                             .fillMaxSize()
                             .testTag("app_drawer_grid")
                     ) {
-                        if (inSearch && searchQuery.isNotBlank()) {
-                            item(
-                                key = "grid_android_default_search_card",
-                                span = { GridItemSpan(cols) }
-                            ) {
-                                AndroidDefaultSearchActionCard(
-                                    query = searchQuery,
-                                    accentColor = accent.color,
-                                    onClick = { launchFinder(searchQuery) }
-                                )
-                            }
-                        }
-
                         items(gridEntries, key = { it.key }) { entry ->
                             val isBeingDragged = draggingEntry?.key == entry.key
                             val isHoverTarget = hoveredTargetKey == entry.key
@@ -1532,8 +1506,7 @@ private fun AndroidDefaultSearchBar(
     accentColor: Color,
     focusRequester: FocusRequester,
     onCloseSearch: () -> Unit,
-    onSubmitLocalSearch: () -> Unit,
-    onTriggerAndroidSystemSearch: () -> Unit
+    onSubmitLocalSearch: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -1609,66 +1582,6 @@ private fun AndroidDefaultSearchBar(
             }
         }
 
-        // This button tries Finder; typing an app name stays local.
-        IconButton(
-            onClick = onTriggerAndroidSystemSearch,
-            modifier = Modifier
-                .size(34.dp)
-                .testTag("launch_android_system_search_button")
-        ) {
-            Icon(
-                imageVector = Icons.Default.OpenInNew,
-                contentDescription = "Mở Samsung Finder",
-                tint = accentColor,
-                modifier = Modifier.size(17.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun AndroidDefaultSearchActionCard(
-    query: String,
-    accentColor: Color,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(accentColor.copy(alpha = 0.18f))
-            .border(1.dp, accentColor.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = null,
-                tint = accentColor,
-                modifier = Modifier.size(18.dp)
-            )
-            Text(
-                text = "Tìm \"$query\" bằng Finder",
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Icon(
-            imageVector = Icons.Default.OpenInNew,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.7f),
-            modifier = Modifier.size(15.dp)
-        )
     }
 }
 
@@ -1678,7 +1591,6 @@ private fun EmptyCategoryPlaceholder(
     searchQuery: String,
     isAndroidSearchMode: Boolean,
     accentColor: Color,
-    onSearchAndroidSystem: () -> Unit,
     onResetFilter: () -> Unit
 ) {
     val catColor = parseHexColor(category.badgeColorHex, accentColor)
@@ -1715,22 +1627,6 @@ private fun EmptyCategoryPlaceholder(
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
-            if (searchQuery.isNotBlank()) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(accentColor)
-                        .clickable { onSearchAndroidSystem() }
-                        .padding(horizontal = 16.dp, vertical = 9.dp)
-                ) {
-                    Text(
-                        text = "Tìm \"$searchQuery\" bằng Finder",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(14.dp))
