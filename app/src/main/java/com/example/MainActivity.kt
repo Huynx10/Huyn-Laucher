@@ -807,7 +807,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                             val targetPage = pages.getOrNull(pagerState.currentPage)
                             val crossed = draggingHomeTileId == tileId &&
                                 draggingHomeTileSourcePageId == page.id &&
-                                targetPage?.pageType == PageType.HOME &&
+                                targetPage != null && targetPage.pageType == PageType.HOME &&
                                 targetPage.id != page.id
                             draggingHomeTileId = null
                             draggingHomeTileSourcePageId = null
@@ -949,7 +949,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         // Lightweight preview when the original Tile's page is offscreen.
         // Never re-host an Android widget: only show its label during drag.
         if (draggingHomeTileId != null &&
-            currentPage?.pageType == PageType.HOME &&
+            currentPage != null && currentPage.pageType == PageType.HOME &&
             currentPage.id != draggingHomeTileSourcePageId
         ) {
             val draggedTile = tiles.firstOrNull { it.id == draggingHomeTileId }
