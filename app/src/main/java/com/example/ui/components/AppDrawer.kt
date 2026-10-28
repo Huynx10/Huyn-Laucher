@@ -957,6 +957,7 @@ fun AppDrawer(
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             var folderTitleText by remember(freshFolder.id) { mutableStateOf(freshFolder.title) }
             var showAddAppsList by remember(freshFolder.id) { mutableStateOf(false) }
+            var addAppsQuery by remember(freshFolder.id) { mutableStateOf("") }
 
             ModalBottomSheet(
                 onDismissRequest = { activeFolderDialog = null },
@@ -1037,7 +1038,7 @@ fun AppDrawer(
                                 Box(
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
-                                        .size(20.dp)
+                                        .size(48.dp)
                                         .clip(CircleShape)
                                         .background(Color.Black.copy(alpha = 0.72f))
                                         .clickable {
@@ -1058,7 +1059,7 @@ fun AppDrawer(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Close,
-                                        contentDescription = "Bỏ khỏi nhóm",
+                                        contentDescription = "Bỏ ${memberApp.label} khỏi thư mục",
                                         tint = Color.White,
                                         modifier = Modifier.size(12.dp)
                                     )
@@ -1102,26 +1103,26 @@ fun AppDrawer(
                     }
 
                     AnimatedVisibility(visible = showAddAppsList) {
-                        val candidateApps = categorizedApps.filter { it.packageName !in freshFolder.appPackages }
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(candidateApps, key = { it.packageName }) { cand ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color.White.copy(alpha = 0.08f))
-                                        .clickable {
-                                            addAppToExistingFolder(cand, freshFolder)
-                                        }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        text = "+ ${cand.label}",
-                                        color = Color.White,
-                                        fontSize = 12.sp
-                                    )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = addAppsQuery,
+                                onValueChange = { addAppsQuery = it },
+                                label = { Text("Tìm ứng dụng") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                                    .testTag("folder_add_app_search")
+                            )
+                            val candidates = remember(categorizedApps, freshFolder.appPackages, addAppsQuery) {
+                                categorizedApps.filter { app ->
+                                    app.packageName !in freshFolder.appPackages &&
+                                        (addAppsQuery.isBlank() || app.label.contains(addAppsQuery, ignoreCase = true))
+                                }
+                            }
+                            LazyColumn(modifier = Modifier.fillMaxWidth().height(240.dp)) {
+                                items(candidates, key = { it.packageName }) { candidate ->
+                                    MenuActionRow(Icons.Default.Add, candidate.label, accent.color) {
+                                        addAppToExistingFolder(candidate, freshFolder)
+                                    }
                                 }
                             }
                         }
@@ -1715,6 +1716,7 @@ private fun MenuActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clickable { onClick() }
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
