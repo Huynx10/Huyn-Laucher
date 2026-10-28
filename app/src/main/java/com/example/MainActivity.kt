@@ -91,6 +91,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -124,6 +125,7 @@ import com.example.ui.viewmodel.LauncherViewModel
 import com.example.ui.widget.LumiaWidgetHostManager
 import com.example.ui.widget.DefaultWidgetMatcher
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -449,12 +451,46 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         pages.filter { it.pageType == PageType.HOME }
     }
 
+    // Keep drag ownership above pager pages so page changes cannot reset the drag session.
+    var draggingHomeTileId by remember { mutableStateOf<String?>(null) }
+    var draggingHomeTileSourcePageId by remember { mutableStateOf<String?>(null) }
+    var dragFingerX by remember { mutableFloatStateOf(0.5f) }
+    var dragFingerY by remember { mutableFloatStateOf(0.5f) }
+    val dragEdgeDirection = when {
+        draggingHomeTileId == null || settings.lockHomeLayout -> 0
+        dragFingerX <= 0.10f -> -1
+        dragFingerX >= 0.90f -> 1
+        else -> 0
+    }
+
+    // Hover deliberately at the edge to visit the adjacent HOME page without lifting.
+    // Only active while dragging: no polling or background work when idle.
+    LaunchedEffect(draggingHomeTileId, dragEdgeDirection, pagerState.currentPage) {
+        val activeTileId = draggingHomeTileId
+        val direction = dragEdgeDirection
+        if (activeTileId != null && direction != 0) {
+            delay(550)
+            val next = pagerState.currentPage + direction
+            if (draggingHomeTileId == activeTileId &&
+                dragEdgeDirection == direction &&
+                pages.getOrNull(next)?.pageType == PageType.HOME
+            ) {
+                pagerState.scrollToPage(next)
+            }
+        }
+    }
 
     // Back press handling: exit Action Center -> exit Smart Folder -> exit Glance -> deselect single tile -> exit Home Edit Mode -> return to Default Home Page
     BackHandler(
-        enabled = activeSmartFolderRequest != null || isGlanceScreenOpen || selectedTileId != null || isEditMode || pagerState.currentPage != defaultPageIndex
+        enabled = draggingHomeTileId != null || activeSmartFolderRequest != null || isGlanceScreenOpen || selectedTileId != null || isEditMode || pagerState.currentPage != defaultPageIndex
     ) {
         when {
+            draggingHomeTileId != null -> {
+                val sourceIndex = pages.indexOfFirst { it.id == draggingHomeTileSourcePageId }
+                draggingHomeTileId = null
+                draggingHomeTileSourcePageId = null
+                if (sourceIndex >= 0) coroutineScope.launch { pagerState.scrollToPage(sourceIndex) }
+            }
             activeSmartFolderRequest != null -> viewModel.closeSmartFolder()
             isGlanceScreenOpen -> viewModel.closeGlanceScreen()
             selectedTileId != null -> viewModel.clearSelectedTile()
@@ -592,7 +628,11 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         // 1. Full-Screen HorizontalPager (Blurs dynamically when Action Center Glassmorphism overlay is open)
         HorizontalPager(
             state = pagerState,
-            beyondViewportPageCount = if (isBatterySaverActive) 0 else 1,
+            // Keep the original pointer-input node composed while a drag crosses pages.
+            // Extra pages are composed only during the gesture, never in idle/background.
+            beyondViewportPageCount = if (draggingHomeTileId != null) (pages.size - 1).coerceAtLeast(0)
+                else if (isBatterySaverActive) 0 else 1,
+            userScrollEnabled = draggingHomeTileId == null,
             key = { idx -> pages.getOrNull(idx)?.id ?: "page_$idx" },
             modifier = Modifier
                 .fillMaxSize()
@@ -749,6 +789,50 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onMoveTileToPage = { tileId, targetPageId ->
                             viewModel.moveTileToPage(tileId, targetPageId)
                         },
+                        onCrossPageDragStart = { tileId, fractionX, fractionY ->
+                            if (!settings.lockHomeLayout && homePages.size > 1) {
+                                draggingHomeTileId = tileId
+                                draggingHomeTileSourcePageId = page.id
+                                dragFingerX = fractionX
+                                dragFingerY = fractionY
+                            }
+                        },
+                        onCrossPageDragMove = { tileId, fractionX, fractionY ->
+                            if (draggingHomeTileId == tileId) {
+                                dragFingerX = fractionX
+                                dragFingerY = fractionY
+                            }
+                        },
+                        onCrossPageDragEnd = { tileId, gridX, gridY ->
+                            val targetPage = pages.getOrNull(pagerState.currentPage)
+                            val crossed = draggingHomeTileId == tileId &&
+                                draggingHomeTileSourcePageId == page.id &&
+                                targetPage?.pageType == PageType.HOME &&
+                                targetPage.id != page.id
+                            draggingHomeTileId = null
+                            draggingHomeTileSourcePageId = null
+                            if (crossed && targetPage != null) {
+                                viewModel.moveTileToPageAtGridPosition(
+                                    tileId, targetPage.id, gridX, gridY
+                                ) { moved ->
+                                    if (!moved) {
+                                        Toast.makeText(context, "Vị trí này không trống. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                viewModel.clearSelectedTile()
+                            }
+                            crossed
+                        },
+                        onCrossPageDragCancel = { tileId ->
+                            if (draggingHomeTileId == tileId) {
+                                val sourceIndex = pages.indexOfFirst { it.id == draggingHomeTileSourcePageId }
+                                draggingHomeTileId = null
+                                draggingHomeTileSourcePageId = null
+                                if (sourceIndex >= 0 && sourceIndex != pagerState.currentPage) {
+                                    coroutineScope.launch { pagerState.scrollToPage(sourceIndex) }
+                                }
+                            }
+                        },
                         onOpenWidgetSettings = { tile ->
                             (context as? MainActivity)?.openWidgetSettings(tile)
                         },
@@ -860,6 +944,50 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     )
                 }
             }
+        }
+
+        // Lightweight preview when the original Tile's page is offscreen.
+        // Never re-host an Android widget: only show its label during drag.
+        if (draggingHomeTileId != null &&
+            currentPage?.pageType == PageType.HOME &&
+            currentPage.id != draggingHomeTileSourcePageId
+        ) {
+            val draggedTile = tiles.firstOrNull { it.id == draggingHomeTileId }
+            val screen = LocalConfiguration.current
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(
+                        x = (screen.screenWidthDp * dragFingerX).dp - 36.dp,
+                        y = (screen.screenHeightDp * dragFingerY).dp - 36.dp
+                    )
+                    .size(72.dp)
+                    .zIndex(40f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accent.color.copy(alpha = 0.85f))
+                    .border(1.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = draggedTile?.title?.take(12) ?: "Tile",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    maxLines = 2
+                )
+            }
+            Text(
+                text = "Thả để chuyển ô sang ${currentPage.title}",
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 8.dp)
+                    .zIndex(41f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.Black.copy(alpha = 0.75f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            )
         }
 
         // 2. Samsung One UI Home Edit Top Bar (Floating at TopCenter in Edit Mode: ONLY Home icon to set default + Drag handle to reorder page)
