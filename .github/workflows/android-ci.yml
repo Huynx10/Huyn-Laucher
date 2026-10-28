@@ -55,12 +55,12 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
           test -n "$AAPT"
           "$AAPT" dump badging "$APK" > /tmp/lumia-trial-badging.txt
-          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.trial4'" /tmp/lumia-trial-badging.txt
+          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.trial5'" /tmp/lumia-trial-badging.txt
           sha256sum "$APK"
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lumia-launcher-s24-trial-apk
+          name: lumia-launcher-s24-trial5-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
