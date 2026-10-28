@@ -684,6 +684,7 @@ class LauncherViewModel(
         targetPageId: String,
         gridX: Int,
         gridY: Int,
+        totalCols: Int = 4,
         onResult: (Boolean) -> Unit = {}
     ) {
         if (_settings.value.lockHomeLayout) {
@@ -691,7 +692,7 @@ class LauncherViewModel(
             return
         }
         viewModelScope.launch {
-            onResult(repository.moveTileToPageAtGridPosition(tileId, targetPageId, gridX, gridY))
+            onResult(repository.moveTileToPageAtGridPosition(tileId, targetPageId, gridX, gridY, totalCols))
         }
     }
 
