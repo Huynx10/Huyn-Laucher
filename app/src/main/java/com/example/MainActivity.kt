@@ -135,18 +135,23 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     fun openWidgetSettings(tile: TileEntity) {
         val manager = LumiaWidgetHostManager.getInstance(this)
-        if (!manager.canReconfigureWidget(tile.appWidgetId, tile.widgetProvider)) return
-        try {
+        val result = manager.startWidgetReconfiguration(tile) { boundId ->
             manager.appWidgetHost.startAppWidgetConfigureActivityForResult(
-                this, tile.appWidgetId, 0, 8201, null
+                this, boundId, 0, 8201, null
             )
-        } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, "Ứng dụng không mở được cài đặt widget.", Toast.LENGTH_SHORT).show()
-        } catch (_: SecurityException) {
-            Toast.makeText(this, "Ứng dụng không cho mở cài đặt widget.", Toast.LENGTH_SHORT).show()
-        } catch (_: RuntimeException) {
-            Toast.makeText(this, "Không mở được cài đặt widget.", Toast.LENGTH_SHORT).show()
         }
+        // A canceled provider screen has no pin/rebind callback: retain widget ID and layout.
+        val message = when (result) {
+            com.example.ui.widget.WidgetReconfigureResult.ACTIVITY_MISSING ->
+                "Ứng dụng không mở được cài đặt widget."
+            com.example.ui.widget.WidgetReconfigureResult.ACCESS_DENIED ->
+                "Ứng dụng không cho mở cài đặt widget."
+            com.example.ui.widget.WidgetReconfigureResult.FAILED ->
+                "Không mở được cài đặt widget."
+            com.example.ui.widget.WidgetReconfigureResult.STARTED,
+            com.example.ui.widget.WidgetReconfigureResult.UNSUPPORTED -> null
+        }
+        message?.let { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

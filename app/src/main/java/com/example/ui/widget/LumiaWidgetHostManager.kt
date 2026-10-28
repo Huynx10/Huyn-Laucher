@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetHostView
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
+import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -23,7 +24,9 @@ import android.widget.AbsListView
 import android.widget.FrameLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.example.data.model.TileEntity
 import com.example.data.model.TileSize
+import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import kotlin.math.abs
 
@@ -44,6 +47,8 @@ sealed interface WidgetHostState {
         val providerComponent: String
     ) : WidgetHostState
 }
+
+enum class WidgetReconfigureResult { UNSUPPORTED, STARTED, ACTIVITY_MISSING, ACCESS_DENIED, FAILED }
 
 /**
  * Custom [AppWidgetHostView] tailored for Lumia Start Screen Tiles:
@@ -394,18 +399,44 @@ class LumiaWidgetHostManager private constructor(context: Context) {
         return info?.configure
     }
 
-    /** A placed widget exposes Settings only when its provider opts in to reconfiguration. */
+    /** Only a LIVE, bound widget from the saved provider can expose native Settings. */
     fun canReconfigureWidget(appWidgetId: Int, providerComponent: String): Boolean {
         if (appWidgetId <= 0) return false
+        val expectedProvider = ComponentName.unflattenFromString(providerComponent.trim()) ?: return false
+        // getAppWidgetInfo returns null for unbound/revoked IDs. Never fall back to provider metadata.
         val info = try {
             appWidgetManager.getAppWidgetInfo(appWidgetId)
         } catch (_: RuntimeException) {
             null
         } ?: return false
-        if (info.provider.flattenToString() != providerComponent) return false
-        if (info.configure == null) return false
+        if (info.provider != expectedProvider || info.configure == null) return false
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             (info.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_RECONFIGURABLE) != 0
+    }
+
+    fun canReconfigureTile(tile: TileEntity): Boolean =
+        tile.tileType == TileType.WIDGET &&
+            canReconfigureWidget(tile.appWidgetId, tile.widgetProvider)
+
+    /**
+     * Re-check the binding at click time and invoke only the Android AppWidgetHost route.
+     * No ID is allocated/released and no tile is saved on cancel, missing Activity or failure.
+     */
+    fun startWidgetReconfiguration(
+        tile: TileEntity,
+        launchWithHost: (Int) -> Unit
+    ): WidgetReconfigureResult {
+        if (!canReconfigureTile(tile)) return WidgetReconfigureResult.UNSUPPORTED
+        return try {
+            launchWithHost(tile.appWidgetId)
+            WidgetReconfigureResult.STARTED
+        } catch (_: ActivityNotFoundException) {
+            WidgetReconfigureResult.ACTIVITY_MISSING
+        } catch (_: SecurityException) {
+            WidgetReconfigureResult.ACCESS_DENIED
+        } catch (_: RuntimeException) {
+            WidgetReconfigureResult.FAILED
+        }
     }
 
     /**

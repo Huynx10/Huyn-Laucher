@@ -380,9 +380,8 @@ fun LumiaStartGrid(
                 ) + fadeOut()
             ) {
                 selectedTileOnThisPage?.let { activeTile ->
-                    val canConfigureWidget = remember(activeTile.appWidgetId, activeTile.widgetProvider) {
-                        widgetHostManager.canReconfigureWidget(activeTile.appWidgetId, activeTile.widgetProvider)
-                    }
+                    // Capability may change after provider removal/rebind without a tile ID change.
+                    val canConfigureWidget = widgetHostManager.canReconfigureTile(activeTile)
                     SingleTileContextualBar(
                         tile = activeTile,
                         displayName = tileDisplayName(activeTile, installedApps, installedWidgets),
