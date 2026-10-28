@@ -35,7 +35,7 @@ private val MetroReleaseSpring = spring<Float>(
  * TileView input node avoids racing an ancestor drag detector against metroTilt's
  * long-press callback (which previously selected the Tile and replaced the node).
  */
-internal class MetroTileDragCallbacks(
+class MetroTileDragCallbacks(
     val cancelToken: Int,
     val onStart: (Offset) -> Unit,
     val onMove: (Offset) -> Unit,
