@@ -149,7 +149,7 @@ fun SettingsSheet(
     onSyncToCloudNow: (String) -> Unit = {},
     onRestoreCloudBackup: (CloudBackup) -> Unit = {},
     onDeleteCloudBackup: (String) -> Unit = {},
-    onSaveSettings: (LauncherSettings) -> Unit,
+    onSaveSettings: (LauncherSettings, LauncherSettings) -> Unit,
     onUpdateTileAppearance: (Wp10TileStyle, Float) -> Unit,
     onPickCustomWallpaper: (Uri) -> Unit = {},
     onClearCustomWallpaper: () -> Unit = {},
@@ -280,8 +280,7 @@ fun SettingsSheet(
         } else {
             selectedAccentHex
         }
-        onSaveSettings(
-            settings.copy(
+        onSaveSettings(settings, settings.copy(
                 accentColorHex = resolvedHex,
                 autoWallpaperAccentEnabled = autoWallpaperAccent,
                 dynamicAccentMode = dynamicAccentMode,

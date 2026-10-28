@@ -86,6 +86,44 @@ internal fun MutableStateFlow<LauncherSettings>.updateTileAppearanceFromLatest(
 internal fun LauncherSettings.withAppearanceFrom(latest: LauncherSettings): LauncherSettings =
     copy(wp10TileStyle = latest.wp10TileStyle, tileOpacity = latest.tileOpacity)
 
+/** Merge only Advanced controls actually changed against their Compose baseline. */
+internal fun LauncherSettings.mergeAdvancedEdits(
+    baseline: LauncherSettings,
+    edited: LauncherSettings
+): LauncherSettings = copy(
+    accentColorHex = if (edited.accentColorHex != baseline.accentColorHex) edited.accentColorHex else accentColorHex,
+    autoWallpaperAccentEnabled = if (edited.autoWallpaperAccentEnabled != baseline.autoWallpaperAccentEnabled) edited.autoWallpaperAccentEnabled else autoWallpaperAccentEnabled,
+    dynamicAccentMode = if (edited.dynamicAccentMode != baseline.dynamicAccentMode) edited.dynamicAccentMode else dynamicAccentMode,
+    dynamicSwatchIndex = if (edited.dynamicSwatchIndex != baseline.dynamicSwatchIndex) edited.dynamicSwatchIndex else dynamicSwatchIndex,
+    isDarkTheme = if (edited.isDarkTheme != baseline.isDarkTheme) edited.isDarkTheme else isDarkTheme,
+    wp10RevealBorder = if (edited.wp10RevealBorder != baseline.wp10RevealBorder) edited.wp10RevealBorder else wp10RevealBorder,
+    showMoreTiles = if (edited.showMoreTiles != baseline.showMoreTiles) edited.showMoreTiles else showMoreTiles,
+    tileCornerRadiusDp = if (edited.tileCornerRadiusDp != baseline.tileCornerRadiusDp) edited.tileCornerRadiusDp else tileCornerRadiusDp,
+    tileSpacingDp = if (edited.tileSpacingDp != baseline.tileSpacingDp) edited.tileSpacingDp else tileSpacingDp,
+    useRealAppIcons = if (edited.useRealAppIcons != baseline.useRealAppIcons) edited.useRealAppIcons else useRealAppIcons,
+    miuiGlassBorder = if (edited.miuiGlassBorder != baseline.miuiGlassBorder) edited.miuiGlassBorder else miuiGlassBorder,
+    pageTransitionEffect = if (edited.pageTransitionEffect != baseline.pageTransitionEffect) edited.pageTransitionEffect else pageTransitionEffect,
+    doubleTapToGlance = if (edited.doubleTapToGlance != baseline.doubleTapToGlance) edited.doubleTapToGlance else doubleTapToGlance,
+    lockHomeLayout = if (edited.lockHomeLayout != baseline.lockHomeLayout) edited.lockHomeLayout else lockHomeLayout,
+    autoArrangeTiles = if (edited.autoArrangeTiles != baseline.autoArrangeTiles) edited.autoArrangeTiles else autoArrangeTiles,
+    wallpaperSource = if (edited.wallpaperSource != baseline.wallpaperSource) edited.wallpaperSource else wallpaperSource,
+    wallpaperGradientIndex = if (edited.wallpaperGradientIndex != baseline.wallpaperGradientIndex) edited.wallpaperGradientIndex else wallpaperGradientIndex,
+    wallpaperDimAlpha = if (edited.wallpaperDimAlpha != baseline.wallpaperDimAlpha) edited.wallpaperDimAlpha else wallpaperDimAlpha,
+    turnstileAnimationEnabled = if (edited.turnstileAnimationEnabled != baseline.turnstileAnimationEnabled) edited.turnstileAnimationEnabled else turnstileAnimationEnabled,
+    glanceScreenEnabled = if (edited.glanceScreenEnabled != baseline.glanceScreenEnabled) edited.glanceScreenEnabled else glanceScreenEnabled,
+    batterySaverMode = if (edited.batterySaverMode != baseline.batterySaverMode) edited.batterySaverMode else batterySaverMode,
+    batterySaverThresholdPct = if (edited.batterySaverThresholdPct != baseline.batterySaverThresholdPct) edited.batterySaverThresholdPct else batterySaverThresholdPct,
+    autoOptimizeBackgroundApps = if (edited.autoOptimizeBackgroundApps != baseline.autoOptimizeBackgroundApps) edited.autoOptimizeBackgroundApps else autoOptimizeBackgroundApps,
+    showPageHeaderTitle = if (edited.showPageHeaderTitle != baseline.showPageHeaderTitle) edited.showPageHeaderTitle else showPageHeaderTitle,
+    allAppsViewMode = if (edited.allAppsViewMode != baseline.allAppsViewMode) edited.allAppsViewMode else allAppsViewMode,
+    allAppsGridColumns = if (edited.allAppsGridColumns != baseline.allAppsGridColumns) edited.allAppsGridColumns else allAppsGridColumns,
+    allAppsSortOrder = if (edited.allAppsSortOrder != baseline.allAppsSortOrder) edited.allAppsSortOrder else allAppsSortOrder,
+    allAppsShowSearchBar = if (edited.allAppsShowSearchBar != baseline.allAppsShowSearchBar) edited.allAppsShowSearchBar else allAppsShowSearchBar,
+    allAppsShowLetterHeaders = if (edited.allAppsShowLetterHeaders != baseline.allAppsShowLetterHeaders) edited.allAppsShowLetterHeaders else allAppsShowLetterHeaders,
+    allAppsCategorizedEnabled = if (edited.allAppsCategorizedEnabled != baseline.allAppsCategorizedEnabled) edited.allAppsCategorizedEnabled else allAppsCategorizedEnabled,
+    quickNotes = if (edited.quickNotes != baseline.quickNotes) edited.quickNotes else quickNotes
+)
+
 class LauncherViewModel(
     private val repository: LauncherRepository,
     private val cloudSyncRepository: CloudSyncRepository?,
@@ -889,11 +927,11 @@ class LauncherViewModel(
         publishSettingsChange(prevCustom, syncedSettings)
     }
 
-    /** Advanced controls do not own appearance; keep a newer Quick Action/style update intact. */
-    fun updateSettingsPreservingAppearance(newSettings: LauncherSettings) {
+    /** Apply only Advanced edits to the newest state, never a whole Compose snapshot. */
+    fun updateAdvancedSettings(baseline: LauncherSettings, edited: LauncherSettings) {
         val prevCustom = _settings.value.customAppCategories
         val syncedSettings = _settings.updateAndGet { latest ->
-            withResolvedAutoAccent(newSettings.withAppearanceFrom(latest))
+            withResolvedAutoAccent(latest.mergeAdvancedEdits(baseline, edited))
         }
         publishSettingsChange(prevCustom, syncedSettings)
     }

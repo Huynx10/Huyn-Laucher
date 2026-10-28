@@ -1183,7 +1183,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     }
                 },
                 onDeleteCloudBackup = { backupId -> viewModel.deleteCloudBackup(backupId) },
-                onSaveSettings = { viewModel.updateSettingsPreservingAppearance(it) },
+                onSaveSettings = { baseline, edited -> viewModel.updateAdvancedSettings(baseline, edited) },
                 onUpdateTileAppearance = { style, opacity -> viewModel.updateTileAppearance(style, opacity) },
                 onPickCustomWallpaper = { uri ->
                     viewModel.setCustomWallpaper(uri)

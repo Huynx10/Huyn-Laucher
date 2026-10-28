@@ -20,7 +20,13 @@ if grep -Fq 'onUpdateSettings(settings.copy(' "$action"; then
 fi
 grep -Fq 'viewModel.cycleTileAppearance(' "$home"
 grep -Fq 'viewModel.updateTileAppearance(style, opacity)' "$home"
-grep -Fq 'viewModel.updateSettingsPreservingAppearance(it)' "$home"
+grep -Fq 'viewModel.updateAdvancedSettings(baseline, edited)' "$home"
+grep -Fq 'onSaveSettings(settings, settings.copy(' "$sheet"
+grep -Fq 'latest.mergeAdvancedEdits(baseline, edited)' "$vm"
+if grep -Fq 'viewModel.updateSettingsPreservingAppearance(it)' "$home"; then
+  echo 'Advanced Settings must not pass a full Compose snapshot' >&2
+  exit 1
+fi
 
 # ViewModel applies only style+opacity to the latest StateFlow value atomically.
 grep -Fq 'updateAndGet { current ->' "$vm"

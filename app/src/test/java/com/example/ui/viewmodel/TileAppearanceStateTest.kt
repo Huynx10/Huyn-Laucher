@@ -52,11 +52,25 @@ class TileAppearanceStateTest {
 
         state.updateTileAppearanceFromLatest { Wp10TileStyle.CRYSTAL_CLEAR to 0f }
         state.updateAndGet { latest ->
-            staleAdvancedSnapshot.copy(isDarkTheme = false).withAppearanceFrom(latest)
+            latest.mergeAdvancedEdits(staleAdvancedSnapshot, staleAdvancedSnapshot.copy(isDarkTheme = false))
         }
 
         assertEquals(Wp10TileStyle.CRYSTAL_CLEAR, state.value.wp10TileStyle)
         assertEquals(0f, state.value.tileOpacity)
         assertEquals(false, state.value.isDarkTheme)
+    }
+
+    @Test
+    fun staleAdvancedEditDoesNotRevertOtherAdvancedOrHomeChanges() {
+        val state = MutableStateFlow(LauncherSettings())
+        val baseline = state.value
+        state.updateAndGet { current -> current.copy(showMoreTiles = true, defaultHomePageId = "page_home_2") }
+        state.updateAndGet { current -> current.mergeAdvancedEdits(baseline, baseline.copy(isDarkTheme = false)) }
+        state.updateAndGet { current -> current.mergeAdvancedEdits(baseline, baseline.copy(quickNotes = "Saved note")) }
+
+        assertEquals(true, state.value.showMoreTiles)
+        assertEquals(false, state.value.isDarkTheme)
+        assertEquals("Saved note", state.value.quickNotes)
+        assertEquals("page_home_2", state.value.defaultHomePageId)
     }
 }
