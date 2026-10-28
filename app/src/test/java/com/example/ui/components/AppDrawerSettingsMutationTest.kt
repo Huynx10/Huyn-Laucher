@@ -28,7 +28,7 @@ class AppDrawerSettingsMutationTest {
                     apps = emptyList(), homePages = emptyList(),
                     settings = staleUiSettings, onLaunchApp = {},
                     onPinAppToPage = { _, _ -> },
-                    onMutateSettings = { edit -> latest = edit(latest) }
+                    onMutateSettings = { edit -> edit(latest).also { latest = it } }
                 )
             }
         }

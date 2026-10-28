@@ -175,7 +175,7 @@ fun AppDrawer(
     onPinAppToPage: (AppItem, String) -> Unit,
     installedWidgets: List<WidgetProviderItem> = emptyList(),
     onPinWidgetToPage: (WidgetProviderItem, String) -> Unit = { _, _ -> },
-    onMutateSettings: ((LauncherSettings) -> LauncherSettings) -> Unit,
+    onMutateSettings: ((LauncherSettings) -> LauncherSettings) -> LauncherSettings,
     onEnterEditMode: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -1060,8 +1060,7 @@ fun AppDrawer(
                                         .clip(CircleShape)
                                         .background(Color.Black.copy(alpha = 0.72f))
                                         .clickable {
-                                            val remainingPkgs = freshFolder.appPackages.filter { it != memberApp.packageName }
-                                            onMutateSettings { latest ->
+                                            val updatedSettings = onMutateSettings { latest ->
                                                 val updatedFolders = latest.appDrawerFolders.mapNotNull { folder ->
                                                     if (folder.id != freshFolder.id) folder else {
                                                         val remaining = folder.appPackages.filterNot {
@@ -1072,7 +1071,7 @@ fun AppDrawer(
                                                 }
                                                 latest.copy(appDrawerFolders = updatedFolders)
                                             }
-                                            if (remainingPkgs.isEmpty()) {
+                                            if (updatedSettings.appDrawerFolders.none { it.id == freshFolder.id }) {
                                                 activeFolderDialog = null
                                             }
                                         },

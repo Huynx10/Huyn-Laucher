@@ -945,12 +945,13 @@ class LauncherViewModel(
     }
 
     /** Apply a small UI edit to the current state so delayed Compose callbacks cannot restore stale fields. */
-    fun mutateSettings(transform: (LauncherSettings) -> LauncherSettings) {
+    fun mutateSettings(transform: (LauncherSettings) -> LauncherSettings): LauncherSettings {
         val prevCustom = _settings.value.customAppCategories
         val syncedSettings = _settings.updateAndGet { latest ->
             withResolvedAutoAccent(transform(latest))
         }
         publishSettingsChange(prevCustom, syncedSettings)
+        return syncedSettings
     }
 
     /** Apply only Advanced edits to the newest state, never a whole Compose snapshot. */
