@@ -270,8 +270,8 @@ fun AppDrawer(
         settings.appDrawerFolders,
         settings.allAppsSortOrder
     ) {
-        val folderPackages = settings.appDrawerFolders
-            .firstOrNull { it.id == selectedFolderId }?.appPackages?.toSet()
+        val selectedFolder = settings.appDrawerFolders.firstOrNull { it.id == selectedFolderId }
+        val folderPackages = selectedFolder?.appPackages?.toSet()
         val filtered = categorizedApps.filter { app ->
             val matchesQuery = searchQuery.isBlank() ||
                 app.label.contains(searchQuery, ignoreCase = true) ||
@@ -281,7 +281,10 @@ fun AppDrawer(
             matchesQuery && (folderPackages == null || app.packageName in folderPackages)
         }
 
-        when (settings.allAppsSortOrder) {
+        if (selectedFolder != null) {
+            val order = selectedFolder.appPackages.withIndex().associate { it.value to it.index }
+            filtered.sortedBy { order[it.packageName] ?: Int.MAX_VALUE }
+        } else when (settings.allAppsSortOrder) {
             AllAppsSortOrder.NAME_ASC -> filtered.sortedBy { it.label.lowercase(Locale.getDefault()) }
             AllAppsSortOrder.NAME_DESC -> filtered.sortedByDescending { it.label.lowercase(Locale.getDefault()) }
             AllAppsSortOrder.USER_FIRST -> filtered.sortedWith(
@@ -535,7 +538,7 @@ fun AppDrawer(
                     hoveredFolderId = hoveredFolderId,
                     showRemoveTarget = draggingEntry is GridDrawerEntry.AppEntry && selectedFolderId != null,
                     showDeleteTarget = draggingEntry is GridDrawerEntry.FolderEntry,
-                    showAzButton = settings.allAppsViewMode == AllAppsViewMode.METRO_LIST,
+                    showAzButton = settings.allAppsViewMode == AllAppsViewMode.METRO_LIST && selectedFolderId == null,
                     onSelectFolder = { id ->
                         if (id == "__new__") {
                             val folder = AppFolder("folder_${UUID.randomUUID()}",
@@ -633,7 +636,7 @@ fun AppDrawer(
                                 if (p in 'A'..'Z') p else '#'
                             } else null
 
-                            val showHeader = settings.allAppsShowLetterHeaders &&
+                            val showHeader = selectedFolderId == null && settings.allAppsShowLetterHeaders &&
                                 settings.allAppsSortOrder != AllAppsSortOrder.USER_FIRST &&
                                 prevChar != currentGroupChar
 
