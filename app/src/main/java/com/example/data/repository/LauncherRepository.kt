@@ -104,26 +104,13 @@ class LauncherRepository(
                 return@withContext
             }
         }
-        // Convert legacy category folders to explicit members before removing auto grouping.
-        // Existing folder IDs, positions and item snapshots remain unchanged.
-        val automaticFolders = tileDao.getAllTiles().mapNotNull { tile ->
-            if (tile.tileType != TileType.SMART_FOLDER) return@mapNotNull null
-            val config = SmartFolderConfig.fromTile(tile)
-            if (config.autoSyncCategory) tile to config else null
-        }
-        if (automaticFolders.isNotEmpty()) {
-            val installed = getInstalledApps(emptySet())
-            if (installed.isNotEmpty()) {
-                val customCategories = loadSettings().customAppCategories
-                database.withTransaction {
-                    tileDao.insertAll(automaticFolders.map { (tile, config) ->
-                        tile.copy(packageName = config.copy(
-                            items = SmartFolderConfig.resolveEffectiveItems(config, installed, customCategories),
-                            autoSyncCategory = false
-                        ).toJsonString())
-                    })
-                }
-            }
+        // Keep a legacy folder untouched if the app catalog is temporarily empty.
+        // refreshApps retries the conversion when package discovery succeeds.
+        if (tileDao.getAllTiles().any { tile ->
+                tile.tileType == TileType.SMART_FOLDER &&
+                    SmartFolderConfig.fromTile(tile).autoSyncCategory
+            }) {
+            completeLegacyFolderMigration(getInstalledApps(emptySet()))
         }
         if (tileDao.getCount() == 0 && !readHomeBoolean("home_initialized", prefs.contains("home_initialized"))) {
             val defaults = createDefaultTiles()
@@ -164,6 +151,24 @@ class LauncherRepository(
             }
         }
         prefs.edit().putBoolean("home_initialized", true).commit()
+    }
+
+    /** Freeze old category folders once installed apps can be resolved, without changing their IDs or layout. */
+    suspend fun completeLegacyFolderMigration(installed: List<AppItem>) = withContext(Dispatchers.IO) {
+        if (installed.isEmpty()) return@withContext
+        val customCategories = loadSettings().customAppCategories
+        database.withTransaction {
+            val converted = tileDao.getAllTiles().mapNotNull { tile ->
+                if (tile.tileType != TileType.SMART_FOLDER) return@mapNotNull null
+                val config = SmartFolderConfig.fromTile(tile)
+                if (!config.autoSyncCategory) return@mapNotNull null
+                tile.copy(packageName = config.copy(
+                    items = SmartFolderConfig.resolveEffectiveItems(config, installed, customCategories),
+                    autoSyncCategory = false
+                ).toJsonString())
+            }
+            if (converted.isNotEmpty()) tileDao.insertAll(converted)
+        }
     }
 
     fun findFirstFreeGridPosition(

@@ -848,7 +848,13 @@ class LauncherViewModel(
             val pinned = tiles.value.map { it.packageName }.filter { it.isNotEmpty() }.toSet()
             runLauncherBackgroundRead(onError = { Log.e(TAG, "App catalog scan failed", it) }) {
                 repository.getInstalledApps(pinned)
-            }?.let { _apps.value = it }
+            }?.let { installed ->
+                _apps.value = installed
+                // Retry legacy folder conversion after a transiently empty startup catalog.
+                runLauncherBackgroundRead(onError = { Log.e(TAG, "Folder migration retry failed", it) }) {
+                    repository.completeLegacyFolderMigration(installed)
+                }
+            }
             runLauncherBackgroundRead(onError = { Log.e(TAG, "Widget provider scan failed", it) }) {
                 repository.discoverInstalledWidgets()
             }?.let { _installedWidgets.value = it }

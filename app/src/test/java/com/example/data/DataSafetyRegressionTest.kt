@@ -673,6 +673,33 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(original), db.tileDao().getAllTiles())
     }
 
+    @Test fun legacyAutoFolderWaitsForCatalogThenFreezesMembersWithoutMovingTile() = runBlocking {
+        val legacy = TileEntity(
+            id = "old_folder", title = "Nhạc", tileType = TileType.SMART_FOLDER,
+            packageName = SmartFolderConfig(
+                category = AppCategory.MEDIA, autoSyncCategory = true,
+                items = listOf(SmartFolderItem("saved", "Saved", "example.saved"))
+            ).toJsonString(), gridX = 2, gridY = 6, pageId = "page_home_1"
+        )
+        db.tileDao().insertOrUpdate(legacy)
+
+        repo.completeLegacyFolderMigration(emptyList())
+        assertEquals(legacy, db.tileDao().getAllTiles().single())
+
+        val installed = listOf(AppItem("Music", "example.music", category = AppCategory.MEDIA))
+        repo.completeLegacyFolderMigration(installed)
+        val frozen = db.tileDao().getAllTiles().single()
+        val config = SmartFolderConfig.fromTile(frozen)
+        assertEquals(legacy.id, frozen.id)
+        assertEquals(legacy.gridX, frozen.gridX)
+        assertEquals(legacy.gridY, frozen.gridY)
+        assertFalse(config.autoSyncCategory)
+        assertEquals(setOf("example.saved", "example.music"),
+            config.items.map { it.packageName }.toSet())
+        repo.completeLegacyFolderMigration(installed)
+        assertEquals(frozen, db.tileDao().getAllTiles().single())
+    }
+
     @Test fun deliberatelyEmptyInitializedHomeStaysEmptyAfterLegacyUpgrade() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
