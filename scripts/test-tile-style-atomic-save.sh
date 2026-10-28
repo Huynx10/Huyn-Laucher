@@ -32,7 +32,7 @@ fi
 grep -Fq 'updateAndGet { current ->' "$vm"
 grep -Fq 'current.copy(wp10TileStyle = style, tileOpacity = opacity.coerceIn(0f, 1f))' "$vm"
 grep -Fq 'pendingSettings.trySend(candidate)' "$vm"
-grep -Fq 'newSettings.withAppearanceFrom(latest)' "$vm"
+grep -Fq 'latest.mergeAdvancedEdits(baseline, edited)' "$vm"
 grep -Fq 'unrelatedSettingChangeThenTransparentKeepsLatestLayoutAndWidgetPreferences' "$test"
 grep -Fq 'advancedSettingAfterTransparentPreservesLatestAppearance' "$test"
 echo "Tile appearance latest-state regression guards passed"
