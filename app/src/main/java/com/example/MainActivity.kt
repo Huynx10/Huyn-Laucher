@@ -461,7 +461,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     }
     val editModeZoomSpring = remember {
         androidx.compose.animation.core.spring<androidx.compose.ui.unit.Dp>(
-            dampingRatio = 0.76f,
+            dampingRatio = 1f,
             stiffness = 360f
         )
     }
@@ -515,6 +515,11 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         )
         v
     }
+    val safePagerHorizontalPadding = nonNegativeLayoutDp(pagerHorizontalPadding)
+    val safePagerTopPadding = nonNegativeLayoutDp(pagerTopPadding)
+    val safePagerBottomPadding = nonNegativeLayoutDp(pagerBottomPadding)
+    val safePagerCornerRadius = nonNegativeLayoutDp(pagerCornerRadius)
+    val safeFloatingIndicatorBottomPadding = nonNegativeLayoutDp(floatingIndicatorBottomPadding)
 
     // State for direct drag-and-drop page reordering on zoomed-out page card
     var draggingPageIndex by remember { mutableIntStateOf(-1) }
@@ -586,17 +591,17 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         } else Modifier
                     )
                     .padding(
-                        start = pagerHorizontalPadding,
-                        end = pagerHorizontalPadding,
-                        top = pagerTopPadding,
-                        bottom = pagerBottomPadding
+                        start = safePagerHorizontalPadding,
+                        end = safePagerHorizontalPadding,
+                        top = safePagerTopPadding,
+                        bottom = safePagerBottomPadding
                     )
                     .zIndex(if (isThisPageDragging) 10f else 1f)
                     .then(
                         if (isThisPageDragging) {
                             Modifier
                                 .offset { IntOffset(pageDragOffsetX.roundToInt(), 0) }
-                                .shadow(24.dp, RoundedCornerShape(pagerCornerRadius))
+                                .shadow(24.dp, RoundedCornerShape(safePagerCornerRadius))
                         } else Modifier
                     )
                     .graphicsLayer {
@@ -631,7 +636,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                             }
                         }
                     }
-                    .clip(RoundedCornerShape(pagerCornerRadius))
+                    .clip(RoundedCornerShape(safePagerCornerRadius))
                     .then(
                         if (isEditMode) {
                             Modifier
@@ -640,7 +645,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     width = if (isPageDefaultHome) 2.dp else 1.2.dp,
                                     color = if (isPageDefaultHome) accent.color.copy(alpha = 0.9f)
                                     else Color.White.copy(alpha = 0.38f),
-                                    shape = RoundedCornerShape(pagerCornerRadius)
+                                    shape = RoundedCornerShape(safePagerCornerRadius)
                                 )
                         } else Modifier
                     )
@@ -947,7 +952,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = floatingIndicatorBottomPadding)
+                .padding(bottom = safeFloatingIndicatorBottomPadding)
         )
 
         // 4. One UI Bottom Edit Bar (Floating at BottomCenter in Home Screen Edit Mode — 3 clean items: Trong suốt, Tiện ích, Cài đặt)
