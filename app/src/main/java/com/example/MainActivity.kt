@@ -4,6 +4,7 @@ import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -104,6 +105,7 @@ import com.example.data.model.LauncherPage
 import com.example.data.model.PageTransitionEffect
 import com.example.data.model.PageType
 import com.example.data.model.TileType
+import com.example.data.model.TileEntity
 import com.example.data.model.WidgetProviderItem
 import com.example.data.model.WallpaperSource
 import com.example.data.model.Wp10TileStyle
@@ -129,6 +131,23 @@ import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     private val viewModel: LauncherViewModel by viewModels { LauncherViewModel.Factory }
+
+    @Suppress("DEPRECATION")
+    fun openWidgetSettings(tile: TileEntity) {
+        val manager = LumiaWidgetHostManager.getInstance(this)
+        if (!manager.canReconfigureWidget(tile.appWidgetId, tile.widgetProvider)) return
+        try {
+            manager.appWidgetHost.startAppWidgetConfigureActivityForResult(
+                this, tile.appWidgetId, 0, 8201, null
+            )
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "Ứng dụng không mở được cài đặt widget.", Toast.LENGTH_SHORT).show()
+        } catch (_: SecurityException) {
+            Toast.makeText(this, "Ứng dụng không cho mở cài đặt widget.", Toast.LENGTH_SHORT).show()
+        } catch (_: RuntimeException) {
+            Toast.makeText(this, "Không mở được cài đặt widget.", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -725,8 +744,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onMoveTileToPage = { tileId, targetPageId ->
                             viewModel.moveTileToPage(tileId, targetPageId)
                         },
-                        onCustomizeTile = { tileId, colorHex, customTitle, isLive ->
-                            viewModel.updateTileCustomization(tileId, colorHex, customTitle, isLive)
+                        onOpenWidgetSettings = { tile ->
+                            (context as? MainActivity)?.openWidgetSettings(tile)
                         },
                         onPinNewTile = { tile -> viewModel.pinTile(tile) },
                         onEnterEditMode = { viewModel.enterEditMode() },
@@ -765,10 +784,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 linkToTileId = targetTile.id,
                                 existingWidgetId = targetTile.appWidgetId
                             )
-                        },
-                        onUnlinkWidgetFromTile = { tileId ->
-                            viewModel.unlinkWidgetFromTile(tileId)
-                            Toast.makeText(context, "Đã gỡ liên kết Widget khỏi ô Tile.", Toast.LENGTH_SHORT).show()
                         },
                         onOpenSmartFolder = { folderTile, pivotX, pivotY ->
                             viewModel.openSmartFolder(folderTile.id, pivotX, pivotY)
@@ -844,9 +859,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 "Đã gom các Tile cùng danh mục vào Thư mục Thông minh!",
                                 Toast.LENGTH_SHORT
                             ).show()
-                        },
-                        onCycleSmartFolderMode = { tileId ->
-                            viewModel.cycleSmartFolderLayoutMode(tileId)
                         }
                     )
                 } else {

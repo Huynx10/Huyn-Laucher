@@ -143,8 +143,12 @@ fun AppDrivenLiveTileContent(
         rememberAppIcon(effectivePackage)
     } else null
 
-    val displayTitle = remember(tile.title, linkedApp?.label) {
-        tile.title.ifBlank { linkedApp?.label ?: "Ứng dụng" }
+    val displayTitle = remember(tile.title, tile.tileType, linkedApp?.label) {
+        if (tile.tileType == TileType.APP) {
+            linkedApp?.label ?: tile.title.ifBlank { "Ứng dụng" }
+        } else {
+            tile.title.ifBlank { linkedApp?.label ?: "Ứng dụng" }
+        }
     }
 
     val categoryBadge = remember(tile.tileType, linkedApp?.category) {

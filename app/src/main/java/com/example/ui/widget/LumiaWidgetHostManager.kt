@@ -394,6 +394,20 @@ class LumiaWidgetHostManager private constructor(context: Context) {
         return info?.configure
     }
 
+    /** A placed widget exposes Settings only when its provider opts in to reconfiguration. */
+    fun canReconfigureWidget(appWidgetId: Int, providerComponent: String): Boolean {
+        if (appWidgetId <= 0) return false
+        val info = try {
+            appWidgetManager.getAppWidgetInfo(appWidgetId)
+        } catch (_: RuntimeException) {
+            null
+        } ?: return false
+        if (info.provider.flattenToString() != providerComponent) return false
+        if (info.configure == null) return false
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            (info.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_RECONFIGURABLE) != 0
+    }
+
     /**
      * Creates or updates the [LumiaAppWidgetHostView] for a bound widget and reports its real dp dimensions
      * only when the size changes, avoiding unnecessary RemoteViews re-inflations.

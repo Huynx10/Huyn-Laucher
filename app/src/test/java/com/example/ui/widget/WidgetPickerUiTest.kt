@@ -41,7 +41,7 @@ class WidgetPickerUiTest {
                         onSelectTileForEdit = {}, onResizeTile = {}, onUnpinTile = {},
                         onMoveTile = { _, _ -> }, onMoveTileToGrid = { _, _, _, _ -> },
                         onNudgeTile = { _, _, _, _ -> }, onReorderTiles = { _, _ -> },
-                        onMoveTileToPage = { _, _ -> }, onCustomizeTile = { _, _, _, _ -> },
+                        onMoveTileToPage = { _, _ -> }, onOpenWidgetSettings = {},
                         onPinNewTile = {}, onEnterEditMode = {}, installedWidgets = providers,
                         onPickAndBindWidget = { provider, pageId, _ ->
                             picked = provider
