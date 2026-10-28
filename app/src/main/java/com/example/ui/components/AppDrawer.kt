@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -158,7 +159,8 @@ private enum class GridDropIntent {
     NONE,
     GROUP_INTO_FOLDER,
     REORDER_SLOT,
-    ASSIGN_CATEGORY
+    REMOVE_FROM_FOLDER,
+    DELETE_FOLDER
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -174,7 +176,6 @@ fun AppDrawer(
     onPinWidgetToPage: (WidgetProviderItem, String) -> Unit = { _, _ -> },
     onUpdateSettings: (LauncherSettings) -> Unit,
     onEnterEditMode: () -> Unit = {},
-    onOpenActionCenter: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -185,7 +186,7 @@ fun AppDrawer(
 
     var isAndroidSearchMode by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf(AppCategory.ALL) }
+    var selectedFolderId by remember { mutableStateOf<String?>(null) }
     var selectedAppForMenu by remember { mutableStateOf<AppItem?>(null) }
     var activeFolderDialog by remember { mutableStateOf<AppFolder?>(null) }
     var showJumpList by remember { mutableStateOf(false) }
@@ -196,22 +197,28 @@ fun AppDrawer(
 
     // Bounds tracking for Grid View drag-and-drop grouping & reordering (plain maps so scrolling never triggers snapshot state writes)
     var rootBoxPosition by remember { mutableStateOf(Offset.Zero) }
-    val gridItemBounds = remember { mutableMapOf<String, Rect>() }
-    val categoryTabBounds = remember { mutableMapOf<AppCategory, Rect>() }
+    val gridItemBounds = remember(selectedFolderId, settings.allAppsViewMode) { mutableMapOf<String, Rect>() }
+    val folderTabBounds = remember(selectedFolderId, settings.appDrawerFolders) { mutableMapOf<String, Rect>() }
 
     var draggingEntry by remember { mutableStateOf<GridDrawerEntry?>(null) }
     var dragFingerRootPos by remember { mutableStateOf(Offset.Zero) }
     var dragTotalDistancePx by remember { mutableStateOf(0f) }
     var hoveredTargetKey by remember { mutableStateOf<String?>(null) }
-    var hoveredCategoryTab by remember { mutableStateOf<AppCategory?>(null) }
+    var hoveredFolderId by remember { mutableStateOf<String?>(null) }
     var activeDropIntent by remember { mutableStateOf(GridDropIntent.NONE) }
+
+    LaunchedEffect(selectedFolderId, settings.appDrawerFolders) {
+        if (selectedFolderId != null && settings.appDrawerFolders.none { it.id == selectedFolderId }) {
+            selectedFolderId = null
+        }
+    }
 
     BackHandler(enabled = isAndroidSearchMode || draggingEntry != null || activeFolderDialog != null) {
         when {
             draggingEntry != null -> {
                 draggingEntry = null
                 hoveredTargetKey = null
-                hoveredCategoryTab = null
+                hoveredFolderId = null
                 activeDropIntent = GridDropIntent.NONE
             }
             activeFolderDialog != null -> activeFolderDialog = null
@@ -235,7 +242,7 @@ fun AppDrawer(
     fun launchFinder(query: String) {
         if (!launchSamsungFinder(context, query)) {
             isAndroidSearchMode = true
-            selectedCategory = AppCategory.ALL
+            selectedFolderId = null
             Toast.makeText(context, "Không mở được Finder; tìm ứng dụng tại đây", Toast.LENGTH_SHORT).show()
         }
     }
@@ -253,26 +260,24 @@ fun AppDrawer(
         }
     }
 
-    // Filter and sort apps according to active category & search query
+    // Manual folders are the only grouping surface. The master list always includes
+    // every installed app, including apps that also appear in a folder.
     val processedApps = remember(
         categorizedApps,
         searchQuery,
-        selectedCategory,
-        settings.allAppsCategorizedEnabled,
+        selectedFolderId,
+        settings.appDrawerFolders,
         settings.allAppsSortOrder
     ) {
+        val folderPackages = settings.appDrawerFolders
+            .firstOrNull { it.id == selectedFolderId }?.appPackages?.toSet()
         val filtered = categorizedApps.filter { app ->
             val matchesQuery = searchQuery.isBlank() ||
                 app.label.contains(searchQuery, ignoreCase = true) ||
                 app.packageName.contains(searchQuery, ignoreCase = true) ||
                 app.category.label.contains(searchQuery, ignoreCase = true)
 
-            val matchesCategory = if (settings.allAppsCategorizedEnabled && !isAndroidSearchMode) {
-                selectedCategory == AppCategory.ALL || app.category == selectedCategory
-            } else {
-                true
-            }
-            matchesQuery && matchesCategory
+            matchesQuery && (folderPackages == null || app.packageName in folderPackages)
         }
 
         when (settings.allAppsSortOrder) {
@@ -290,21 +295,23 @@ fun AppDrawer(
         categorizedApps,
         settings.appDrawerFolders,
         settings.appDrawerCustomOrder,
-        selectedCategory,
+        selectedFolderId,
         searchQuery,
         isAndroidSearchMode
     ) {
-        if (isAndroidSearchMode && searchQuery.isNotBlank()) {
+        if (selectedFolderId != null) {
+            val byPackage = processedApps.associateBy { it.packageName }
+            settings.appDrawerFolders.firstOrNull { it.id == selectedFolderId }
+                ?.appPackages.orEmpty().mapNotNull { byPackage[it] }
+                .map { GridDrawerEntry.AppEntry(it) }
+        } else if (isAndroidSearchMode && searchQuery.isNotBlank()) {
             // During active text search, show matching apps directly for fast launching
             processedApps.map { GridDrawerEntry.AppEntry(it) }
         } else {
             val appsByPkg = categorizedApps.associateBy { it.packageName }
             val visibleFolders = settings.appDrawerFolders.mapNotNull { folder ->
                 val memberApps = folder.appPackages.mapNotNull { appsByPkg[it] }
-                val matchesCat = selectedCategory == AppCategory.ALL ||
-                    folder.category == selectedCategory ||
-                    memberApps.any { it.category == selectedCategory }
-                if (memberApps.isNotEmpty() && matchesCat) {
+                if (memberApps.isNotEmpty()) {
                     GridDrawerEntry.FolderEntry(folder = folder, apps = memberApps)
                 } else {
                     null
@@ -346,77 +353,66 @@ fun AppDrawer(
         map
     }
 
-    fun assignAppCategory(app: AppItem, newCategory: AppCategory) {
-        val updatedMap = settings.customAppCategories.toMutableMap()
-        updatedMap[app.packageName] = newCategory.name
-        onUpdateSettings(settings.copy(customAppCategories = updatedMap))
-    }
-
-    fun groupTwoAppsIntoFolder(sourceApp: AppItem, targetApp: AppItem) {
-        if (sourceApp.packageName == targetApp.packageName) return
-        val currentFolders = settings.appDrawerFolders.toMutableList()
-        // Remove both apps from any existing folders first
-        val cleanedFolders = currentFolders.mapNotNull { f ->
-            val remaining = f.appPackages.filter { it != sourceApp.packageName && it != targetApp.packageName }
-            if (remaining.isEmpty()) null else f.copy(appPackages = remaining)
-        }.toMutableList()
-
-        val defaultFolderTitle = if (sourceApp.category == targetApp.category && targetApp.category != AppCategory.ALL) {
-            targetApp.category.shortLabel
-        } else {
-            targetApp.category.shortLabel.ifBlank { "Thư mục mới" }
-        }
-        val newFolder = AppFolder(
+    fun createManualFolder(app: AppItem) {
+        val folder = AppFolder(
             id = "folder_${System.currentTimeMillis()}",
-            title = defaultFolderTitle,
-            appPackages = listOf(targetApp.packageName, sourceApp.packageName).distinct(),
-            category = targetApp.category,
-            orderIndex = cleanedFolders.size
+            title = "Thư mục mới",
+            appPackages = listOf(app.packageName),
+            category = AppCategory.ALL,
+            orderIndex = settings.appDrawerFolders.size
         )
-        cleanedFolders.add(0, newFolder)
-
-        // Place the new folder at the targetApp's position in custom order
-        val currentOrder = gridEntries.map { it.key }.toMutableList()
-        val targetIdx = currentOrder.indexOf("app:${targetApp.packageName}")
-        if (targetIdx >= 0) {
-            currentOrder[targetIdx] = "folder:${newFolder.id}"
-            currentOrder.remove("app:${sourceApp.packageName}")
-        } else {
-            currentOrder.add(0, "folder:${newFolder.id}")
+        val remaining = settings.appDrawerFolders.mapNotNull { old ->
+            val packages = old.appPackages.filterNot { it == app.packageName }
+            if (packages.isEmpty()) null else old.copy(appPackages = packages)
         }
-
-        onUpdateSettings(
-            settings.copy(
-                appDrawerFolders = cleanedFolders,
-                appDrawerCustomOrder = currentOrder.distinct()
-            )
-        )
+        onUpdateSettings(settings.copy(
+            appDrawerFolders = remaining + folder,
+            appDrawerCustomOrder = settings.appDrawerCustomOrder + "folder:${folder.id}"
+        ))
+        activeFolderDialog = folder
     }
 
     fun addAppToExistingFolder(sourceApp: AppItem, targetFolder: AppFolder) {
         val updatedFolders = settings.appDrawerFolders.mapNotNull { f ->
             when {
-                f.id == targetFolder.id -> {
-                    f.copy(appPackages = (f.appPackages + sourceApp.packageName).distinct())
-                }
+                f.id == targetFolder.id -> f.copy(appPackages = (f.appPackages + sourceApp.packageName).distinct())
                 sourceApp.packageName in f.appPackages -> {
-                    val rem = f.appPackages.filter { it != sourceApp.packageName }
+                    val rem = f.appPackages.filterNot { it == sourceApp.packageName }
                     if (rem.isEmpty()) null else f.copy(appPackages = rem)
                 }
                 else -> f
             }
         }
-        val updatedOrder = settings.appDrawerCustomOrder.filter { it != "app:${sourceApp.packageName}" }
-        onUpdateSettings(
-            settings.copy(
-                appDrawerFolders = updatedFolders,
-                appDrawerCustomOrder = updatedOrder
-            )
-        )
+        onUpdateSettings(settings.copy(appDrawerFolders = updatedFolders))
+    }
+
+    fun removeAppFromFolder(app: AppItem) {
+        val updated = settings.appDrawerFolders.mapNotNull { folder ->
+            val remaining = folder.appPackages.filterNot { it == app.packageName }
+            if (remaining.isEmpty()) null else folder.copy(appPackages = remaining)
+        }
+        onUpdateSettings(settings.copy(appDrawerFolders = updated))
     }
 
     fun reorderGridEntries(fromKey: String, toKey: String) {
         if (fromKey == toKey) return
+        if (selectedFolderId != null) {
+            val fromPkg = fromKey.removePrefix("app:")
+            val toPkg = toKey.removePrefix("app:")
+            val updated = settings.appDrawerFolders.map { folder ->
+                if (folder.id != selectedFolderId) folder else {
+                    val packages = folder.appPackages.toMutableList()
+                    val fromIndex = packages.indexOf(fromPkg)
+                    val toIndex = packages.indexOf(toPkg)
+                    if (fromIndex >= 0 && toIndex >= 0) {
+                        packages.add(toIndex, packages.removeAt(fromIndex))
+                    }
+                    folder.copy(appPackages = packages)
+                }
+            }
+            onUpdateSettings(settings.copy(appDrawerFolders = updated))
+            return
+        }
         val currentKeys = gridEntries.map { it.key }.toMutableList()
         val fromIdx = currentKeys.indexOf(fromKey)
         val toIdx = currentKeys.indexOf(toKey)
@@ -428,70 +424,59 @@ fun AppDrawer(
     }
 
     fun updateDragHoverTarget(fingerRootPos: Offset, dragged: GridDrawerEntry) {
-        // 1. Check if hovering over a Category Filter Pill
-        if (dragged is GridDrawerEntry.AppEntry) {
-            val hitCat = categoryTabBounds.entries.firstOrNull { (cat, rect) ->
-                cat != AppCategory.ALL && rect.contains(fingerRootPos)
+        if (dragged is GridDrawerEntry.AppEntry || dragged is GridDrawerEntry.FolderEntry) {
+            val folderTarget = folderTabBounds.entries.firstOrNull { (id, rect) ->
+                when (dragged) {
+                    is GridDrawerEntry.AppEntry -> id != "__delete__" &&
+                        (id != "__remove__" || selectedFolderId != null) && rect.contains(fingerRootPos)
+                    is GridDrawerEntry.FolderEntry -> id == "__delete__" && rect.contains(fingerRootPos)
+                }
             }?.key
-            if (hitCat != null) {
-                hoveredCategoryTab = hitCat
+            if (folderTarget != null) {
+                hoveredFolderId = folderTarget
                 hoveredTargetKey = null
-                activeDropIntent = GridDropIntent.ASSIGN_CATEGORY
+                activeDropIntent = when (folderTarget) {
+                    "__remove__" -> GridDropIntent.REMOVE_FROM_FOLDER
+                    "__delete__" -> GridDropIntent.DELETE_FOLDER
+                    else -> GridDropIntent.GROUP_INTO_FOLDER
+                }
                 return
             }
         }
-        hoveredCategoryTab = null
-
-        // 2. Check if hovering over another Grid Cell
+        hoveredFolderId = null
         val hitEntry = gridItemBounds.entries.firstOrNull { (key, rect) ->
             key != dragged.key && rect.contains(fingerRootPos)
         }
-        if (hitEntry == null) {
-            hoveredTargetKey = null
-            activeDropIntent = GridDropIntent.NONE
-            return
-        }
-
-        val targetKey = hitEntry.key
-        val rect = hitEntry.value
-        hoveredTargetKey = targetKey
-
-        // Determine whether finger is in the inner 68% (Group into Folder) or outer border (Reorder slot)
-        val center = rect.center
-        val normDx = kotlin.math.abs(fingerRootPos.x - center.x) / (rect.width * 0.5f).coerceAtLeast(1f)
-        val normDy = kotlin.math.abs(fingerRootPos.y - center.y) / (rect.height * 0.5f).coerceAtLeast(1f)
-        val isInnerCenter = normDx < 0.68f && normDy < 0.68f
-
-        activeDropIntent = if (dragged is GridDrawerEntry.AppEntry && isInnerCenter) {
-            GridDropIntent.GROUP_INTO_FOLDER
-        } else {
-            GridDropIntent.REORDER_SLOT
+        hoveredTargetKey = hitEntry?.key
+        activeDropIntent = when {
+            hitEntry == null -> GridDropIntent.NONE
+            dragged is GridDrawerEntry.AppEntry && hitEntry.key.startsWith("folder:") -> GridDropIntent.GROUP_INTO_FOLDER
+            else -> GridDropIntent.REORDER_SLOT
         }
     }
 
     fun commitGridDrop(dragged: GridDrawerEntry) {
-        val targetCat = hoveredCategoryTab
-        val targetKey = hoveredTargetKey
-        val intent = activeDropIntent
-
-        if (intent == GridDropIntent.ASSIGN_CATEGORY && targetCat != null && dragged is GridDrawerEntry.AppEntry) {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            assignAppCategory(dragged.app, targetCat)
-        } else if (intent == GridDropIntent.GROUP_INTO_FOLDER && targetKey != null && dragged is GridDrawerEntry.AppEntry) {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            val targetEntry = gridEntries.find { it.key == targetKey }
-            when (targetEntry) {
-                is GridDrawerEntry.AppEntry -> {
-                    groupTwoAppsIntoFolder(dragged.app, targetEntry.app)
+        val app = (dragged as? GridDrawerEntry.AppEntry)?.app
+        when (activeDropIntent) {
+            GridDropIntent.GROUP_INTO_FOLDER -> if (app != null) {
+                val folderId = hoveredFolderId ?: hoveredTargetKey?.removePrefix("folder:")
+                if (folderId == "__new__") createManualFolder(app)
+                else settings.appDrawerFolders.firstOrNull { it.id == folderId }?.let {
+                    addAppToExistingFolder(app, it)
                 }
-                is GridDrawerEntry.FolderEntry -> {
-                    addAppToExistingFolder(dragged.app, targetEntry.folder)
-                }
-                else -> {}
             }
-        } else if (intent == GridDropIntent.REORDER_SLOT && targetKey != null) {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            reorderGridEntries(dragged.key, targetKey)
+            GridDropIntent.REMOVE_FROM_FOLDER -> if (app != null && selectedFolderId != null) {
+                removeAppFromFolder(app)
+            }
+            GridDropIntent.DELETE_FOLDER -> if (dragged is GridDrawerEntry.FolderEntry) {
+                onUpdateSettings(settings.copy(appDrawerFolders = settings.appDrawerFolders.filterNot {
+                    it.id == dragged.folder.id
+                }))
+            }
+            GridDropIntent.REORDER_SLOT -> hoveredTargetKey?.let { target ->
+                reorderGridEntries(dragged.key, target)
+            }
+            GridDropIntent.NONE -> Unit
         }
     }
 
@@ -539,18 +524,27 @@ fun AppDrawer(
                 )
             } else {
                 CleanAppDrawerHeaderBar(
-                    selectedCategory = selectedCategory,
-                    categorizedEnabled = settings.allAppsCategorizedEnabled,
+                    folders = settings.appDrawerFolders,
+                    selectedFolderId = selectedFolderId,
                     viewMode = settings.allAppsViewMode,
                     accentColor = accent.color,
-                    hoveredCategoryTab = hoveredCategoryTab,
+                    hoveredFolderId = hoveredFolderId,
+                    showRemoveTarget = draggingEntry is GridDrawerEntry.AppEntry && selectedFolderId != null,
+                    showDeleteTarget = draggingEntry is GridDrawerEntry.FolderEntry,
                     showAzButton = settings.allAppsViewMode == AllAppsViewMode.METRO_LIST,
-                    onSelectCategory = { cat -> selectedCategory = cat },
-                    onCategoryTabPositioned = { cat, rect ->
-                        categoryTabBounds[cat] = rect
+                    onSelectFolder = { id ->
+                        if (id == "__new__") {
+                            val folder = AppFolder("folder_${System.currentTimeMillis()}",
+                                "Thư mục mới", emptyList(), AppCategory.ALL,
+                                settings.appDrawerFolders.size)
+                            onUpdateSettings(settings.copy(appDrawerFolders = settings.appDrawerFolders + folder))
+                            activeFolderDialog = folder
+                        } else selectedFolderId = id
+                    },
+                    onFolderTabPositioned = { id, rect ->
+                        folderTabBounds[id] = rect
                     },
                     onOpenAzJump = { showJumpList = true },
-                    onOpenActionCenter = onOpenActionCenter,
                     onToggleViewMode = {
                         val nextMode = if (settings.allAppsViewMode == AllAppsViewMode.METRO_LIST) {
                             AllAppsViewMode.ONE_UI_GRID
@@ -566,19 +560,17 @@ fun AppDrawer(
             // Live Drag-and-Drop Action Banner when dragging an app in Grid View
             AnimatedVisibility(visible = draggingEntry != null) {
                 val hintText = when (activeDropIntent) {
-                    GridDropIntent.ASSIGN_CATEGORY -> {
-                        "Thả để chuyển sang phân loại \"${hoveredCategoryTab?.label ?: ""}\""
-                    }
                     GridDropIntent.GROUP_INTO_FOLDER -> {
-                        val target = gridEntries.find { it.key == hoveredTargetKey }
-                        when (target) {
-                            is GridDrawerEntry.FolderEntry -> "Thả để gom vào nhóm \"${target.folder.title}\""
-                            is GridDrawerEntry.AppEntry -> "Thả để tạo nhóm thư mục với \"${target.app.label}\""
-                            else -> "Thả lên ứng dụng khác để tạo thư mục"
-                        }
+                        val title = settings.appDrawerFolders.firstOrNull {
+                            it.id == hoveredFolderId || "folder:${it.id}" == hoveredTargetKey
+                        }?.title
+                        if (hoveredFolderId == "__new__") "Thả để tạo thư mục"
+                        else "Thả vào ${title ?: "thư mục"}"
                     }
                     GridDropIntent.REORDER_SLOT -> "Thả để đổi vị trí"
-                    GridDropIntent.NONE -> "Kéo lên ứng dụng khác để tạo thư mục"
+                    GridDropIntent.REMOVE_FROM_FOLDER -> "Thả để bỏ khỏi thư mục"
+                    GridDropIntent.DELETE_FOLDER -> "Thả để xóa thư mục"
+                    GridDropIntent.NONE -> "Thả vào thư mục hoặc vị trí mới"
                 }
                 Box(
                     modifier = Modifier
@@ -603,13 +595,14 @@ fun AppDrawer(
             Spacer(modifier = Modifier.height(2.dp))
 
             // Main Content: Listing (METRO_LIST) or Grid (ONE_UI_GRID) — direct rendering without heavy crossfade cloning
-            val activeCat = selectedCategory
+            val activeCat = AppCategory.ALL
             val viewMode = settings.allAppsViewMode
             val inSearch = isAndroidSearchMode
             Box(modifier = Modifier.fillMaxSize()) {
                 if (processedApps.isEmpty() && gridEntries.isEmpty()) {
                     EmptyCategoryPlaceholder(
                         category = activeCat,
+                        folderTitle = settings.appDrawerFolders.firstOrNull { it.id == selectedFolderId }?.title,
                         searchQuery = searchQuery,
                         isAndroidSearchMode = inSearch,
                         accentColor = accent.color,
@@ -617,7 +610,7 @@ fun AppDrawer(
                             if (searchQuery.isNotBlank()) {
                                 searchQuery = ""
                             } else {
-                                selectedCategory = AppCategory.ALL
+                                selectedFolderId = null
                             }
                         }
                     )
@@ -658,17 +651,49 @@ fun AppDrawer(
                                 )
                             }
 
-                            AppItemRow(
-                                app = app,
-                                accentColor = accent.color,
-                                cornerRadiusDp = settings.tileCornerRadiusDp,
-                                useRealAppIcons = settings.useRealAppIcons,
-                                onClick = { onLaunchApp(app.packageName) },
-                                onLongClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    selectedAppForMenu = app
-                                }
-                            )
+                            val entry = GridDrawerEntry.AppEntry(app)
+                            Box(modifier = Modifier.fillMaxWidth()
+                                .onGloballyPositioned { gridItemBounds[entry.key] = it.boundsInRoot() }
+                                .pointerInput(entry.key, selectedFolderId, settings.appDrawerFolders) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = { start ->
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            draggingEntry = entry
+                                            dragTotalDistancePx = 0f
+                                            val bounds = gridItemBounds[entry.key]
+                                            dragFingerRootPos = if (bounds == null) rootBoxPosition + start
+                                                else Offset(bounds.left + start.x, bounds.top + start.y)
+                                            hoveredTargetKey = null
+                                            hoveredFolderId = null
+                                            activeDropIntent = GridDropIntent.NONE
+                                        },
+                                        onDrag = { change, distance ->
+                                            change.consume()
+                                            dragFingerRootPos += distance
+                                            dragTotalDistancePx += hypot(distance.x, distance.y)
+                                            updateDragHoverTarget(dragFingerRootPos, entry)
+                                        },
+                                        onDragEnd = {
+                                            if (with(density) { dragTotalDistancePx.toDp() } < 14.dp) {
+                                                selectedAppForMenu = app
+                                            } else commitGridDrop(entry)
+                                            draggingEntry = null
+                                            hoveredTargetKey = null
+                                            hoveredFolderId = null
+                                            activeDropIntent = GridDropIntent.NONE
+                                        },
+                                        onDragCancel = {
+                                            draggingEntry = null
+                                            hoveredTargetKey = null
+                                            hoveredFolderId = null
+                                            activeDropIntent = GridDropIntent.NONE
+                                        }
+                                    )
+                                }) {
+                                AppItemRow(app, accent.color, settings.tileCornerRadiusDp,
+                                    settings.useRealAppIcons,
+                                    onClick = { onLaunchApp(app.packageName) })
+                            }
                         }
 
                         // Empty space at bottom of list — long-press enters launcher Edit/Settings Mode
@@ -732,7 +757,8 @@ fun AppDrawer(
                                     .onGloballyPositioned { coords ->
                                         gridItemBounds[entry.key] = coords.boundsInRoot()
                                     }
-                                    .pointerInput(entry.key, gridEntries.size) {
+                                    .pointerInput(entry.key, gridEntries.size, selectedFolderId,
+                                        settings.appDrawerFolders) {
                                         detectDragGesturesAfterLongPress(
                                             onDragStart = { startOffset ->
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -748,7 +774,7 @@ fun AppDrawer(
                                                     rootBoxPosition + startOffset
                                                 }
                                                 hoveredTargetKey = null
-                                                hoveredCategoryTab = null
+                                                hoveredFolderId = null
                                                 activeDropIntent = GridDropIntent.NONE
                                             },
                                             onDrag = { change, dragAmount ->
@@ -759,7 +785,7 @@ fun AppDrawer(
                                             },
                                             onDragEnd = {
                                                 val movedDistanceDp = with(density) { dragTotalDistancePx.toDp() }
-                                                if (movedDistanceDp < 14.dp && activeDropIntent == GridDropIntent.NONE) {
+                                                if (movedDistanceDp < 14.dp) {
                                                     // Short hold without dragging opens quick actions for the app or folder
                                                     when (entry) {
                                                         is GridDrawerEntry.AppEntry -> selectedAppForMenu = entry.app
@@ -770,13 +796,13 @@ fun AppDrawer(
                                                 }
                                                 draggingEntry = null
                                                 hoveredTargetKey = null
-                                                hoveredCategoryTab = null
+                                                hoveredFolderId = null
                                                 activeDropIntent = GridDropIntent.NONE
                                             },
                                             onDragCancel = {
                                                 draggingEntry = null
                                                 hoveredTargetKey = null
-                                                hoveredCategoryTab = null
+                                                hoveredFolderId = null
                                                 activeDropIntent = GridDropIntent.NONE
                                             }
                                         )
@@ -1099,10 +1125,12 @@ fun AppDrawer(
             }
         }
 
-        // App Context Action Sheet (Pin to Home, Group into Folder, Assign Category, App Info)
-        selectedAppForMenu?.let { currentMenuApp ->
-            val app = categorizedApps.find { it.packageName == currentMenuApp.packageName } ?: currentMenuApp
+        // One compact action sheet for both list and grid. Grouping happens by dragging
+        // into an existing folder; app removal here always uses Android's own UI.
+        selectedAppForMenu?.let { app ->
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            val defaultHomeId = homePages.firstOrNull { it.id == settings.defaultHomePageId }?.id
+                ?: homePages.firstOrNull()?.id ?: "page_home_1"
             ModalBottomSheet(
                 onDismissRequest = { selectedAppForMenu = null },
                 sheetState = sheetState,
@@ -1110,270 +1138,39 @@ fun AppDrawer(
                 contentColor = Color.White
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 12.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = app.label,
-                                color = Color.White,
-                                fontSize = 19.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = app.packageName,
-                                color = Color.White.copy(alpha = 0.5f),
-                                fontSize = 11.sp
-                            )
-                        }
-                        CategoryBadgePill(
-                            category = app.category,
-                            isCustom = app.isCustomCategory
-                        )
+                    Text(app.label, color = Color.White, fontSize = 19.sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(12.dp))
+                    MenuActionRow(Icons.Default.PushPin, "Ghim vào Trang chủ", accent.color) {
+                        onPinAppToPage(app, defaultHomeId)
+                        selectedAppForMenu = null
                     }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Group into Folder section (for Grid View)
-                    Text(
-                        text = "THƯ MỤC",
-                        color = accent.color,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        item(key = "create_new_folder_for_app") {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(accent.color.copy(alpha = 0.22f))
-                                    .border(1.dp, accent.color, RoundedCornerShape(14.dp))
-                                    .clickable {
-                                        val newFolder = AppFolder(
-                                            id = "folder_${System.currentTimeMillis()}",
-                                            title = app.category.shortLabel,
-                                            appPackages = listOf(app.packageName),
-                                            category = app.category,
-                                            orderIndex = settings.appDrawerFolders.size
-                                        )
-                                        onUpdateSettings(
-                                            settings.copy(
-                                                allAppsViewMode = AllAppsViewMode.ONE_UI_GRID,
-                                                appDrawerFolders = listOf(newFolder) + settings.appDrawerFolders
-                                            )
-                                        )
-                                        selectedAppForMenu = null
-                                        activeFolderDialog = newFolder
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
-                                    .testTag("create_folder_from_app_button")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CreateNewFolder,
-                                        contentDescription = null,
-                                        tint = accent.color,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Text(
-                                        text = "+ Tạo nhóm thư mục mới",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
+                    MenuActionRow(Icons.Default.Info, "Thông tin ứng dụng", Color.White) {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", app.packageName, null)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        try { context.startActivity(intent) } catch (_: Exception) {
+                            Toast.makeText(context, "Không mở được thông tin ứng dụng", Toast.LENGTH_SHORT).show()
+                        }
+                        selectedAppForMenu = null
+                    }
+                    if (!app.isSystemApp) {
+                        MenuActionRow(Icons.Default.Delete, "Gỡ cài đặt", Color(0xFFE81123)) {
+                            val intent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
+                                data = Uri.fromParts("package", app.packageName, null)
                             }
-                        }
-
-                        items(settings.appDrawerFolders, key = { it.id }) { folder ->
-                            val alreadyIn = app.packageName in folder.appPackages
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        if (alreadyIn) accent.color.copy(alpha = 0.3f)
-                                        else Color.White.copy(alpha = 0.08f)
-                                    )
-                                    .clickable {
-                                        addAppToExistingFolder(app, folder)
-                                        selectedAppForMenu = null
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Folder,
-                                        contentDescription = null,
-                                        tint = accent.color,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = folder.title,
-                                        color = Color.White,
-                                        fontSize = 12.sp
-                                    )
-                                }
+                            try { context.startActivity(intent) } catch (_: Exception) {
+                                Toast.makeText(context, "Không mở được trình gỡ cài đặt", Toast.LENGTH_SHORT).show()
                             }
+                            selectedAppForMenu = null
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Category Filter Assignment (Auto-Save on Tap)
-                    Text(
-                        text = "LỌC THEO NHÓM",
-                        color = accent.color,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(AppCategory.assignableCategories) { cat ->
-                            val isCurrent = app.category == cat
-                            val catColor = parseHexColor(cat.badgeColorHex, accent.color)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        if (isCurrent) catColor.copy(alpha = 0.3f)
-                                        else Color.White.copy(alpha = 0.07f)
-                                    )
-                                    .border(
-                                        width = if (isCurrent) 1.5.dp else 1.dp,
-                                        color = if (isCurrent) catColor else Color.White.copy(alpha = 0.15f),
-                                        shape = RoundedCornerShape(14.dp)
-                                    )
-                                    .clickable {
-                                        assignAppCategory(app, cat)
-                                        selectedAppForMenu = app.copy(category = cat, isCustomCategory = true)
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
-                                    .testTag("assign_category_${cat.name.lowercase()}")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = categoryIcon(cat),
-                                        contentDescription = cat.label,
-                                        tint = if (isCurrent) catColor else Color.White.copy(alpha = 0.75f),
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = cat.label,
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                    if (isCurrent) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = catColor,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    val appWidgets = remember(installedWidgets, app.packageName) {
-                        installedWidgets.filter { it.packageName == app.packageName }
-                    }
-                    if (appWidgets.isNotEmpty()) {
-                        val defaultHomeId = homePages.firstOrNull { it.id == settings.defaultHomePageId }?.id
-                            ?: homePages.firstOrNull()?.id ?: "page_home_1"
-                        appWidgets.take(3).forEach { wItem ->
-                            MenuActionRow(
-                                icon = Icons.Default.Widgets,
-                                label = "Ghim Widget \"${wItem.label}\" (${wItem.targetCellWidth}x${wItem.targetCellHeight})",
-                                tint = accent.color,
-                                onClick = {
-                                    onPinWidgetToPage(wItem, defaultHomeId)
-                                    selectedAppForMenu = null
-                                }
-                            )
-                        }
-                    }
-
-                    homePages.forEach { homePage ->
-                        MenuActionRow(
-                            icon = Icons.Default.PushPin,
-                            label = "Ghim vào \"${homePage.title}\"",
-                            tint = accent.color,
-                            onClick = {
-                                onPinAppToPage(app, homePage.id)
-                                selectedAppForMenu = null
-                            }
-                        )
-                    }
-
-                    appDrawerSystemActions(app.isSystemApp).forEach { action ->
-                        when (action) {
-                            AppDrawerSystemAction.APP_INFO -> MenuActionRow(
-                                icon = Icons.Default.Info,
-                                label = "Thông tin ứng dụng",
-                                tint = Color.White,
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                            data = Uri.fromParts("package", app.packageName, null)
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {}
-                                    selectedAppForMenu = null
-                                }
-                            )
-                            AppDrawerSystemAction.UNINSTALL -> MenuActionRow(
-                                icon = Icons.Default.Delete,
-                                label = "Gỡ cài đặt",
-                                tint = Color(0xFFE81123),
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
-                                            data = Uri.fromParts("package", app.packageName, null)
-                                            putExtra(Intent.EXTRA_RETURN_RESULT, true)
-                                        }
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {}
-                                    selectedAppForMenu = null
-                                }
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(Modifier.height(12.dp))
                 }
             }
         }
@@ -1381,118 +1178,114 @@ fun AppDrawer(
 }
 
 /**
- * Metro app list controls: Action Center, A-Z, layout toggle and Search on the FIRST row.
+ * Metro app list controls: A-Z, layout toggle and Search on the first row.
  * Optional category filter chips sit BELOW. Keep their measured bounds for grid drag grouping.
  */
 @Composable
 private fun CleanAppDrawerHeaderBar(
-    selectedCategory: AppCategory,
-    categorizedEnabled: Boolean,
+    folders: List<AppFolder>,
+    selectedFolderId: String?,
     viewMode: AllAppsViewMode,
     accentColor: Color,
-    hoveredCategoryTab: AppCategory?,
+    hoveredFolderId: String?,
+    showRemoveTarget: Boolean,
+    showDeleteTarget: Boolean,
     showAzButton: Boolean,
-    onSelectCategory: (AppCategory) -> Unit,
-    onCategoryTabPositioned: (AppCategory, Rect) -> Unit,
+    onSelectFolder: (String?) -> Unit,
+    onFolderTabPositioned: (String, Rect) -> Unit,
     onOpenAzJump: () -> Unit,
-    onOpenActionCenter: () -> Unit,
     onToggleViewMode: () -> Unit,
     onOpenSearchMode: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().testTag("app_drawer_header")) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { onOpenActionCenter() }
-                    .testTag("app_drawer_action_center"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Default.Settings, contentDescription = "Mở thao tác nhanh", tint = Color.White, modifier = Modifier.size(22.dp))
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Ứng dụng", color = Color.White, fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             if (showAzButton) {
-                Box(
-                    modifier = Modifier.size(44.dp)
-                        .clip(CircleShape)
-                        .clickable { onOpenAzJump() }
-                        .testTag("app_drawer_az_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("A-Z", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Box(modifier = Modifier.size(48.dp).clip(CircleShape)
+                    .clickable { onOpenAzJump() }.testTag("app_drawer_az_button"),
+                    contentAlignment = Alignment.Center) {
+                    Text("A–Z", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-            Box(
-                modifier = Modifier.size(44.dp)
-                    .clip(CircleShape)
-                    .clickable { onToggleViewMode() }
-                    .testTag("toggle_all_apps_view_mode_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (viewMode == AllAppsViewMode.METRO_LIST) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
-                    contentDescription = if (viewMode == AllAppsViewMode.METRO_LIST) "Chuyển sang dạng lưới" else "Chuyển sang danh sách",
-                    tint = Color.White, modifier = Modifier.size(22.dp)
-                )
+            Box(modifier = Modifier.size(48.dp).clip(CircleShape)
+                .clickable { onToggleViewMode() }.testTag("toggle_all_apps_view_mode_button"),
+                contentAlignment = Alignment.Center) {
+                Icon(if (viewMode == AllAppsViewMode.METRO_LIST) Icons.Default.GridView
+                    else Icons.AutoMirrored.Filled.ViewList,
+                    contentDescription = if (viewMode == AllAppsViewMode.METRO_LIST)
+                        "Chuyển sang dạng lưới" else "Chuyển sang danh sách",
+                    tint = Color.White, modifier = Modifier.size(22.dp))
             }
-            Box(
-                modifier = Modifier.size(44.dp)
-                    .clip(CircleShape)
-                    .clickable { onOpenSearchMode() }
-                    .testTag("app_search_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Search, contentDescription = "Mở Samsung Finder", tint = Color.White, modifier = Modifier.size(22.dp))
+            Box(modifier = Modifier.size(48.dp).clip(CircleShape)
+                .clickable { onOpenSearchMode() }.testTag("app_search_button"),
+                contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Search, contentDescription = "Mở Finder", tint = Color.White,
+                    modifier = Modifier.size(22.dp))
             }
         }
 
-        if (categorizedEnabled) {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth()
-                    .padding(top = 1.dp, bottom = 3.dp)
-                    .testTag("app_drawer_category_bar"),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(end = 6.dp)
-            ) {
-                items(AppCategory.entries, key = { it.name }) { category ->
-                    val selected = selectedCategory == category
-                    val dragHovered = hoveredCategoryTab == category
-                    val active = selected || dragHovered
-                    val color = if (category == AppCategory.ALL) accentColor else parseHexColor(category.badgeColorHex, accentColor)
-                    Row(
-                        modifier = Modifier
-                            .onGloballyPositioned { coords -> onCategoryTabPositioned(category, coords.boundsInRoot()) }
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(if (active) Color.Black.copy(alpha = 0.60f) else Color.Black.copy(alpha = 0.24f))
-                            .border(
-                                width = if (active) 1.dp else 0.dp,
-                                color = if (active) color else Color.Transparent,
-                                shape = RoundedCornerShape(18.dp)
-                            )
-                            .clickable { onSelectCategory(category) }
-                            .padding(horizontal = 12.dp, vertical = 9.dp)
-                            .testTag("app_category_tab_${category.name.lowercase()}"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Text(
-                            text = category.shortLabel,
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                    }
+        // These are user-created folders, never automatic category assignments.
+        LazyRow(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+            .testTag("app_drawer_folder_bar"),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(end = 6.dp)) {
+            item(key = "all") {
+                FolderFilterChip("Tất cả", selectedFolderId == null, false, accentColor,
+                    onClick = { onSelectFolder(null) })
+            }
+            if (showRemoveTarget) {
+                item(key = "remove_from_folder") {
+                    FolderFilterChip("Bỏ khỏi thư mục", false, hoveredFolderId == "__remove__",
+                        Color(0xFFE81123), onClick = {},
+                        onPositioned = { onFolderTabPositioned("__remove__", it) })
                 }
             }
+            if (showDeleteTarget) {
+                item(key = "delete_folder") {
+                    FolderFilterChip("Xóa thư mục", false, hoveredFolderId == "__delete__",
+                        Color(0xFFE81123), onClick = {},
+                        onPositioned = { onFolderTabPositioned("__delete__", it) })
+                }
+            }
+            item(key = "new_folder") {
+                FolderFilterChip("+ Thư mục", false, hoveredFolderId == "__new__", accentColor,
+                    onClick = { onSelectFolder("__new__") },
+                    onPositioned = { onFolderTabPositioned("__new__", it) })
+            }
+            items(folders, key = { it.id }) { folder ->
+                FolderFilterChip(folder.title.ifBlank { "Thư mục" },
+                    selectedFolderId == folder.id, hoveredFolderId == folder.id, accentColor,
+                    onClick = { onSelectFolder(folder.id) },
+                    onPositioned = { onFolderTabPositioned(folder.id, it) })
+            }
         }
+    }
+}
+
+@Composable
+private fun FolderFilterChip(
+    label: String,
+    selected: Boolean,
+    hovered: Boolean,
+    accentColor: Color,
+    onClick: () -> Unit,
+    onPositioned: (Rect) -> Unit = {}
+) {
+    val active = selected || hovered
+    Box(modifier = Modifier
+        .onGloballyPositioned { onPositioned(it.boundsInRoot()) }
+        .heightIn(min = 48.dp)
+        .clip(RoundedCornerShape(24.dp))
+        .background(if (active) accentColor.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.30f))
+        .border(if (active) 1.dp else 0.dp, if (active) accentColor else Color.Transparent,
+            RoundedCornerShape(24.dp))
+        .clickable { onClick() }
+        .padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+        Text(label, color = Color.White, fontSize = 13.sp,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1)
     }
 }
 
@@ -1588,6 +1381,7 @@ private fun AndroidDefaultSearchBar(
 @Composable
 private fun EmptyCategoryPlaceholder(
     category: AppCategory,
+    folderTitle: String?,
     searchQuery: String,
     isAndroidSearchMode: Boolean,
     accentColor: Color,
@@ -1620,7 +1414,8 @@ private fun EmptyCategoryPlaceholder(
                 text = if (searchQuery.isNotBlank()) {
                     "Không có ứng dụng khớp \"$searchQuery\""
                 } else {
-                    "Chưa có ứng dụng trong mục \"${category.label}\""
+                    if (folderTitle != null) "Thư mục \"$folderTitle\" chưa có ứng dụng"
+                    else "Chưa có ứng dụng"
                 },
                 color = Color.White,
                 fontSize = 15.sp,
@@ -1652,8 +1447,7 @@ private fun AppItemRow(
     accentColor: Color,
     cornerRadiusDp: Int,
     useRealAppIcons: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onClick: () -> Unit
 ) {
     val iconBitmap = if (useRealAppIcons) rememberAppIcon(app.packageName) else null
 
@@ -1661,10 +1455,7 @@ private fun AppItemRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
+            .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

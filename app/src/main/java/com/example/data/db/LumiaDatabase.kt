@@ -9,7 +9,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.TileEntity
 
-@Database(entities = [TileEntity::class], version = 4, exportSchema = false)
+@Database(entities = [TileEntity::class], version = 5, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class LumiaDatabase : RoomDatabase() {
     abstract fun tileDao(): TileDao
@@ -33,6 +33,13 @@ abstract class LumiaDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 migrateTilesTableColumnsSafely(db)
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tiles` ADD COLUMN `customSpanX` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `tiles` ADD COLUMN `customSpanY` INTEGER NOT NULL DEFAULT 0")
             }
         }
 
@@ -75,7 +82,7 @@ abstract class LumiaDatabase : RoomDatabase() {
                     LumiaDatabase::class.java,
                     "lumia_launcher_db"
                 )
-                    .addMigrations(MIGRATION_1_4, MIGRATION_2_4, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_4, MIGRATION_2_4, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                 INSTANCE = instance
                 instance

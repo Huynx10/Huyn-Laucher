@@ -174,9 +174,6 @@ fun CleanSettingsScreen(
                             if (settings.allAppsViewMode == AllAppsViewMode.ONE_UI_GRID) "Đang dùng" else "Chuyển sang lưới",
                             { onSaveSettings(settings.copy(allAppsViewMode = AllAppsViewMode.ONE_UI_GRID)) }) }
                         item { Heading("Tùy chọn") }
-                        item { SettingToggle("Lọc theo nhóm", null, settings.allAppsCategorizedEnabled) {
-                            onSaveSettings(settings.copy(allAppsCategorizedEnabled = it))
-                        } }
                         item { SettingToggle("Chữ cái A–Z", null, settings.allAppsShowLetterHeaders) {
                             onSaveSettings(settings.copy(allAppsShowLetterHeaders = it))
                         } }

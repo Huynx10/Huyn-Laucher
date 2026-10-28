@@ -68,18 +68,13 @@ class WidgetPickerUiTest {
         }
     }
 
-    @Test fun tabsSwitchContentAndSearchFindsProviderBeyondOldLimit() {
+    @Test fun pickerHasNoAutomaticGroupingAndSearchFindsProviderBeyondOldLimit() {
         showPicker()
-        compose.onNodeWithTag("add_sheet_tab_folders").performClick()
-        compose.onNodeWithTag("widget_picker_search_input").assertDoesNotExist()
+        compose.onNodeWithTag("add_sheet_tab_folders").assertDoesNotExist()
+        compose.onNodeWithTag("group_page_tiles_by_category_button").assertDoesNotExist()
         val list = compose.onNodeWithTag("add_tile_picker_list")
-        list.performScrollToNode(hasTestTag("group_page_tiles_by_category_button"))
-        compose.onNodeWithTag("group_page_tiles_by_category_button").assertIsDisplayed()
-        list.performScrollToNode(hasTestTag("add_sheet_tab_widgets"))
-        compose.onNodeWithTag("add_sheet_tab_widgets").performClick()
         compose.onNodeWithTag("widget_picker_search_input").performTextInput("Widget 224")
         list.performScrollToNode(hasTestTag("pin_widget_item_example.widgets/.Widget224"))
         compose.onNodeWithTag("pin_widget_item_example.widgets/.Widget224").assertIsDisplayed()
-        compose.onNodeWithTag("group_page_tiles_by_category_button").assertDoesNotExist()
     }
 }

@@ -612,6 +612,11 @@ class LauncherViewModel(
         }
     }
 
+    fun setTileSpans(tileId: String, spanX: Int, spanY: Int) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch { repository.setTileSpans(tileId, spanX, spanY) }
+    }
+
     fun updateTileCustomization(
         tileId: String,
         colorOverrideHex: String?,

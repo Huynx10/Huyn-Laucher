@@ -694,7 +694,8 @@ class DataSafetyRegressionTest {
             old.version = 2
         }
         val migrated = Room.databaseBuilder(context, LumiaDatabase::class.java, name)
-            .addMigrations(LumiaDatabase.MIGRATION_2_4).allowMainThreadQueries().build()
+            .addMigrations(LumiaDatabase.MIGRATION_2_4, LumiaDatabase.MIGRATION_4_5)
+            .allowMainThreadQueries().build()
         try {
             val tile = migrated.tileDao().getAllTiles().single()
             assertEquals("Saved title", tile.title)
@@ -702,10 +703,36 @@ class DataSafetyRegressionTest {
             assertEquals(6, tile.gridY)
             assertEquals(-1, tile.appWidgetId)
             assertEquals("", tile.widgetProvider)
+            assertEquals(0, tile.customSpanX)
+            assertEquals(0, tile.customSpanY)
         } finally {
             migrated.close()
             context.deleteDatabase(name)
         }
+    }
+
+    @Test fun freeResizePreservesIndependentSpansAndWidgetAxisRules() = runBlocking {
+        val app = TileEntity("resizable", "App", gridX = 0, gridY = 0)
+        val widget = TileEntity("widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 123, widgetProvider = "example/.Widget", size = TileSize.MEDIUM,
+            widgetMinSpanX = 2, widgetMinSpanY = 2, widgetResizeMode = 1,
+            gridX = 2, gridY = 0)
+        db.tileDao().insertAll(listOf(app, widget))
+        repo.setTileSpans(app.id, 3, 5)
+        repo.setTileSpans(widget.id, 4, 5)
+        val after = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(3, after.getValue(app.id).effectiveSpanX(4))
+        assertEquals(5, after.getValue(app.id).effectiveSpanY())
+        assertEquals(4, after.getValue(widget.id).effectiveSpanX(4))
+        assertEquals(2, after.getValue(widget.id).effectiveSpanY())
+        val backup = repo.exportBackupJson()
+        assertTrue(repo.restoreFromJson(backup))
+        val restored = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(3, restored.getValue(app.id).customSpanX)
+        assertEquals(5, restored.getValue(app.id).customSpanY)
+        assertEquals(-1, restored.getValue(widget.id).appWidgetId)
+        assertEquals(4, restored.getValue(widget.id).customSpanX)
+        assertEquals(2, restored.getValue(widget.id).customSpanY)
     }
 
     @Test fun ungroupRestoresAllItemsBeyondPreviewLimit() = runBlocking {

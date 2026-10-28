@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -371,6 +372,27 @@ fun TileView(
                         )
                     }
                 } else {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(48.dp)
+                            .clickable { onUnpin() }
+                            .testTag("tile_remove_${tile.id}"),
+                        contentAlignment = Alignment.TopEnd
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(5.dp)
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.82f))
+                                .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Bỏ ô khỏi trang",
+                                tint = Color.White, modifier = Modifier.size(16.dp))
+                        }
+                    }
                     // Interactive Border/Edge Drag Handles (One UI style resize handles along borders)
                     val handlePillLength by animateDpAsState(
                         targetValue = when {
@@ -531,7 +553,7 @@ fun TileView(
 
                 if (tile.size != TileSize.SMALL) {
                     Text(
-                        text = "${tile.size.spanX}×${tile.size.spanY} • Kéo viền để đổi cỡ",
+                        text = "${tile.customSpanX.takeIf { it > 0 } ?: tile.size.spanX}×${tile.effectiveSpanY()} • Kéo viền để đổi cỡ",
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,

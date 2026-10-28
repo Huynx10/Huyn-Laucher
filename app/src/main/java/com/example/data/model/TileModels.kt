@@ -103,7 +103,7 @@ data class SmartFolderItem(
 @Immutable
 data class SmartFolderConfig(
     val category: AppCategory = AppCategory.TOOLS,
-    val autoSyncCategory: Boolean = true,
+    val autoSyncCategory: Boolean = false,
     val layoutMode: SmartFolderLayoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
     val items: List<SmartFolderItem> = emptyList(),
     val excludedKeys: Set<String> = emptySet()
@@ -127,6 +127,8 @@ data class SmartFolderConfig(
                     put("sourceTile", org.json.JSONObject().apply {
                         put("id", tile.id)
                         put("size", tile.size.name)
+                        put("customSpanX", tile.customSpanX)
+                        put("customSpanY", tile.customSpanY)
                         put("orderIndex", tile.orderIndex)
                         put("gridX", tile.gridX)
                         put("gridY", tile.gridY)
@@ -195,6 +197,8 @@ data class SmartFolderConfig(
                                     packageName = itemObj.optString("packageName", ""),
                                     tileType = itemType,
                                     size = originalSize,
+                                    customSpanX = source.optInt("customSpanX", 0).coerceIn(0, 6),
+                                    customSpanY = source.optInt("customSpanY", 0).coerceIn(0, 8),
                                     orderIndex = source.optInt("orderIndex", 0),
                                     pageId = tile.pageId,
                                     gridX = source.optInt("gridX", -1),
@@ -245,7 +249,7 @@ data class SmartFolderConfig(
             }
             return SmartFolderConfig(
                 category = fallbackCategory,
-                autoSyncCategory = true,
+                autoSyncCategory = false,
                 layoutMode = SmartFolderLayoutMode.HYPEROS_PEEK,
                 items = defaultSeedItemsForCategory(fallbackCategory)
             )
@@ -459,8 +463,28 @@ data class TileEntity(
     val widgetProvider: String = "",
     val widgetMinSpanX: Int = 1,
     val widgetMinSpanY: Int = 1,
-    val widgetResizeMode: Int = 3
+    val widgetResizeMode: Int = 3,
+    // Zero means use the legacy TileSize. Positive values keep each dragged axis independently.
+    val customSpanX: Int = 0,
+    val customSpanY: Int = 0
 ) {
+    fun effectiveSpanX(totalCols: Int): Int =
+        (customSpanX.takeIf { it > 0 } ?: size.spanX).coerceIn(1, totalCols)
+
+    fun effectiveSpanY(): Int =
+        (customSpanY.takeIf { it > 0 } ?: size.spanY).coerceIn(1, 8)
+
+    fun constrainedResizeSpans(requestX: Int, requestY: Int, totalCols: Int): Pair<Int, Int> {
+        val currentX = effectiveSpanX(totalCols)
+        val currentY = effectiveSpanY()
+        if (!hasBoundOrLinkedWidget()) return requestX.coerceIn(1, totalCols) to requestY.coerceIn(1, 8)
+        val canResizeH = (widgetResizeMode and 1) != 0
+        val canResizeV = (widgetResizeMode and 2) != 0
+        val width = if (canResizeH) requestX.coerceIn(widgetMinSpanX.coerceIn(1, totalCols), totalCols) else currentX
+        val height = if (canResizeV) requestY.coerceIn(widgetMinSpanY.coerceIn(1, 8), 8) else currentY
+        return width to height
+    }
+
     fun hasBoundOrLinkedWidget(): Boolean {
         return tileType == TileType.WIDGET || widgetProvider.isNotBlank() || appWidgetId > 0
     }

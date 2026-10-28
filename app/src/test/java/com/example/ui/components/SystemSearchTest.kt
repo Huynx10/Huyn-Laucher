@@ -15,6 +15,15 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class SystemSearchTest {
     @Test
+    fun oneUiHomeSearchUsesOnlyTheOptionalSamsungEntry() {
+        val intent = oneUiHomeSearchIntent("")
+        assertEquals(Intent.ACTION_SEARCH, intent.action)
+        assertEquals(ONE_UI_HOME_PACKAGE, intent.component?.packageName)
+        assertEquals("com.sec.android.app.launcher.search.SearchActivity", intent.component?.className)
+        assertFalse(intent.hasExtra(SearchManager.QUERY))
+    }
+
+    @Test
     fun finderSearchTargetsSamsungPackageInsteadOfWebProvider() {
         val intent = finderSearchIntent("Máy ảnh")
 

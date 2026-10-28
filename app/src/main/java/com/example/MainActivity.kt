@@ -110,7 +110,6 @@ import com.example.data.model.WidgetProviderItem
 import com.example.data.model.WallpaperSource
 import com.example.data.model.Wp10TileStyle
 import com.example.ui.auth.GoogleSignInHelper
-import com.example.ui.components.ActionCenterOverlay
 import com.example.ui.components.AppDrawer
 import com.example.ui.components.GlanceScreenOverlay
 import com.example.ui.components.LumiaStartGrid
@@ -450,14 +449,12 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         pages.filter { it.pageType == PageType.HOME }
     }
 
-    var isActionCenterOpen by remember { mutableStateOf(false) }
 
     // Back press handling: exit Action Center -> exit Smart Folder -> exit Glance -> deselect single tile -> exit Home Edit Mode -> return to Default Home Page
     BackHandler(
-        enabled = isActionCenterOpen || activeSmartFolderRequest != null || isGlanceScreenOpen || selectedTileId != null || isEditMode || pagerState.currentPage != defaultPageIndex
+        enabled = activeSmartFolderRequest != null || isGlanceScreenOpen || selectedTileId != null || isEditMode || pagerState.currentPage != defaultPageIndex
     ) {
         when {
-            isActionCenterOpen -> isActionCenterOpen = false
             activeSmartFolderRequest != null -> viewModel.closeSmartFolder()
             isGlanceScreenOpen -> viewModel.closeGlanceScreen()
             selectedTileId != null -> viewModel.clearSelectedTile()
@@ -599,7 +596,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             key = { idx -> pages.getOrNull(idx)?.id ?: "page_$idx" },
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (isActionCenterOpen) Modifier.blur(18.dp) else Modifier)
                 .testTag("launcher_horizontal_pager")
         ) { pageIndex ->
             val page = pages.getOrNull(pageIndex) ?: return@HorizontalPager
@@ -710,7 +706,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                             Intent(Intent.ACTION_POWER_USAGE_SUMMARY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                         )
                                     } catch (_: Exception) {
-                                        isActionCenterOpen = true
+                                        viewModel.openSettings()
                                     }
                                 }
                                 linkedApp != null -> {
@@ -726,7 +722,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                     }
                                 }
                                 else -> {
-                                    isActionCenterOpen = true
+                                    Toast.makeText(context, "Không thể mở mục này", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
@@ -737,6 +733,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onResizeTile = { id -> viewModel.resizeTile(id) },
                         onStepTileSize = { id, increase -> viewModel.stepTileSize(id, increase) },
                         onSetTileSize = { id, newSize -> viewModel.setTileSize(id, newSize) },
+                        onSetTileSpans = { id, spanX, spanY -> viewModel.setTileSpans(id, spanX, spanY) },
                         onUnpinTile = { id -> viewModel.unpinTile(id) },
                         onMoveTile = { id, up -> viewModel.moveTileInPage(id, page.id, up) },
                         onMoveTileToGrid = { id, gx, gy, cols ->
@@ -836,35 +833,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 }
                             }
                         },
-                        onCreateSmartFolderByCategory = { category, absorbExisting ->
-                            viewModel.createSmartFolderByCategory(
-                                category = category,
-                                pageId = page.id,
-                                absorbMatchingPageTiles = absorbExisting
-                            )
-                            Toast.makeText(
-                                context,
-                                "Đã thêm Thư mục Thông minh: ${category.label}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        onGroupPageTilesByCategory = {
-                            viewModel.groupPageTilesByCategory(page.id) { count ->
-                                Toast.makeText(
-                                    context,
-                                    "Đã tự động gom $count Thư mục Thông minh theo danh mục!",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        },
-                        onConvertTileToSmartFolder = { tileId ->
-                            viewModel.convertTileIntoSmartFolder(tileId, absorbSameCategoryOnPage = true)
-                            Toast.makeText(
-                                context,
-                                "Đã gom các Tile cùng danh mục vào Thư mục Thông minh!",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
                     )
                 } else {
                     AppDrawer(
@@ -885,8 +853,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                             )
                         },
                         onUpdateSettings = { updated -> viewModel.updateSettings(updated) },
-                        onEnterEditMode = { viewModel.enterEditMode() },
-                        onOpenActionCenter = { isActionCenterOpen = true }
+                        onEnterEditMode = { viewModel.enterEditMode() }
                     )
                 }
             }
@@ -998,17 +965,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         viewModel.openAddTileSheet()
                     }
                 },
-                onGroupSmartFolders = {
-                    val targetPageId = currentPage?.takeIf { it.pageType == PageType.HOME }?.id
-                        ?: settings.defaultHomePageId
-                    viewModel.groupPageTilesByCategory(targetPageId) { count ->
-                        Toast.makeText(
-                            context,
-                            "Đã gom $count Thư mục Thông minh theo danh mục!",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                },
                 onOpenSettings = { viewModel.openSettings() }
             )
         }
@@ -1088,19 +1044,6 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         showDefaultWidgetOffer = false
                     }) { Text("Để sau") }
                 }
-            )
-        }
-
-        // Action Center is launched from the App Drawer header, not a floating Home pill.
-        // Windows 11 / W10M Fluent Acrylic Action Center Overlay
-        if (isActionCenterOpen) {
-            ActionCenterOverlay(
-                settings = settings,
-                onCycleTileAppearance = { viewModel.cycleTileAppearance(acrylicOpacity = 0.38f, tintedOpacity = 0.42f) },
-                onToggleLayoutLock = { viewModel.toggleHomeLayoutLock() },
-                onOpenGlance = { viewModel.openGlanceScreen() },
-                onOpenFullSettings = { viewModel.openSettings() },
-                onDismiss = { isActionCenterOpen = false }
             )
         }
 
@@ -1495,7 +1438,6 @@ private fun OneUiBottomEditBar(
     wp10TileStyle: Wp10TileStyle,
     onCycleTileTransparency: () -> Unit,
     onAddTile: () -> Unit,
-    onGroupSmartFolders: () -> Unit = {},
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1518,14 +1460,6 @@ private fun OneUiBottomEditBar(
             accentHighlight = if (wp10TileStyle != Wp10TileStyle.CLASSIC_METRO) accentColor.copy(alpha = 0.5f) else null,
             onClick = onCycleTileTransparency,
             testTag = "cycle_tile_transparency_button"
-        )
-
-        OneUiBottomActionItem(
-            icon = Icons.Default.FolderSpecial,
-            label = "Gom Nhóm",
-            accentHighlight = accentColor.copy(alpha = 0.42f),
-            onClick = onGroupSmartFolders,
-            testTag = "group_smart_folders_bar_button"
         )
 
         OneUiBottomActionItem(
