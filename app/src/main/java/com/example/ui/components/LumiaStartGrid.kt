@@ -492,8 +492,9 @@ fun LumiaStartGrid(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .verticalScroll(scrollState)
+                        // Capture the viewport, not the scrolling content's translated origin.
                         .onGloballyPositioned { gridViewportRoot = it.positionInRoot() }
+                        .verticalScroll(scrollState)
                         .testTag(
                             if (tiles.isEmpty()) "empty_home_page_${currentPage.id}"
                             else "tiles_grid_${currentPage.id}"
