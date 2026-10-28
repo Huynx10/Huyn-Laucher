@@ -679,6 +679,22 @@ class LauncherViewModel(
         }
     }
 
+    fun moveTileToPageAtGridPosition(
+        tileId: String,
+        targetPageId: String,
+        gridX: Int,
+        gridY: Int,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        if (_settings.value.lockHomeLayout) {
+            onResult(false)
+            return
+        }
+        viewModelScope.launch {
+            onResult(repository.moveTileToPageAtGridPosition(tileId, targetPageId, gridX, gridY))
+        }
+    }
+
     fun pinAppToPage(app: AppItem, pageId: String = _settings.value.defaultHomePageId) {
         viewModelScope.launch {
             repository.pinApp(app, pageId)
