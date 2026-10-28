@@ -57,9 +57,9 @@ android {
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
       // Isolated test package: the prior debug APK uses an unrelated temporary key.
-      // A new CI debug key cannot update the prior trial; use a distinct test identity.
-      applicationIdSuffix = ".trial5"
-      versionNameSuffix = "-s24-trial5"
+      // CI creates a temporary signing key per build; trial6 coexists with trial5 without uninstalling it.
+      applicationIdSuffix = ".trial6"
+      versionNameSuffix = "-s24-trial6"
     }
   }
   compileOptions {
