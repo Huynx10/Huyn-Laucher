@@ -734,6 +734,9 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onStepTileSize = { id, increase -> viewModel.stepTileSize(id, increase) },
                         onSetTileSize = { id, newSize -> viewModel.setTileSize(id, newSize) },
                         onSetTileSpans = { id, spanX, spanY -> viewModel.setTileSpans(id, spanX, spanY) },
+                        onGroupTilesManually = { sourceId, targetId ->
+                            viewModel.groupHomeTilesManually(sourceId, targetId)
+                        },
                         onUnpinTile = { id -> viewModel.unpinTile(id) },
                         onMoveTile = { id, up -> viewModel.moveTileInPage(id, page.id, up) },
                         onMoveTileToGrid = { id, gx, gy, cols ->

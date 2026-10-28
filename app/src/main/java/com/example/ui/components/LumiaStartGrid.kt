@@ -147,6 +147,24 @@ private data class PositionedTile(
     val spanY: Int
 )
 
+private fun findManualFolderDropTarget(
+    source: PositionedTile,
+    candidates: List<PositionedTile>,
+    offsetX: Float,
+    offsetY: Float,
+    cellStepPx: Float
+): PositionedTile? {
+    if (source.tile.tileType != TileType.APP || source.tile.hasBoundOrLinkedWidget()) return null
+    val centerX = source.gridX + source.spanX / 2f + offsetX / cellStepPx
+    val centerY = source.gridY + source.spanY / 2f + offsetY / cellStepPx
+    return candidates.firstOrNull { target ->
+        target.tile.id != source.tile.id && !target.tile.hasBoundOrLinkedWidget() &&
+            (target.tile.tileType == TileType.APP || target.tile.tileType == TileType.SMART_FOLDER) &&
+            centerX in (target.gridX + target.spanX * 0.25f)..(target.gridX + target.spanX * 0.75f) &&
+            centerY in (target.gridY + target.spanY * 0.25f)..(target.gridY + target.spanY * 0.75f)
+    }
+}
+
 private fun tileDisplayName(
     tile: TileEntity,
     installedApps: List<AppItem>,
@@ -180,6 +198,7 @@ fun LumiaStartGrid(
     onStepTileSize: (String, Boolean) -> Unit = { id, _ -> onResizeTile(id) },
     onSetTileSize: (String, TileSize) -> Unit = { id, _ -> onResizeTile(id) },
     onSetTileSpans: (String, Int, Int) -> Unit = { _, _, _ -> },
+    onGroupTilesManually: (String, String) -> Unit = { _, _ -> },
     onUnpinTile: (String) -> Unit,
     onMoveTile: (String, Boolean) -> Unit,
     onMoveTileToGrid: (String, Int, Int, Int) -> Unit,
@@ -523,6 +542,25 @@ fun LumiaStartGrid(
                                         shape = RoundedCornerShape(settings.tileCornerRadiusDp.coerceAtLeast(4).dp)
                                     )
                             )
+                            val folderTarget = findManualFolderDropTarget(
+                                activeDraggingPositioned, positionedTiles,
+                                dragOffsetX, dragOffsetY, cellStepPx)
+                            if (folderTarget != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = horizontalPadding + cellStepDp * folderTarget.gridX,
+                                            y = topPadding + cellStepDp * folderTarget.gridY)
+                                        .width(unitSize * folderTarget.spanX + tileSpacing * (folderTarget.spanX - 1))
+                                        .height(unitSize * folderTarget.spanY + tileSpacing * (folderTarget.spanY - 1))
+                                        .border(3.dp, accent.color, RoundedCornerShape(settings.tileCornerRadiusDp.dp))
+                                        .testTag("home_folder_drop_target"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("Thả vào thư mục", color = Color.White, fontSize = 11.sp,
+                                        modifier = Modifier.background(Color.Black.copy(alpha = 0.75f))
+                                            .padding(horizontal = 5.dp, vertical = 2.dp))
+                                }
+                            }
                         }
 
                         // Live Border-Drag Resize Preview Frame with Spring Morphing & Haptic Step Ticks
@@ -582,12 +620,7 @@ fun LumiaStartGrid(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = when (previewSize) {
-                                        TileSize.SMALL -> "1x1 (Nhỏ)"
-                                        TileSize.MEDIUM -> "2x2 (Vừa)"
-                                        TileSize.WIDE -> "4x2 (Rộng)"
-                                        TileSize.LARGE -> "4x4 (Lớn)"
-                                    },
+                                    text = "${previewSpanX}×${previewSpanY}",
                                     color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -720,6 +753,8 @@ fun LumiaStartGrid(
                                                                 dragVelY = 0f
                                                             },
                                                             onDragEnd = {
+                                                                val folderTarget = findManualFolderDropTarget(
+                                                                    positioned, positionedTiles, dragOffsetX, dragOffsetY, cellStepPx)
                                                                 val targetX = (positioned.gridX + (dragOffsetX / cellStepPx).roundToInt())
                                                                     .coerceIn(0, (totalCols - positioned.spanX).coerceAtLeast(0))
                                                                 val targetY = (positioned.gridY + (dragOffsetY / cellStepPx).roundToInt())
@@ -729,7 +764,8 @@ fun LumiaStartGrid(
                                                                 dragOffsetY = 0f
                                                                 dragVelX = 0f
                                                                 dragVelY = 0f
-                                                                onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
+                                                                if (folderTarget != null) onGroupTilesManually(tile.id, folderTarget.tile.id)
+                                                                else onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
                                                             },
                                                             onDragCancel = {
                                                                 draggingTileId = null
@@ -761,6 +797,8 @@ fun LumiaStartGrid(
                                                                 dragVelY = 0f
                                                             },
                                                             onDragEnd = {
+                                                                val folderTarget = findManualFolderDropTarget(
+                                                                    positioned, positionedTiles, dragOffsetX, dragOffsetY, cellStepPx)
                                                                 val deltaCellsX = (dragOffsetX / cellStepPx).roundToInt()
                                                                 val deltaCellsY = (dragOffsetY / cellStepPx).roundToInt()
                                                                 val targetX = (positioned.gridX + deltaCellsX)
@@ -772,7 +810,9 @@ fun LumiaStartGrid(
                                                                 dragOffsetY = 0f
                                                                 dragVelX = 0f
                                                                 dragVelY = 0f
-                                                                if (deltaCellsX != 0 || deltaCellsY != 0) {
+                                                                if (folderTarget != null) {
+                                                                    onGroupTilesManually(tile.id, folderTarget.tile.id)
+                                                                } else if (deltaCellsX != 0 || deltaCellsY != 0) {
                                                                     onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
                                                                 }
                                                             },
@@ -1032,38 +1072,8 @@ fun LumiaStartGrid(
                 ) {
                     item(key = "picker_header", contentType = "header") {
                         Column {
-                    // Header Tabs: 0 = Widget & App Tile, 1 = Smart Folders
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val tabs = listOf(
-                            0 to "Widget & Ứng dụng"
-                        )
-                        tabs.forEach { (idx, title) ->
-                            val selected = activePickerTab == idx
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(if (selected) accent.color else Color.Transparent)
-                                    .padding(vertical = 8.dp)
-                                    .testTag(if (idx == 0) "add_sheet_tab_widgets" else "add_sheet_tab_folders"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = title,
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
+                    Text("Thêm ô", color = Color.White, fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold)
 
                     Spacer(modifier = Modifier.height(12.dp))
 

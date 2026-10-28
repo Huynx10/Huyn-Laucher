@@ -469,9 +469,12 @@ fun AppDrawer(
                 removeAppFromFolder(app)
             }
             GridDropIntent.DELETE_FOLDER -> if (dragged is GridDrawerEntry.FolderEntry) {
-                onUpdateSettings(settings.copy(appDrawerFolders = settings.appDrawerFolders.filterNot {
-                    it.id == dragged.folder.id
-                }))
+                onUpdateSettings(settings.copy(
+                    appDrawerFolders = settings.appDrawerFolders.filterNot { it.id == dragged.folder.id },
+                    appDrawerCustomOrder = settings.appDrawerCustomOrder.filterNot {
+                        it == dragged.key
+                    }
+                ))
             }
             GridDropIntent.REORDER_SLOT -> hoveredTargetKey?.let { target ->
                 reorderGridEntries(dragged.key, target)
@@ -980,7 +983,7 @@ fun AppDrawer(
                                 }
                                 onUpdateSettings(settings.copy(appDrawerFolders = updated))
                             },
-                            label = { Text("Tên nhóm thư mục", color = Color.White.copy(alpha = 0.65f)) },
+                            label = { Text("Tên thư mục", color = Color.White.copy(alpha = 0.65f)) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -995,13 +998,16 @@ fun AppDrawer(
                             onClick = {
                                 // Dissolve folder (ungroup apps back to grid)
                                 val updated = settings.appDrawerFolders.filter { it.id != freshFolder.id }
-                                onUpdateSettings(settings.copy(appDrawerFolders = updated))
+                                onUpdateSettings(settings.copy(appDrawerFolders = updated,
+                                    appDrawerCustomOrder = settings.appDrawerCustomOrder.filterNot {
+                                        it == "folder:${freshFolder.id}"
+                                    }))
                                 activeFolderDialog = null
                             }
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
-                                contentDescription = "Bỏ gom nhóm",
+                                contentDescription = "Xóa thư mục; ứng dụng vẫn còn trong Tất cả",
                                 tint = Color(0xFFFF6B6B)
                             )
                         }

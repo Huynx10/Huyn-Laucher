@@ -735,6 +735,29 @@ class DataSafetyRegressionTest {
         assertEquals(2, restored.getValue(widget.id).customSpanY)
     }
 
+    @Test fun manualHomeFolderAbsorbsOnlyDroppedAppsAndRestoresTheirSpans() = runBlocking {
+        val first = TileEntity("first", "First", packageName = "example.first",
+            customSpanX = 3, customSpanY = 2, gridX = 0, gridY = 0)
+        val second = TileEntity("second", "Second", packageName = "example.second",
+            gridX = 2, gridY = 3)
+        val unrelated = TileEntity("other", "Other", packageName = "example.other",
+            gridX = 0, gridY = 6)
+        val widget = TileEntity("widget", "Widget", tileType = TileType.WIDGET,
+            appWidgetId = 91, widgetProvider = "example/.Provider", gridX = 2, gridY = 6)
+        db.tileDao().insertAll(listOf(first, second, unrelated, widget))
+        assertNull(repo.groupHomeTilesManually(widget.id, second.id))
+        val folder = requireNotNull(repo.groupHomeTilesManually(first.id, second.id))
+        val config = SmartFolderConfig.fromTile(folder)
+        assertFalse(config.autoSyncCategory)
+        assertEquals(listOf("second", "first"), config.items.map { it.sourceTile?.id })
+        assertEquals(setOf(folder.id, unrelated.id, widget.id), db.tileDao().getAllTiles().map { it.id }.toSet())
+        repo.ungroupSmartFolderToTiles(folder.id)
+        val restored = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(3, restored.getValue(first.id).customSpanX)
+        assertEquals(2, restored.getValue(first.id).customSpanY)
+        assertEquals(widget, restored.getValue(widget.id))
+    }
+
     @Test fun ungroupRestoresAllItemsBeyondPreviewLimit() = runBlocking {
         val items = (1..12).map { SmartFolderItem("app_$it", "App $it", "example.app$it") }
         db.tileDao().insertOrUpdate(TileEntity("folder", "Folder", tileType = TileType.SMART_FOLDER,

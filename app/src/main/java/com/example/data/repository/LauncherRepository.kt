@@ -1220,6 +1220,54 @@ class LauncherRepository(
         }
     }
 
+    suspend fun groupHomeTilesManually(sourceId: String, targetId: String): TileEntity? =
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                val tiles = tileDao.getAllTiles()
+                val source = tiles.find { it.id == sourceId } ?: return@withTransaction null
+                val target = tiles.find { it.id == targetId } ?: return@withTransaction null
+                if (source.id == target.id || source.pageId != target.pageId ||
+                    source.tileType != TileType.APP || source.hasBoundOrLinkedWidget() ||
+                    target.hasBoundOrLinkedWidget() ||
+                    target.tileType !in setOf(TileType.APP, TileType.SMART_FOLDER)
+                ) return@withTransaction null
+
+                fun item(tile: TileEntity) = SmartFolderItem(
+                    id = "item_${tile.id}", title = tile.title,
+                    packageName = tile.packageName, tileType = tile.tileType,
+                    customIconName = tile.customIconName,
+                    category = AppCategory.ALL, sourceTile = tile
+                )
+
+                val folder = if (target.tileType == TileType.SMART_FOLDER) {
+                    val config = SmartFolderConfig.fromTile(target)
+                    if (config.autoSyncCategory) return@withTransaction null
+                    target.copy(packageName = config.copy(
+                        autoSyncCategory = false,
+                        items = config.items + item(source)
+                    ).toJsonString())
+                } else {
+                    val config = SmartFolderConfig(
+                        category = AppCategory.ALL,
+                        autoSyncCategory = false,
+                        items = listOf(item(target), item(source))
+                    )
+                    target.copy(
+                        id = allocateUniqueTileId("manual_folder", tiles),
+                        title = "Thư mục",
+                        tileType = TileType.SMART_FOLDER,
+                        packageName = config.toJsonString(),
+                        colorOverrideHex = null,
+                        customIconName = ""
+                    )
+                }
+                tileDao.deleteById(source.id)
+                if (target.tileType == TileType.APP) tileDao.deleteById(target.id)
+                tileDao.insertOrUpdate(folder)
+                folder
+            }
+        }
+
     suspend fun updateSmartFolderConfig(
         tileId: String,
         newTitle: String,

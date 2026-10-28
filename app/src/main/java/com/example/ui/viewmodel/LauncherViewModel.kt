@@ -617,6 +617,11 @@ class LauncherViewModel(
         viewModelScope.launch { repository.setTileSpans(tileId, spanX, spanY) }
     }
 
+    fun groupHomeTilesManually(sourceId: String, targetId: String) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch { repository.groupHomeTilesManually(sourceId, targetId) }
+    }
+
     fun updateTileCustomization(
         tileId: String,
         colorOverrideHex: String?,
