@@ -205,6 +205,10 @@ fun LumiaStartGrid(
     onNudgeTile: (String, Int, Int, Int) -> Unit,
     onReorderTiles: (Int, Int) -> Unit,
     onMoveTileToPage: (String, String) -> Unit,
+    onCrossPageDragStart: (String, Float, Float) -> Unit = { _, _, _ -> },
+    onCrossPageDragMove: (String, Float, Float) -> Unit = { _, _, _ -> },
+    onCrossPageDragEnd: (String, Int, Int) -> Boolean = { _, _, _ -> false },
+    onCrossPageDragCancel: (String) -> Unit = {},
     onOpenWidgetSettings: (TileEntity) -> Unit = {},
     onPinNewTile: (TileEntity) -> Unit,
     onEnterEditMode: () -> Unit,
@@ -232,6 +236,8 @@ fun LumiaStartGrid(
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var dragVelX by remember { mutableFloatStateOf(0f) }
     var dragVelY by remember { mutableFloatStateOf(0f) }
+    var dragStartFingerX by remember { mutableFloatStateOf(0f) }
+    var dragStartFingerY by remember { mutableFloatStateOf(0f) }
 
     var resizingTileId by remember { mutableStateOf<String?>(null) }
     var resizeOffsetX by remember { mutableFloatStateOf(0f) }
@@ -298,6 +304,16 @@ fun LumiaStartGrid(
         val unitSize = (availableContentWidth - (tileSpacing * (totalCols - 1))) / totalCols
         val cellStepDp = unitSize + tileSpacing
         val cellStepPx = with(density) { cellStepDp.toPx() }.coerceAtLeast(1f)
+        val viewportWidthPx = with(density) { screenWidth.toPx() }.coerceAtLeast(1f)
+        val viewportHeightPx = with(density) { screenHeight.toPx() }.coerceAtLeast(1f)
+
+        fun reportCrossPageDrag(tileId: String) {
+            onCrossPageDragMove(
+                tileId,
+                ((dragStartFingerX + dragOffsetX) / viewportWidthPx).coerceIn(0f, 1f),
+                ((dragStartFingerY + dragOffsetY) / viewportHeightPx).coerceIn(0f, 1f)
+            )
+        }
 
         // Resolve deterministic 2D coordinates for each tile without auto-collapsing empty spaces
         val positionedTiles = remember(tiles, totalCols) {
@@ -744,13 +760,20 @@ fun LumiaStartGrid(
                                                     // Already selected single tile: allow immediate drag without waiting for another long-press
                                                     Modifier.pointerInput(tile.id, positioned.gridX, positioned.gridY, totalCols) {
                                                         detectDragGestures(
-                                                            onDragStart = {
+                                                            onDragStart = { offset ->
                                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                                 draggingTileId = tile.id
                                                                 dragOffsetX = 0f
                                                                 dragOffsetY = 0f
                                                                 dragVelX = 0f
                                                                 dragVelY = 0f
+                                                                dragStartFingerX = with(density) { baseTileX.toPx() } + offset.x
+                                                                dragStartFingerY = with(density) { baseTileY.toPx() } + offset.y - scrollState.value
+                                                                onCrossPageDragStart(
+                                                                    tile.id,
+                                                                    (dragStartFingerX / viewportWidthPx).coerceIn(0f, 1f),
+                                                                    (dragStartFingerY / viewportHeightPx).coerceIn(0f, 1f)
+                                                                )
                                                             },
                                                             onDragEnd = {
                                                                 val folderTarget = findManualFolderDropTarget(
@@ -764,10 +787,13 @@ fun LumiaStartGrid(
                                                                 dragOffsetY = 0f
                                                                 dragVelX = 0f
                                                                 dragVelY = 0f
-                                                                if (folderTarget != null) onGroupTilesManually(tile.id, folderTarget.tile.id)
-                                                                else onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
+                                                                if (!onCrossPageDragEnd(tile.id, targetX, targetY)) {
+                                                                    if (folderTarget != null) onGroupTilesManually(tile.id, folderTarget.tile.id)
+                                                                    else onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
+                                                                }
                                                             },
                                                             onDragCancel = {
+                                                                onCrossPageDragCancel(tile.id)
                                                                 draggingTileId = null
                                                                 dragOffsetX = 0f
                                                                 dragOffsetY = 0f
@@ -780,6 +806,7 @@ fun LumiaStartGrid(
                                                                 dragOffsetY += dragAmount.y
                                                                 dragVelX = (dragVelX * 0.55f) + (dragAmount.x * 0.45f)
                                                                 dragVelY = (dragVelY * 0.55f) + (dragAmount.y * 0.45f)
+                                                                reportCrossPageDrag(tile.id)
                                                             }
                                                         )
                                                     }
@@ -787,14 +814,21 @@ fun LumiaStartGrid(
                                                     // Long-press on a tile when NO tile is currently being edited: selects ONLY this 1 tile AND allows immediate free 2D drag
                                                     Modifier.pointerInput(tile.id, positioned.gridX, positioned.gridY, totalCols) {
                                                         detectDragGesturesAfterLongPress(
-                                                            onDragStart = {
+                                                            onDragStart = { offset ->
                                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                                onSelectTileForEdit(tile.id)
+                                                                // Defer selection until finger-up: changing pointer modifiers here cancels the gesture.
                                                                 draggingTileId = tile.id
                                                                 dragOffsetX = 0f
                                                                 dragOffsetY = 0f
                                                                 dragVelX = 0f
                                                                 dragVelY = 0f
+                                                                dragStartFingerX = with(density) { baseTileX.toPx() } + offset.x
+                                                                dragStartFingerY = with(density) { baseTileY.toPx() } + offset.y - scrollState.value
+                                                                onCrossPageDragStart(
+                                                                    tile.id,
+                                                                    (dragStartFingerX / viewportWidthPx).coerceIn(0f, 1f),
+                                                                    (dragStartFingerY / viewportHeightPx).coerceIn(0f, 1f)
+                                                                )
                                                             },
                                                             onDragEnd = {
                                                                 val folderTarget = findManualFolderDropTarget(
@@ -810,13 +844,18 @@ fun LumiaStartGrid(
                                                                 dragOffsetY = 0f
                                                                 dragVelX = 0f
                                                                 dragVelY = 0f
-                                                                if (folderTarget != null) {
-                                                                    onGroupTilesManually(tile.id, folderTarget.tile.id)
-                                                                } else if (deltaCellsX != 0 || deltaCellsY != 0) {
-                                                                    onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
+                                                                val movedAcrossPage = onCrossPageDragEnd(tile.id, targetX, targetY)
+                                                                if (!movedAcrossPage) {
+                                                                    if (folderTarget != null) {
+                                                                        onGroupTilesManually(tile.id, folderTarget.tile.id)
+                                                                    } else if (deltaCellsX != 0 || deltaCellsY != 0) {
+                                                                        onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
+                                                                    }
                                                                 }
+                                                                onSelectTileForEdit(if (movedAcrossPage) null else tile.id)
                                                             },
                                                             onDragCancel = {
+                                                                onCrossPageDragCancel(tile.id)
                                                                 draggingTileId = null
                                                                 dragOffsetX = 0f
                                                                 dragOffsetY = 0f
@@ -829,6 +868,7 @@ fun LumiaStartGrid(
                                                                 dragOffsetY += dragAmount.y
                                                                 dragVelX = (dragVelX * 0.55f) + (dragAmount.x * 0.45f)
                                                                 dragVelY = (dragVelY * 0.55f) + (dragAmount.y * 0.45f)
+                                                                reportCrossPageDrag(tile.id)
                                                             }
                                                         )
                                                     }
