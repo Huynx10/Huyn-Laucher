@@ -835,8 +835,18 @@ class LauncherViewModel(
         }
     }
 
-    fun launchApp(packageName: String) {
-        repository.launchApp(packageName)
+    fun launchApp(packageName: String): Boolean = repository.launchApp(packageName)
+
+    fun launchApp(app: AppItem): Boolean = repository.launchApp(app)
+
+    fun launchTile(tile: TileEntity): Boolean = repository.launchTile(tile)
+
+    fun rebindAppTile(tileId: String, app: AppItem, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val success = repository.rebindAppTile(tileId, app)
+            if (success) refreshApps()
+            onResult(success)
+        }
     }
 
     fun optimizeMemory(): SystemTelemetry {

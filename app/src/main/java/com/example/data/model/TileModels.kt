@@ -1,6 +1,7 @@
 package com.example.data.model
 
 import androidx.compose.runtime.Immutable
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -466,7 +467,10 @@ data class TileEntity(
     val widgetResizeMode: Int = 3,
     // Zero means use the legacy TileSize. Positive values keep each dragged axis independently.
     val customSpanX: Int = 0,
-    val customSpanY: Int = 0
+    val customSpanY: Int = 0,
+    val launcherComponent: String? = null,
+    val launcherUserSerial: Long? = null,
+    @ColumnInfo(defaultValue = "'LEGACY'") val launcherIdentityState: String = "LEGACY"
 ) {
     fun effectiveSpanX(totalCols: Int): Int =
         (customSpanX.takeIf { it > 0 } ?: size.spanX).coerceIn(1, totalCols)
@@ -689,8 +693,13 @@ data class AppItem(
     val isSystemApp: Boolean = false,
     val isPinned: Boolean = false,
     val category: AppCategory = AppCategory.classifyApp(packageName, label, -1, isSystemApp),
-    val isCustomCategory: Boolean = false
+    val isCustomCategory: Boolean = false,
+    val launcherComponent: String? = null,
+    val launcherUserSerial: Long? = null
 ) {
+    val drawerKey: String get() = if (launcherComponent != null && launcherUserSerial != null)
+        "app:v2:${launcherComponent}:${launcherUserSerial}" else "app:${packageName}"
+
     fun effectiveCategory(customCategories: Map<String, String>): AppCategory {
         val overrideName = customCategories[packageName]
         if (!overrideName.isNullOrBlank()) {

@@ -48,23 +48,15 @@ jobs:
       - name: Assemble Debug APK
         run: gradle :app:assembleDebug
 
-      - name: Verify isolated trial package
+      - name: Verify isolated internal P1-B1 build (no release or upload)
         run: |
           APK="$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f -print -quit)"
           test -n "$APK" && test -f "$APK"
           AAPT="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
           test -n "$AAPT"
-          "$AAPT" dump badging "$APK" > /tmp/lumia-trial-badging.txt
-          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.trial7'" /tmp/lumia-trial-badging.txt
-          # A new temporary debug key must never be presented as an in-place Trial 6 upgrade.
-          # Verify the actual APK binary's distinct identity, version and launcher label.
-          grep -Fq "versionName='1.1.0-beta3-s24-trial7'" /tmp/lumia-trial-badging.txt
-          grep -Fq "application-label:'Lumia Trial 7'" /tmp/lumia-trial-badging.txt
+          "$AAPT" dump badging "$APK" > /tmp/lumia-p1b1-badging.txt
+          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.p1b1'" /tmp/lumia-p1b1-badging.txt
+          grep -Fq "versionName='1.1.0-beta3-p1b1-internal'" /tmp/lumia-p1b1-badging.txt
+          grep -Fq "application-label:'Lumia P1-B1 (internal)'" /tmp/lumia-p1b1-badging.txt
+          # Provenance only; no P1-B1 binary is delivered or saved as a GitHub artifact.
           sha256sum "$APK"
-
-      - name: Upload Debug APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lumia-launcher-s24-trial7-apk
-          path: app/build/outputs/apk/debug/*.apk
-          retention-days: 14

@@ -793,7 +793,7 @@ class DataSafetyRegressionTest {
             old.version = 2
         }
         val migrated = Room.databaseBuilder(context, LumiaDatabase::class.java, name)
-            .addMigrations(LumiaDatabase.MIGRATION_2_4, LumiaDatabase.MIGRATION_4_5)
+            .addMigrations(LumiaDatabase.MIGRATION_2_4, LumiaDatabase.MIGRATION_4_5, LumiaDatabase.MIGRATION_5_6)
             .allowMainThreadQueries().build()
         try {
             val tile = migrated.tileDao().getAllTiles().single()

@@ -2,11 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <application
-        android:label="Lumia Trial 7"
+        android:label="Lumia P1-B1 (internal)"
         tools:replace="android:label">
         <activity
             android:name=".MainActivity"
-            android:label="Lumia Trial 7"
+            android:label="Lumia P1-B1 (internal)"
             tools:replace="android:label" />
     </application>
 </manifest>

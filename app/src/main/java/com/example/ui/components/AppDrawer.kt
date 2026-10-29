@@ -75,6 +75,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.Work
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -83,6 +84,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -132,6 +134,7 @@ import com.example.data.model.AppItem
 import com.example.data.model.LauncherPage
 import com.example.data.model.LauncherSettings
 import com.example.data.model.WidgetProviderItem
+import com.example.data.repository.LauncherIdentityPolicy
 import com.example.ui.theme.LumiaPalette
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -152,7 +155,7 @@ private sealed class GridDrawerEntry {
     data class AppEntry(
         val app: AppItem
     ) : GridDrawerEntry() {
-        override val key: String = "app:${app.packageName}"
+        override val key: String = app.drawerKey
     }
 }
 
@@ -171,7 +174,7 @@ fun AppDrawer(
     homePages: List<LauncherPage>,
     settings: LauncherSettings,
     isEditMode: Boolean = false,
-    onLaunchApp: (String) -> Unit,
+    onLaunchApp: (AppItem) -> Unit,
     onPinAppToPage: (AppItem, String) -> Unit,
     installedWidgets: List<WidgetProviderItem> = emptyList(),
     onPinWidgetToPage: (WidgetProviderItem, String) -> Unit = { _, _ -> },
@@ -189,6 +192,7 @@ fun AppDrawer(
     var searchQuery by remember { mutableStateOf("") }
     var selectedFolderId by remember { mutableStateOf<String?>(null) }
     var selectedAppForMenu by remember { mutableStateOf<AppItem?>(null) }
+    var legacyFolderChoicePackage by remember { mutableStateOf<String?>(null) }
     var activeFolderDialog by remember { mutableStateOf<AppFolder?>(null) }
     var showJumpList by remember { mutableStateOf(false) }
 
@@ -261,6 +265,20 @@ fun AppDrawer(
         }
     }
 
+    // A legacy folder slot has no exact identity; prompt if more than one target exists.
+    fun launchDrawerApp(app: AppItem) {
+        if (app.launcherComponent != null && app.launcherUserSerial != null) {
+            onLaunchApp(app)
+        } else {
+            val choices = categorizedApps.filter { it.packageName == app.packageName }
+            when (choices.size) {
+                1 -> onLaunchApp(choices.single())
+                0 -> onLaunchApp(app)
+                else -> legacyFolderChoicePackage = app.packageName
+            }
+        }
+    }
+
     // Manual folders are the only grouping surface. The master list always includes
     // every installed app, including apps that also appear in a folder.
     val processedApps = remember(
@@ -282,8 +300,10 @@ fun AppDrawer(
         }
 
         if (selectedFolder != null) {
-            val order = selectedFolder.appPackages.withIndex().associate { it.value to it.index }
-            filtered.sortedBy { order[it.packageName] ?: Int.MAX_VALUE }
+            // Existing manual folder slots are by package, not an arbitrary launcher activity.
+            selectedFolder.appPackages.mapNotNull { pkg ->
+                LauncherIdentityPolicy.legacyFolderSlot(pkg, filtered)
+            }
         } else when (settings.allAppsSortOrder) {
             AllAppsSortOrder.NAME_ASC -> filtered.sortedBy { it.label.lowercase(Locale.getDefault()) }
             AllAppsSortOrder.NAME_DESC -> filtered.sortedByDescending { it.label.lowercase(Locale.getDefault()) }
@@ -304,17 +324,15 @@ fun AppDrawer(
         isAndroidSearchMode
     ) {
         if (selectedFolderId != null) {
-            val byPackage = processedApps.associateBy { it.packageName }
-            settings.appDrawerFolders.firstOrNull { it.id == selectedFolderId }
-                ?.appPackages.orEmpty().mapNotNull { byPackage[it] }
-                .map { GridDrawerEntry.AppEntry(it) }
+            processedApps.map { GridDrawerEntry.AppEntry(it) }
         } else if (isAndroidSearchMode && searchQuery.isNotBlank()) {
             // During active text search, show matching apps directly for fast launching
             processedApps.map { GridDrawerEntry.AppEntry(it) }
         } else {
-            val appsByPkg = categorizedApps.associateBy { it.packageName }
             val visibleFolders = settings.appDrawerFolders.mapNotNull { folder ->
-                val memberApps = folder.appPackages.mapNotNull { appsByPkg[it] }
+                val memberApps = folder.appPackages.mapNotNull { pkg ->
+                    LauncherIdentityPolicy.legacyFolderSlot(pkg, categorizedApps)
+                }
                 if (memberApps.isNotEmpty()) {
                     GridDrawerEntry.FolderEntry(folder = folder, apps = memberApps)
                 } else {
@@ -322,8 +340,10 @@ fun AppDrawer(
                 }
             }
             val groupedPkgs = visibleFolders.flatMap { entry -> entry.apps.map { it.packageName } }.toSet()
+            val multiTargetPkgs = categorizedApps.groupBy { it.packageName }.filterValues { it.size > 1 }.keys
+            // Keep every exact activity/profile discoverable despite a legacy package folder.
             val ungroupedApps = processedApps
-                .filter { it.packageName !in groupedPkgs }
+                .filter { it.packageName !in groupedPkgs || it.packageName in multiTargetPkgs }
                 .map { GridDrawerEntry.AppEntry(it) }
 
             val combined = visibleFolders + ungroupedApps
@@ -332,7 +352,11 @@ fun AppDrawer(
             } else {
                 val orderMap = settings.appDrawerCustomOrder.withIndex().associate { it.value to it.index }
                 combined.sortedWith(
-                    compareBy<GridDrawerEntry> { orderMap[it.key] ?: Int.MAX_VALUE }
+                    compareBy<GridDrawerEntry> { entry ->
+                        val legacyAnchor = (entry as? GridDrawerEntry.AppEntry)?.app?.packageName
+                            ?.let { "app:$it" }
+                        orderMap[entry.key] ?: legacyAnchor?.let { orderMap[it] } ?: Int.MAX_VALUE
+                    }.thenBy { it.key }
                 )
             }
         }
@@ -358,6 +382,8 @@ fun AppDrawer(
     }
 
     fun createManualFolder(app: AppItem) {
+        // Existing folder JSON is package-only. Never silently group multiple targets.
+        if (categorizedApps.count { it.packageName == app.packageName } != 1) return
         val folder = AppFolder(
             id = "folder_${UUID.randomUUID()}",
             title = "Thư mục mới",
@@ -379,6 +405,7 @@ fun AppDrawer(
     }
 
     fun addAppToExistingFolder(sourceApp: AppItem, targetFolderId: String) {
+        if (categorizedApps.count { it.packageName == sourceApp.packageName } != 1) return
         onMutateSettings { latest ->
             if (latest.appDrawerFolders.none { it.id == targetFolderId }) latest else {
                 val updatedFolders = latest.appDrawerFolders.mapNotNull { f ->
@@ -409,8 +436,10 @@ fun AppDrawer(
     fun reorderGridEntries(fromKey: String, toKey: String) {
         if (fromKey == toKey) return
         if (selectedFolderId != null) {
-            val fromPkg = fromKey.removePrefix("app:")
-            val toPkg = toKey.removePrefix("app:")
+            val fromPkg = (gridEntries.firstOrNull { it.key == fromKey } as? GridDrawerEntry.AppEntry)
+                ?.app?.packageName ?: fromKey.removePrefix("app:")
+            val toPkg = (gridEntries.firstOrNull { it.key == toKey } as? GridDrawerEntry.AppEntry)
+                ?.app?.packageName ?: toKey.removePrefix("app:")
             onMutateSettings { latest ->
                 val updated = latest.appDrawerFolders.map { folder ->
                     if (folder.id != selectedFolderId) folder else {
@@ -641,7 +670,7 @@ fun AppDrawer(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        itemsIndexed(processedApps, key = { _, item -> item.packageName }) { index, app ->
+                        itemsIndexed(processedApps, key = { _, item -> item.drawerKey }) { index, app ->
                             val currentChar = app.label.firstOrNull()?.uppercaseChar() ?: '#'
                             val currentGroupChar = if (currentChar in 'A'..'Z') currentChar else '#'
                             val prevChar = if (index > 0) {
@@ -712,7 +741,7 @@ fun AppDrawer(
                                 }) {
                                 AppItemRow(app, accent.color, settings.tileCornerRadiusDp,
                                     settings.useRealAppIcons,
-                                    onClick = { onLaunchApp(app.packageName) })
+                                    onClick = { launchDrawerApp(app) })
                             }
                         }
 
@@ -849,7 +878,7 @@ fun AppDrawer(
                                             isBeingDragged = isBeingDragged,
                                             isHighlightedForMerge = isFolderMergeTarget,
                                             isHighlightedForReorder = isReorderTarget,
-                                            onClick = { onLaunchApp(entry.app.packageName) }
+                                            onClick = { launchDrawerApp(entry.app) }
                                         )
                                     }
                                 }
@@ -968,7 +997,7 @@ fun AppDrawer(
         activeFolderDialog?.let { currentFolder ->
             val freshFolder = settings.appDrawerFolders.find { it.id == currentFolder.id } ?: currentFolder
             val folderApps = freshFolder.appPackages.mapNotNull { pkg ->
-                categorizedApps.find { it.packageName == pkg }
+                LauncherIdentityPolicy.legacyFolderSlot(pkg, categorizedApps)
             }
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             var folderTitleText by remember(freshFolder.id) { mutableStateOf(freshFolder.title) }
@@ -1041,7 +1070,7 @@ fun AppDrawer(
                             .fillMaxWidth()
                             .height(190.dp)
                     ) {
-                        items(folderApps, key = { it.packageName }) { memberApp ->
+                        items(folderApps, key = { it.drawerKey }) { memberApp ->
                             Box(modifier = Modifier.fillMaxWidth()) {
                                 AppGridCell(
                                     app = memberApp,
@@ -1050,7 +1079,7 @@ fun AppDrawer(
                                     useRealAppIcons = settings.useRealAppIcons,
                                     onClick = {
                                         activeFolderDialog = null
-                                        onLaunchApp(memberApp.packageName)
+                                        launchDrawerApp(memberApp)
                                     }
                                 )
                                 Box(
@@ -1139,7 +1168,7 @@ fun AppDrawer(
                                 }
                             }
                             LazyColumn(modifier = Modifier.fillMaxWidth().height(240.dp)) {
-                                items(candidates, key = { it.packageName }) { candidate ->
+                                items(candidates, key = { it.drawerKey }) { candidate ->
                                     MenuActionRow(Icons.Default.Add, candidate.label, accent.color) {
                                         addAppToExistingFolder(candidate, freshFolder.id)
                                     }
@@ -1151,6 +1180,27 @@ fun AppDrawer(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
             }
+        }
+
+        legacyFolderChoicePackage?.let { legacyPkg ->
+            val choices = categorizedApps.filter { it.packageName == legacyPkg }
+            AlertDialog(
+                onDismissRequest = { legacyFolderChoicePackage = null },
+                title = { Text("Chọn ứng dụng và hồ sơ") },
+                text = {
+                    Column {
+                        choices.forEach { choice ->
+                            TextButton(onClick = {
+                                legacyFolderChoicePackage = null
+                                onLaunchApp(choice)
+                            }) { Text(choice.label) }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { legacyFolderChoicePackage = null }) { Text("Đóng") }
+                }
+            )
         }
 
         // One compact action sheet for both list and grid. Grouping happens by dragging
@@ -1174,7 +1224,10 @@ fun AppDrawer(
                         overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(12.dp))
                     MenuActionRow(Icons.Default.PushPin, "Ghim vào Trang chủ", accent.color) {
-                        onPinAppToPage(app, defaultHomeId)
+                        val resolved = if (app.launcherComponent != null) app
+                            else categorizedApps.filter { it.packageName == app.packageName }.singleOrNull()
+                        if (resolved != null) onPinAppToPage(resolved, defaultHomeId)
+                        else Toast.makeText(context, "Hãy chọn ứng dụng cụ thể trong Tất cả ứng dụng.", Toast.LENGTH_SHORT).show()
                         selectedAppForMenu = null
                     }
                     MenuActionRow(Icons.Default.Info, "Thông tin ứng dụng", Color.White) {
@@ -1477,7 +1530,7 @@ private fun AppItemRow(
     useRealAppIcons: Boolean,
     onClick: () -> Unit
 ) {
-    val iconBitmap = if (useRealAppIcons) rememberAppIcon(app.packageName) else null
+    val iconBitmap = if (useRealAppIcons) rememberAppIcon(app) else null
 
     Row(
         modifier = Modifier
@@ -1532,7 +1585,7 @@ private fun AppGridCell(
     isHighlightedForReorder: Boolean = false,
     onClick: () -> Unit
 ) {
-    val iconBitmap = if (useRealAppIcons) rememberAppIcon(app.packageName) else null
+    val iconBitmap = if (useRealAppIcons) rememberAppIcon(app) else null
 
     Column(
         modifier = Modifier
@@ -1639,7 +1692,7 @@ private fun AppFolderGridCell(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (app != null) {
-                                    val bmp = if (useRealAppIcons) rememberAppIcon(app.packageName) else null
+                                    val bmp = if (useRealAppIcons) rememberAppIcon(app) else null
                                     if (bmp != null) {
                                         Image(
                                             bitmap = bmp,

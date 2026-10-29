@@ -45,12 +45,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -238,6 +241,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     val tiles by viewModel.tiles.collectAsStateWithLifecycle()
     val pages by viewModel.pages.collectAsStateWithLifecycle()
     val apps by viewModel.apps.collectAsStateWithLifecycle()
+    var pendingAppTargetChoice by remember { mutableStateOf<TileEntity?>(null) }
     val installedWidgets by viewModel.installedWidgets.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
@@ -884,6 +888,11 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onTileClick = { tile ->
                             val linkedApp = resolveLinkedAppForTile(tile, apps)
                             when {
+                                tile.tileType == TileType.APP && tile.packageName.isNotEmpty() -> {
+                                    if (!viewModel.launchTile(tile)) {
+                                        pendingAppTargetChoice = tile // Explicit choice; never package/profile fallback.
+                                    }
+                                }
                                 tile.packageName.isNotEmpty() && !tile.packageName.startsWith("{") -> {
                                     viewModel.launchApp(tile.packageName)
                                 }
@@ -1067,7 +1076,11 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         homePages = homePages,
                         settings = settings,
                         isEditMode = isEditMode,
-                        onLaunchApp = { pkg -> viewModel.launchApp(pkg) },
+                        onLaunchApp = { app ->
+                            if (!viewModel.launchApp(app)) {
+                                Toast.makeText(context, "Không thể mở ứng dụng. Hãy chọn đúng ứng dụng và hồ sơ.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
                         onPinAppToPage = { app, targetPageId ->
                             viewModel.pinAppToPage(app, targetPageId)
                         },
@@ -1127,6 +1140,35 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color.Black.copy(alpha = 0.75f))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
+            )
+        }
+
+        pendingAppTargetChoice?.let { pending ->
+            val candidates = apps.filter { it.packageName == pending.packageName &&
+                it.launcherComponent != null && it.launcherUserSerial != null }
+            AlertDialog(
+                onDismissRequest = { pendingAppTargetChoice = null },
+                title = { Text("Chọn ứng dụng và hồ sơ") },
+                text = {
+                    if (candidates.isEmpty()) {
+                        Text("Ứng dụng hoặc hồ sơ này không còn khả dụng. Tile hiện tại vẫn được giữ nguyên.")
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                            items(candidates, key = { it.drawerKey }) { candidate ->
+                                TextButton(onClick = {
+                                    pendingAppTargetChoice = null
+                                    viewModel.rebindAppTile(pending.id, candidate) { ok ->
+                                        if (ok) viewModel.launchApp(candidate)
+                                        else Toast.makeText(context, "Không thể gắn lại ứng dụng.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }) { Text(candidate.label) }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { pendingAppTargetChoice = null }) { Text("Đóng") }
+                }
             )
         }
 

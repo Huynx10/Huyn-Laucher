@@ -57,9 +57,10 @@ android {
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
       // Isolated test package: the prior debug APK uses an unrelated temporary key.
-      // CI creates a temporary signing key per build; trial7 coexists with trial5/trial6 without uninstalling or migrating data.
-      applicationIdSuffix = ".trial7"
-      versionNameSuffix = "-s24-trial7"
+      // Internal identity-only P1-B slice; frozen Trial7 remains at dea5383b.
+      // No APK artifact is uploaded or handed off for this unreviewed code slice.
+      applicationIdSuffix = ".p1b1"
+      versionNameSuffix = "-p1b1-internal"
     }
   }
   compileOptions {

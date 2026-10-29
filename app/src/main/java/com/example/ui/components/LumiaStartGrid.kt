@@ -201,9 +201,11 @@ private fun tileDisplayName(
     tile.hasBoundOrLinkedWidget() -> installedWidgets
         .firstOrNull { it.providerComponent == tile.widgetProvider }?.label
         ?.takeIf { it.isNotBlank() } ?: tile.title
-    tile.tileType == TileType.APP -> installedApps
-        .firstOrNull { it.packageName == tile.packageName }?.label
-        ?.takeIf { it.isNotBlank() } ?: tile.title
+    tile.tileType == TileType.APP -> if (tile.launcherIdentityState == "EXACT") {
+        installedApps.firstOrNull { it.launcherComponent == tile.launcherComponent &&
+            it.launcherUserSerial == tile.launcherUserSerial }?.label
+            ?.takeIf { it.isNotBlank() } ?: tile.title
+    } else tile.title
     else -> tile.title
 }
 
@@ -1382,7 +1384,7 @@ fun LumiaStartGrid(
 
                             }
                         }
-                        items(filteredAppsForTile, key = { "app:${it.packageName}" }, contentType = { "app" }) { app ->
+                        items(filteredAppsForTile, key = { it.drawerKey }, contentType = { "app" }) { app ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1393,6 +1395,9 @@ fun LumiaStartGrid(
                                         title = app.label,
                                         packageName = app.packageName,
                                         tileType = TileType.APP,
+                                        launcherComponent = app.launcherComponent,
+                                        launcherUserSerial = app.launcherUserSerial,
+                                        launcherIdentityState = "EXACT",
                                         size = selectedNewAppTileSize,
                                         orderIndex = tiles.size,
                                         pageId = currentPage.id,
