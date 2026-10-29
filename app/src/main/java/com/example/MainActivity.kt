@@ -95,6 +95,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -487,7 +488,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     var draggingHomeTileSourcePageId by remember { mutableStateOf<String?>(null) }
     var crossPageDragCancelToken by remember { mutableIntStateOf(0) }
     // The root (not a lazy pager page) tracks the finger until physical UP.
-    var rootDragFingerDown by remember { mutableStateOf(false) }
+    val rootDragFingerDown = remember { booleanArrayOf(false) }
     var rootFinishedAcrossTileId by remember { mutableStateOf<String?>(null) }
     var dragFingerX by remember { mutableFloatStateOf(0.5f) }
     var dragFingerY by remember { mutableFloatStateOf(0.5f) }
@@ -520,11 +521,11 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     LaunchedEffect(draggingHomeTileId, dragEdgeDirection, pagerState.currentPage, pages) {
         val activeTileId = draggingHomeTileId
         val direction = dragEdgeDirection
-        if (activeTileId != null && rootDragFingerDown && direction != 0) {
+        if (activeTileId != null && rootDragFingerDown[0] && direction != 0) {
             val originalPage = pagerState.currentPage
             awaitHomeEdgeDwell(pages, originalPage, direction,
                 isStillHeld = {
-                    rootDragFingerDown && draggingHomeTileId == activeTileId &&
+                    rootDragFingerDown[0] && draggingHomeTileId == activeTileId &&
                         dragEdgeDirection == direction && pagerState.currentPage == originalPage &&
                         !settings.lockHomeLayout
                 },
@@ -709,14 +710,14 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    rootDragFingerDown = true
+                    rootDragFingerDown[0] = true
                     val pointerId = down.id
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         val change = event.changes.firstOrNull { it.id == pointerId }
                         if (change == null || event.changes.count { it.pressed } > 1) {
                             if (draggingHomeTileId != null) cancelCrossPageDrag(restoreSource = true)
-                            rootDragFingerDown = false
+                            rootDragFingerDown[0] = false
                             break
                         }
                         if (draggingHomeTileId != null) {
@@ -727,9 +728,13 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         }
                         if (!change.pressed) {
                             if (draggingHomeTileId != null) {
-                                latestFinishCrossPageDrag.value(draggingHomeTileId!!)
+                                if (event.type == PointerEventType.Release) {
+                                    latestFinishCrossPageDrag.value(draggingHomeTileId!!)
+                                } else {
+                                    cancelCrossPageDrag(restoreSource = true)
+                                }
                             }
-                            rootDragFingerDown = false
+                            rootDragFingerDown[0] = false
                             break
                         }
                     }
@@ -962,13 +967,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onCrossPageDragEnd = { tileId -> finishCrossPageDrag(tileId) },
                         crossPageDragCancelToken = crossPageDragCancelToken,
                         onCrossPageDragCancel = { tileId ->
-                            if (draggingHomeTileId == tileId) {
-                                val sourceIndex = pages.indexOfFirst { it.id == draggingHomeTileSourcePageId }
-                                // Pager may dispose the source recognizer while the finger is STILL down.
-                                // The root observer keeps the drag active until UP / Back / cancellation.
-                                if (!rootDragFingerDown || sourceIndex == pagerState.currentPage) {
-                                    cancelCrossPageDrag(restoreSource = true)
-                                }
+                            if (draggingHomeTileId == tileId && !rootDragFingerDown[0]) {
+                                // A lazy pager can cancel the source recognizer even on the source
+                                // page while the parent remeasures. Root still owns physical DOWN.
+                                cancelCrossPageDrag(restoreSource = true)
                             }
                         },
                         onOpenWidgetSettings = { tile ->
