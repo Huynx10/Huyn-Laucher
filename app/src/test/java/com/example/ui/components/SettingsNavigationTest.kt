@@ -15,6 +15,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.example.data.model.LauncherSettings
@@ -67,6 +69,7 @@ class SettingsNavigationTest {
 
     @Test fun cleanSettingsCannotCloseWhileSettingsAreSaving() {
         var dismissCount = 0
+        var advancedCount = 0
         compose.setContent {
             CleanSettingsScreen(
                 settings = LauncherSettings(),
@@ -84,15 +87,18 @@ class SettingsNavigationTest {
                 onSignOutCloud = {},
                 onSyncToCloudNow = {},
                 onRestoreCloudBackup = {},
-                onOpenAdvanced = {},
+                onOpenAdvanced = { advancedCount++ },
                 onDismiss = { dismissCount++ }
             )
         }
 
-        // The loading surface intercepts taps, including the close control.
         compose.onNodeWithTag("settings_loading").assertExists()
-        compose.onNodeWithContentDescription("Đóng cài đặt", useUnmergedTree = true).performClick()
-        compose.runOnIdle { assertEquals(0, dismissCount) }
+        compose.onNodeWithContentDescription("Đóng cài đặt").assertDoesNotExist()
+        compose.onNodeWithTag("settings_loading").performTouchInput { click() }
+        compose.runOnIdle {
+            assertEquals(0, dismissCount)
+            assertEquals(0, advancedCount)
+        }
     }
 
     @Test fun advancedSettingsSwitchesCategoriesWithoutAnotherLevel() {
@@ -158,9 +164,10 @@ class SettingsNavigationTest {
         compose.onNodeWithText("Khôi phục").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, restoreCalls) }
         compose.onNodeWithTag("settings_loading").assertExists()
-        compose.onNodeWithText("Khôi phục", useUnmergedTree = true).performClick()
-        compose.onNodeWithContentDescription("Đóng tùy chỉnh nâng cao", useUnmergedTree = true)
-            .performClick()
+        compose.onNodeWithText("Khôi phục").assertDoesNotExist()
+        compose.onNodeWithTag("settings_tab_system").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Đóng tùy chỉnh nâng cao").assertDoesNotExist()
+        compose.onNodeWithTag("settings_loading").performTouchInput { click() }
         compose.runOnIdle {
             assertEquals(1, restoreCalls)
             assertEquals(0, dismissCount)

@@ -17,6 +17,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -95,8 +96,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -356,6 +359,7 @@ fun SettingsSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .then(if (backupBusy) Modifier.clearAndSetSemantics {} else Modifier)
                 ) {
                     SettingsHeader(selectedTab.title, ::back, ::close, "Đóng tùy chỉnh nâng cao")
 
@@ -1510,6 +1514,7 @@ fun SettingsSheet(
         if (backupBusy) {
             Box(
                 modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+                    .pointerInput(Unit) { detectTapGestures { } }
                     .testTag("settings_loading"),
                 contentAlignment = Alignment.Center
             ) {

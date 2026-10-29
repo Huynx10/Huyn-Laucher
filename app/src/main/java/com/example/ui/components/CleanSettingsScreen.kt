@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +30,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -102,7 +105,7 @@ fun CleanSettingsScreen(
     MaterialTheme(colorScheme = darkColorScheme(primary = accent, background = bg, surface = bg)) {
     Box(Modifier.fillMaxSize().background(bg).statusBarsPadding().navigationBarsPadding()
         .testTag("clean_settings_screen")) {
-        Column {
+        Column(modifier = if (busy || isSavingSettings) Modifier.clearAndSetSemantics {} else Modifier) {
             SettingsHeader(section?.label ?: "Cài đặt", ::back, ::close)
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
             LazyColumn(
@@ -123,7 +126,8 @@ fun CleanSettingsScreen(
                         }
                     }
                     item { Spacer(Modifier.height(12.dp)) }
-                    item { SettingAction("Tùy chỉnh nâng cao", "Hiệu ứng và các tùy chọn khác", onOpenAdvanced) }
+                    item { SettingAction("Tùy chỉnh nâng cao", "Hiệu ứng và các tùy chọn khác",
+                        { if (!busy && !isSavingSettings) onOpenAdvanced() }) }
                 }
                 when (section) {
                     CleanSection.HOME -> {
@@ -173,7 +177,7 @@ fun CleanSettingsScreen(
                     CleanSection.WIDGETS -> {
                         item { Heading("Widget thật từ ứng dụng") }
                         item { Hint("Lumia sử dụng widget từ các ứng dụng đã cài. Android sẽ yêu cầu xác nhận nếu cần.") }
-                        item { SettingAction("Thêm widget", "Trên Home, nhấn giữ vùng trống rồi chọn Thêm ô", onDismiss) }
+                        item { SettingAction("Thêm widget", "Trên Home, nhấn giữ vùng trống rồi chọn Thêm ô", ::close) }
                         item { SettingAction("Đặt làm màn hình chính", "Dùng Lumia khi nhấn nút Home", ::chooseHome) }
                     }
                     CleanSection.BACKUP -> {
@@ -236,6 +240,7 @@ fun CleanSettingsScreen(
         if (busy || isSavingSettings) {
             Box(
                 modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+                    .pointerInput(Unit) { detectTapGestures { } }
                     .testTag("settings_loading"),
                 contentAlignment = Alignment.Center
             ) {
