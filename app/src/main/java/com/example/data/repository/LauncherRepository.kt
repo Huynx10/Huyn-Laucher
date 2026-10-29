@@ -3,6 +3,7 @@ package com.example.data.repository
 import androidx.room.withTransaction
 import com.example.data.db.LumiaDatabase
 import kotlinx.coroutines.CancellationException
+import android.content.ComponentName
 import android.app.ActivityManager
 import android.app.role.RoleManager
 import android.content.Context
@@ -73,6 +74,7 @@ class LauncherRepository(
 ) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+    private val targetResolver = LauncherTargetResolver(context)
 
     private fun allocateUniqueTileId(prefix: String, existingTiles: List<TileEntity>): String {
         val existingIds = existingTiles.mapTo(HashSet()) { it.id }
@@ -864,6 +866,58 @@ class LauncherRepository(
         }
     }
 
+    /**
+     * Drop an existing Tile onto an exact empty cell of another HOME page.
+     * A failed/occupied/out-of-bounds drop is a no-op, including widget bindings.
+     */
+    suspend fun moveTileToPageAtGridPosition(
+        tileId: String,
+        targetPageId: String,
+        gridX: Int,
+        gridY: Int,
+        totalCols: Int = 4
+    ): Boolean = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            if (loadPages().none { it.id == targetPageId && it.pageType == PageType.HOME }) {
+                return@withTransaction false
+            }
+            val allTiles = tileDao.getAllTiles()
+            val tile = allTiles.find { it.id == tileId } ?: return@withTransaction false
+            if (tile.pageId == targetPageId) return@withTransaction false
+
+            // Match the actual viewport grid (4/6/8), including wide screens.
+            // Never silently reinterpret a valid UI drop using a narrower grid.
+            if (totalCols != 4 && totalCols != 6 && totalCols != 8) {
+                return@withTransaction false
+            }
+            val cols = totalCols
+            val spanX = tile.effectiveSpanX(cols)
+            val spanY = tile.effectiveSpanY()
+            if (gridX < 0 || gridX + spanX > cols || gridY !in 0..60) {
+                return@withTransaction false
+            }
+            val destination = allTiles.filter { it.pageId == targetPageId }
+            if (destination.any { other ->
+                    rectsOverlap(
+                        gridX, gridY, spanX, spanY,
+                        other.gridX.coerceAtLeast(0), other.gridY.coerceAtLeast(0),
+                        other.effectiveSpanX(cols), other.effectiveSpanY()
+                    )
+                }) {
+                return@withTransaction false
+            }
+            tileDao.update(
+                tile.copy(
+                    pageId = targetPageId,
+                    gridX = gridX,
+                    gridY = gridY,
+                    orderIndex = (destination.maxOfOrNull { it.orderIndex } ?: -1) + 1
+                )
+            )
+            true
+        }
+    }
+
     suspend fun reassignTilesFromDeletedPage(deletedPageId: String, fallbackPageId: String) = withContext(Dispatchers.IO) {
         require(deletedPageId != fallbackPageId) { "Cannot reassign tiles to the deleted Home page" }
         // Keep all widget moves atomic so a failed write cannot partially move a page.
@@ -893,6 +947,14 @@ class LauncherRepository(
     }
 
     suspend fun pinApp(app: AppItem, pageId: String = "page_home_1") = withContext(Dispatchers.IO) {
+        // A package-only AppItem is an explicit legacy compatibility request.
+        // New All Apps discovery supplies both component and profile; a partial/stale exact
+        // target must fail closed and can NEVER degrade into a package-only pin.
+        val exact = app.launcherComponent != null && app.launcherUserSerial != null
+        if ((app.launcherComponent != null || app.launcherUserSerial != null) && !exact) return@withContext
+        if (exact && targetResolver.resolve(app.launcherComponent, app.launcherUserSerial, app.packageName) == null) {
+            return@withContext
+        }
         // Keep occupancy, ID allocation and insert in one Room transaction.
         database.withTransaction {
             val allTiles = tileDao.getAllTiles()
@@ -909,6 +971,9 @@ class LauncherRepository(
                 title = app.label,
                 packageName = app.packageName,
                 tileType = TileType.APP,
+                launcherComponent = app.launcherComponent,
+                launcherUserSerial = app.launcherUserSerial,
+                launcherIdentityState = if (exact) "EXACT" else "LEGACY",
                 size = TileSize.MEDIUM,
                 orderIndex = (pageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
                 pageId = pageId,
@@ -922,6 +987,10 @@ class LauncherRepository(
     }
 
     suspend fun pinTile(tile: TileEntity) = withContext(Dispatchers.IO) {
+        // The Home Add Tile picker must never silently pin a stale component/profile.
+        if (tile.tileType == TileType.APP && tile.launcherIdentityState == "EXACT" &&
+            targetResolver.resolve(tile.launcherComponent, tile.launcherUserSerial, tile.packageName) == null
+        ) return@withContext
         // Read occupancy and persist the new Tile atomically, including sparse page orders.
         database.withTransaction {
             val allTiles = tileDao.getAllTiles()
@@ -979,6 +1048,7 @@ class LauncherRepository(
         val matchingTiles = if (absorbMatchingPageTiles) {
             pageTiles.filter {
                 it.tileType != TileType.SMART_FOLDER && !it.hasBoundOrLinkedWidget() &&
+                    it.launcherIdentityState == "LEGACY" &&
                     (category == AppCategory.ALL || SmartFolderConfig.classifyTileCategory(it, customCategories) == category)
             }
         } else {
@@ -1059,7 +1129,7 @@ class LauncherRepository(
         val totalCols = if (loadSettings().showMoreTiles) 6 else 4
         val pageTiles = allTiles.filter { it.pageId == pageId }.sortedWith(compareBy({ it.gridY.coerceAtLeast(0) }, { it.gridX.coerceAtLeast(0) }, { it.orderIndex }))
 
-        val looseTiles = pageTiles.filter { it.tileType != TileType.SMART_FOLDER && !it.hasBoundOrLinkedWidget() }
+        val looseTiles = pageTiles.filter { it.tileType != TileType.SMART_FOLDER && !it.hasBoundOrLinkedWidget() && it.launcherIdentityState == "LEGACY" }
         if (looseTiles.isEmpty()) return@withTransaction 0
 
         val existingFoldersByCat = pageTiles
@@ -1148,7 +1218,7 @@ class LauncherRepository(
         database.withTransaction {
         val allTiles = tileDao.getAllTiles()
         val target = allTiles.find { it.id == tileId } ?: return@withTransaction null
-        if (target.hasBoundOrLinkedWidget()) return@withTransaction null
+        if (target.hasBoundOrLinkedWidget() || target.launcherIdentityState != "LEGACY") return@withTransaction null
         if (target.tileType == TileType.SMART_FOLDER) return@withTransaction target
 
         val customCategories = loadCustomAppCategories()
@@ -1158,7 +1228,7 @@ class LauncherRepository(
 
         val tilesToAbsorb = if (absorbSameCategoryOnPage) {
             pageTiles.filter {
-                it.id == target.id || (it.tileType != TileType.SMART_FOLDER && !it.hasBoundOrLinkedWidget() && SmartFolderConfig.classifyTileCategory(it, customCategories) == cat)
+                it.id == target.id || (it.tileType != TileType.SMART_FOLDER && !it.hasBoundOrLinkedWidget() && it.launcherIdentityState == "LEGACY" && SmartFolderConfig.classifyTileCategory(it, customCategories) == cat)
             }
         } else {
             listOf(target)
@@ -1233,6 +1303,7 @@ class LauncherRepository(
                 val target = tiles.find { it.id == targetId } ?: return@withTransaction null
                 if (source.id == target.id || source.pageId != target.pageId ||
                     source.tileType != TileType.APP || source.hasBoundOrLinkedWidget() ||
+                    source.launcherIdentityState != "LEGACY" || target.launcherIdentityState != "LEGACY" ||
                     target.hasBoundOrLinkedWidget() ||
                     target.tileType !in setOf(TileType.APP, TileType.SMART_FOLDER)
                 ) return@withTransaction null
@@ -1359,66 +1430,28 @@ class LauncherRepository(
     private val resolvedAppMetaCache = java.util.concurrent.ConcurrentHashMap<String, CachedAppMeta>()
 
     suspend fun getInstalledApps(pinnedPackageNames: Set<String>): List<AppItem> = withContext(Dispatchers.IO) {
-        val pm = context.packageManager
         val customCategories = loadCustomAppCategories()
-        val intent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-        val activities = pm.queryIntentActivities(intent, 0)
-        val seenPackages = HashSet<String>(activities.size)
-        val list = ArrayList<Pair<String, AppItem>>(activities.size)
-        val locale = Locale.getDefault()
-
-        for (resolveInfo in activities) {
-            val pkg = resolveInfo.activityInfo.packageName
-            if (pkg == context.packageName || !seenPackages.add(pkg)) continue
-
-            val meta = resolvedAppMetaCache[pkg] ?: run {
-                val label = resolveInfo.loadLabel(pm)?.toString() ?: pkg
-                val appInfo = resolveInfo.activityInfo.applicationInfo
-                val isSystem = appInfo != null && (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                val androidCat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && appInfo != null) {
-                    appInfo.category
-                } else {
-                    -1
-                }
-                val autoCat = AppCategory.classifyApp(
-                    packageName = pkg,
-                    label = label,
-                    androidCategory = androidCat,
-                    isSystemApp = isSystem
-                )
-                CachedAppMeta(
-                    label = label,
-                    sortKey = label.lowercase(locale),
-                    isSystemApp = isSystem,
-                    autoCategory = autoCat
-                ).also { resolvedAppMetaCache[pkg] = it }
-            }
-
-            val overrideCatName = customCategories[pkg]
-            val finalCat = if (!overrideCatName.isNullOrBlank()) {
-                try {
-                    AppCategory.valueOf(overrideCatName)
-                } catch (_: Exception) {
-                    meta.autoCategory
-                }
-            } else {
-                meta.autoCategory
-            }
-            list.add(
-                meta.sortKey to AppItem(
-                    label = meta.label,
-                    packageName = pkg,
-                    isSystemApp = meta.isSystemApp,
-                    isPinned = pinnedPackageNames.contains(pkg),
-                    category = finalCat,
-                    isCustomCategory = !overrideCatName.isNullOrBlank()
-                )
+        val pinnedTiles = tileDao.getAllTiles()
+        val exactPins = pinnedTiles.asSequence()
+            .filter { it.tileType == TileType.APP && it.launcherIdentityState == "EXACT" }
+            .mapNotNull { tile ->
+                if (tile.launcherComponent == null || tile.launcherUserSerial == null) null
+                else "${tile.launcherComponent}:${tile.launcherUserSerial}"
+            }.toSet()
+        val legacyPins = pinnedTiles.asSequence()
+            .filter { it.tileType == TileType.APP && it.launcherIdentityState == "LEGACY" }
+            .map { it.packageName }.toSet()
+        targetResolver.discover().map { app ->
+            val custom = customCategories[app.packageName]
+            val resolvedCategory = custom?.let { runCatching { AppCategory.valueOf(it) }.getOrNull() }
+                ?: AppCategory.classifyApp(app.packageName, app.label, -1, app.isSystemApp)
+            app.copy(
+                category = resolvedCategory,
+                isCustomCategory = !custom.isNullOrBlank(),
+                isPinned = "${app.launcherComponent}:${app.launcherUserSerial}" in exactPins ||
+                    app.packageName in legacyPins
             )
         }
-        list.sortBy { it.first }
-        list.map { it.second }
     }
 
     private fun loadCustomAppCategories(): Map<String, String> {
@@ -1530,35 +1563,47 @@ class LauncherRepository(
         return arr.toString()
     }
 
+    fun launchApp(app: AppItem): Boolean =
+        if (app.launcherComponent != null && app.launcherUserSerial != null)
+            targetResolver.launch(app.launcherComponent, app.launcherUserSerial, app.packageName)
+        else launchApp(app.packageName) // Legacy folder slot: safe current-profile-only resolution.
+
+    suspend fun rebindAppTile(tileId: String, app: AppItem): Boolean = withContext(Dispatchers.IO) {
+        if (targetResolver.resolve(app.launcherComponent, app.launcherUserSerial, app.packageName) == null) {
+            return@withContext false
+        }
+        database.withTransaction {
+            val existing = tileDao.getAllTiles().firstOrNull { it.id == tileId } ?: return@withTransaction false
+            if (existing.tileType != TileType.APP || existing.hasBoundOrLinkedWidget()) return@withTransaction false
+            tileDao.update(existing.copy(
+                title = app.label, packageName = app.packageName,
+                launcherComponent = app.launcherComponent, launcherUserSerial = app.launcherUserSerial,
+                launcherIdentityState = "EXACT"
+            ))
+            true
+        }
+    }
+
+    fun launchTile(tile: TileEntity): Boolean = when (tile.launcherIdentityState) {
+        "EXACT" -> targetResolver.launch(tile.launcherComponent, tile.launcherUserSerial, tile.packageName)
+        "UNRESOLVED" -> false // Imported profile serials are never trusted for launch.
+        "LEGACY" -> launchApp(tile.packageName)
+        else -> false
+    }
+
     fun launchApp(packageName: String): Boolean {
-        if (packageName.isEmpty()) return false
+        if (packageName.isBlank()) return false
         return try {
             when (packageName) {
                 "SYSTEM_SETTINGS", "com.android.settings" -> {
-                    val intent = Intent(Settings.ACTION_SETTINGS).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(intent)
+                    context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     true
                 }
                 "SYSTEM_CAMERA", "android.media.action.IMAGE_CAPTURE" -> {
-                    val intent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(intent)
+                    context.startActivity(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     true
                 }
-                else -> {
-                    val pm = context.packageManager
-                    val intent = pm.getLaunchIntentForPackage(packageName)
-                    if (intent != null) {
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                        true
-                    } else {
-                        false
-                    }
-                }
+                else -> targetResolver.launchLegacy(packageName)
             }
         } catch (_: Exception) {
             false
@@ -1922,7 +1967,7 @@ class LauncherRepository(
         val settings = loadSettings()
         val pages = loadPages()
         val root = JSONObject()
-        root.put("version", 6)
+        root.put("version", 7)
         root.put("app", "LumiaLauncher")
         root.put("timestamp", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
 
@@ -1988,6 +2033,11 @@ class LauncherRepository(
                 put("title", tile.title)
                 put("packageName", tile.packageName)
                 put("tileType", tile.tileType.name)
+                if (tile.tileType == TileType.APP) {
+                    put("launcherIdentityState", tile.launcherIdentityState)
+                    tile.launcherComponent?.let { put("launcherComponent", it) }
+                    tile.launcherUserSerial?.let { put("launcherUserSerial", it) }
+                }
                 put("size", tile.size.name)
                 put("customSpanX", tile.customSpanX)
                 put("customSpanY", tile.customSpanY)
@@ -2011,11 +2061,46 @@ class LauncherRepository(
         root.toString(2)
     }
 
+    /**
+     * All imported EXACT targets are UNRESOLVED: a user serial is not portable.
+     * Validate metadata before a backup restore journal or Tile write.
+     */
+    internal fun parseBackupIdentity(
+        obj: JSONObject, tileType: TileType, version: Int, packageName: String
+    ): Triple<String?, Long?, String> {
+        if (version < 7) return Triple(null, null, "LEGACY")
+        if (tileType != TileType.APP) {
+            require(!obj.has("launcherComponent") && !obj.has("launcherUserSerial") &&
+                !obj.has("launcherIdentityState")) { "Non-APP cannot carry launcher identity" }
+            return Triple(null, null, "LEGACY")
+        }
+        val state = obj.optString("launcherIdentityState", "LEGACY")
+        require(state in setOf("LEGACY", "EXACT", "UNRESOLVED")) { "Invalid identity state" }
+        val component = if (obj.has("launcherComponent")) {
+            require(obj.get("launcherComponent") is String)
+            obj.getString("launcherComponent")
+        } else null
+        val serial = if (obj.has("launcherUserSerial")) {
+            val value = obj.get("launcherUserSerial")
+            require(value is Number && value.toLong() >= 0 && value.toDouble() == value.toLong().toDouble())
+            value.toLong()
+        } else null
+        if (state == "LEGACY") {
+            require(component == null && serial == null)
+            return Triple(null, null, "LEGACY")
+        }
+        val parsed = ComponentName.unflattenFromString(component ?: "")
+        require(parsed != null && parsed.packageName == packageName) { "Wrong component package" }
+        if (state == "EXACT") require(serial != null) { "Missing exact profile serial" }
+        return Triple(component, null, "UNRESOLVED")
+    }
+
     suspend fun restoreFromJson(jsonString: String): Boolean = withContext(Dispatchers.IO) {
         try {
             require(jsonString.toByteArray(Charsets.UTF_8).size <= 1_048_576)
             val root = JSONObject(jsonString)
-            require(root.getInt("version") in 1..6)
+            val backupVersion = root.getInt("version")
+            require(backupVersion in 1..7)
             require(root.getString("app") == "LumiaLauncher")
             require(root.has("tiles") && root.has("pages") && root.has("settings"))
             var restoredPages = loadPages()
@@ -2125,6 +2210,7 @@ class LauncherRepository(
                     val parsedType = TileType.valueOf(obj.getString("tileType"))
                     val parsedSize = TileSize.valueOf(obj.getString("size"))
                     val parsedProvider = obj.optString("widgetProvider", "")
+                    val importedIdentity = parseBackupIdentity(obj, parsedType, backupVersion, obj.optString("packageName", ""))
                     val isWidget = parsedType == TileType.WIDGET || parsedProvider.isNotBlank()
 
                     // Widget IDs are device-local capabilities. Restore an explicit rebind placeholder.
@@ -2136,6 +2222,9 @@ class LauncherRepository(
                             title = obj.getString("title"),
                             packageName = obj.optString("packageName", ""),
                             tileType = parsedType,
+                            launcherComponent = importedIdentity.first,
+                            launcherUserSerial = importedIdentity.second,
+                            launcherIdentityState = importedIdentity.third,
                             size = parsedSize,
                             customSpanX = obj.optInt("customSpanX", 0).coerceIn(0, 6),
                             customSpanY = obj.optInt("customSpanY", 0).coerceIn(0, 8),

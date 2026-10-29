@@ -13,7 +13,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.heightIn
@@ -78,14 +77,19 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
@@ -165,6 +169,30 @@ private fun findManualFolderDropTarget(
     }
 }
 
+/** Exact destination grid geometry in Compose root coordinates, independent of source scroll. */
+@Immutable
+data class HomePageDropGeometry(
+    val pageId: String,
+    val viewportRootX: Float,
+    val viewportRootY: Float,
+    val scrollYPx: Float,
+    val horizontalPaddingPx: Float,
+    val topPaddingPx: Float,
+    val cellStepPx: Float,
+    val columns: Int
+) {
+    fun resolveDrop(tileRootX: Float, tileRootY: Float, spanX: Int): Pair<Int, Int>? {
+        if (!tileRootX.isFinite() || !tileRootY.isFinite() ||
+            !viewportRootX.isFinite() || !viewportRootY.isFinite() ||
+            !scrollYPx.isFinite() || !cellStepPx.isFinite() || cellStepPx <= 0f ||
+            columns !in listOf(4, 6, 8) || spanX !in 1..columns
+        ) return null
+        val column = ((tileRootX - viewportRootX - horizontalPaddingPx) / cellStepPx).roundToInt()
+        val row = ((tileRootY - viewportRootY + scrollYPx - topPaddingPx) / cellStepPx).roundToInt()
+        return if (column >= 0 && column + spanX <= columns && row in 0..60) column to row else null
+    }
+}
+
 private fun tileDisplayName(
     tile: TileEntity,
     installedApps: List<AppItem>,
@@ -173,9 +201,11 @@ private fun tileDisplayName(
     tile.hasBoundOrLinkedWidget() -> installedWidgets
         .firstOrNull { it.providerComponent == tile.widgetProvider }?.label
         ?.takeIf { it.isNotBlank() } ?: tile.title
-    tile.tileType == TileType.APP -> installedApps
-        .firstOrNull { it.packageName == tile.packageName }?.label
-        ?.takeIf { it.isNotBlank() } ?: tile.title
+    tile.tileType == TileType.APP -> if (tile.launcherIdentityState == "EXACT") {
+        installedApps.firstOrNull { it.launcherComponent == tile.launcherComponent &&
+            it.launcherUserSerial == tile.launcherUserSerial }?.label
+            ?.takeIf { it.isNotBlank() } ?: tile.title
+    } else tile.title
     else -> tile.title
 }
 
@@ -205,6 +235,12 @@ fun LumiaStartGrid(
     onNudgeTile: (String, Int, Int, Int) -> Unit,
     onReorderTiles: (Int, Int) -> Unit,
     onMoveTileToPage: (String, String) -> Unit,
+    onCrossPageDragStart: (String, Float, Float, Float, Float) -> Unit = { _, _, _, _, _ -> },
+    onCrossPageDragMove: (String, Float, Float) -> Unit = { _, _, _ -> },
+    onCrossPageDragEnd: (String) -> Boolean = { false },
+    onCrossPageGridGeometry: (HomePageDropGeometry) -> Unit = {},
+    onCrossPageDragCancel: (String) -> Unit = {},
+    crossPageDragCancelToken: Int = 0,
     onOpenWidgetSettings: (TileEntity) -> Unit = {},
     onPinNewTile: (TileEntity) -> Unit,
     onEnterEditMode: () -> Unit,
@@ -232,6 +268,8 @@ fun LumiaStartGrid(
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var dragVelX by remember { mutableFloatStateOf(0f) }
     var dragVelY by remember { mutableFloatStateOf(0f) }
+    var dragStartFingerX by remember { mutableFloatStateOf(0f) }
+    var dragStartFingerY by remember { mutableFloatStateOf(0f) }
 
     var resizingTileId by remember { mutableStateOf<String?>(null) }
     var resizeOffsetX by remember { mutableFloatStateOf(0f) }
@@ -251,33 +289,7 @@ fun LumiaStartGrid(
     }
 
     BoxWithConstraints(
-        modifier = modifier
-            .fillMaxSize()
-            .pointerInput(isEditMode, selectedTileId, settings.doubleTapToGlance) {
-                detectTapGestures(
-                    onTap = {
-                        when {
-                            selectedTileId != null -> onSelectTileForEdit(null)
-                            isEditMode -> onExitEditMode()
-                        }
-                    },
-                    onDoubleTap = {
-                        if (settings.doubleTapToGlance && !isEditMode && selectedTileId == null) {
-                            onOpenGlance()
-                        }
-                    },
-                    onLongPress = {
-                        if (selectedTileId != null) {
-                            // Đang sửa 1 tile mà bấm ra ngoài -> lưu & thoát chế độ sửa 1 tile
-                            onSelectTileForEdit(null)
-                        } else {
-                            // Long-pressing empty area enters Home Screen Edit Mode (One UI style)
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onEnterEditMode()
-                        }
-                    }
-                )
-            }
+        modifier = modifier.fillMaxSize()
     ) {
         val screenWidth = maxWidth
         val screenHeight = maxHeight
@@ -298,6 +310,20 @@ fun LumiaStartGrid(
         val unitSize = (availableContentWidth - (tileSpacing * (totalCols - 1))) / totalCols
         val cellStepDp = unitSize + tileSpacing
         val cellStepPx = with(density) { cellStepDp.toPx() }.coerceAtLeast(1f)
+        var gridViewportRoot by remember(currentPage.id) { mutableStateOf(Offset.Unspecified) }
+        val latestGeometryCallback by rememberUpdatedState(onCrossPageGridGeometry)
+        LaunchedEffect(currentPage.id, gridViewportRoot, scrollState.value, totalCols, cellStepPx) {
+            if (gridViewportRoot != Offset.Unspecified) {
+                latestGeometryCallback(
+                    HomePageDropGeometry(
+                        currentPage.id,
+                        gridViewportRoot.x, gridViewportRoot.y, scrollState.value.toFloat(),
+                        with(density) { horizontalPadding.toPx() },
+                        with(density) { topPadding.toPx() }, cellStepPx, totalCols
+                    )
+                )
+            }
+        }
 
         // Resolve deterministic 2D coordinates for each tile without auto-collapsing empty spaces
         val positionedTiles = remember(tiles, totalCols) {
@@ -418,6 +444,7 @@ fun LumiaStartGrid(
                         .weight(1f)
                         .fillMaxWidth()
                         .testTag("empty_home_page_${currentPage.id}")
+                        .onGloballyPositioned { gridViewportRoot = it.positionInRoot() }
                         .pointerInput(isEditMode, settings.doubleTapToGlance) {
                             detectTapGestures(
                                 onDoubleTap = {
@@ -436,42 +463,47 @@ fun LumiaStartGrid(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
+                        // Capture the viewport, not the scrolling content's translated origin.
+                        .onGloballyPositioned { gridViewportRoot = it.positionInRoot() }
                         .verticalScroll(scrollState)
                         .testTag(
                             if (tiles.isEmpty()) "empty_home_page_${currentPage.id}"
                             else "tiles_grid_${currentPage.id}"
                         )
-                        .pointerInput(isEditMode, selectedTileId, settings.doubleTapToGlance) {
-                            detectTapGestures(
-                                onTap = {
-                                    when {
-                                        selectedTileId != null -> onSelectTileForEdit(null)
-                                        isEditMode -> onExitEditMode()
-                                    }
-                                },
-                                onDoubleTap = {
-                                    if (settings.doubleTapToGlance && !isEditMode && selectedTileId == null) {
-                                        onOpenGlance()
-                                    }
-                                },
-                                onLongPress = {
-                                    if (selectedTileId != null) {
-                                        // Đang chỉnh sửa 1 tile mà bấm ra ngoài -> lưu cấu hình & thoát sửa tile
-                                        onSelectTileForEdit(null)
-                                    } else {
-                                        // Long-pressing empty area enters Home Screen Edit Mode
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onEnterEditMode()
-                                    }
-                                }
-                            )
-                        }
+
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(canvasHeight)
                     ) {
+                        // Blank Home background is a SIBLING, not an ancestor, of Tile input.
+                        // Its long-press cannot consume the Tile's DOWN or cancel a drag.
+                        Box(
+                            modifier = Modifier.matchParentSize()
+                                .pointerInput(isEditMode, selectedTileId, settings.doubleTapToGlance) {
+                                    detectTapGestures(
+                                        onTap = {
+                                            when {
+                                                selectedTileId != null -> onSelectTileForEdit(null)
+                                                isEditMode -> onExitEditMode()
+                                            }
+                                        },
+                                        onDoubleTap = {
+                                            if (settings.doubleTapToGlance && !isEditMode &&
+                                                selectedTileId == null
+                                            ) onOpenGlance()
+                                        },
+                                        onLongPress = {
+                                            if (selectedTileId != null) onSelectTileForEdit(null)
+                                            else {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                onEnterEditMode()
+                                            }
+                                        }
+                                    )
+                                }
+                        )
                         // Subtle 2D Grid Cell Guides shown when a single tile is being edited/dragged/resized or in Home Edit Mode
                         val showGridGuides = isEditMode || selectedTileOnThisPage != null || draggingTileId != null || resizingTileId != null
                         if (showGridGuides) {
@@ -704,6 +736,11 @@ fun LumiaStartGrid(
                                     targetTileHeight
                                 }
 
+                                // LayoutCoordinates tracks the real finger position in root space,
+                                // even when pager translation moves the source page offscreen.
+                                val tileCoords = remember(tile.id) { arrayOfNulls<LayoutCoordinates>(1) }
+                                val lastFingerRoot = remember(tile.id) { floatArrayOf(0f, 0f) }
+
                                 Box(
                                     modifier = Modifier
                                         .offset(x = animatedTileX, y = animatedTileY)
@@ -738,103 +775,7 @@ fun LumiaStartGrid(
                                                     }
                                             } else Modifier
                                         )
-                                        .then(
-                                            if (!settings.lockHomeLayout) {
-                                                if (isThisTileSelected) {
-                                                    // Already selected single tile: allow immediate drag without waiting for another long-press
-                                                    Modifier.pointerInput(tile.id, positioned.gridX, positioned.gridY, totalCols) {
-                                                        detectDragGestures(
-                                                            onDragStart = {
-                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                                draggingTileId = tile.id
-                                                                dragOffsetX = 0f
-                                                                dragOffsetY = 0f
-                                                                dragVelX = 0f
-                                                                dragVelY = 0f
-                                                            },
-                                                            onDragEnd = {
-                                                                val folderTarget = findManualFolderDropTarget(
-                                                                    positioned, positionedTiles, dragOffsetX, dragOffsetY, cellStepPx)
-                                                                val targetX = (positioned.gridX + (dragOffsetX / cellStepPx).roundToInt())
-                                                                    .coerceIn(0, (totalCols - positioned.spanX).coerceAtLeast(0))
-                                                                val targetY = (positioned.gridY + (dragOffsetY / cellStepPx).roundToInt())
-                                                                    .coerceIn(0, 60)
-                                                                draggingTileId = null
-                                                                dragOffsetX = 0f
-                                                                dragOffsetY = 0f
-                                                                dragVelX = 0f
-                                                                dragVelY = 0f
-                                                                if (folderTarget != null) onGroupTilesManually(tile.id, folderTarget.tile.id)
-                                                                else onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
-                                                            },
-                                                            onDragCancel = {
-                                                                draggingTileId = null
-                                                                dragOffsetX = 0f
-                                                                dragOffsetY = 0f
-                                                                dragVelX = 0f
-                                                                dragVelY = 0f
-                                                            },
-                                                            onDrag = { change, dragAmount ->
-                                                                change.consume()
-                                                                dragOffsetX += dragAmount.x
-                                                                dragOffsetY += dragAmount.y
-                                                                dragVelX = (dragVelX * 0.55f) + (dragAmount.x * 0.45f)
-                                                                dragVelY = (dragVelY * 0.55f) + (dragAmount.y * 0.45f)
-                                                            }
-                                                        )
-                                                    }
-                                                } else if (selectedTileId == null) {
-                                                    // Long-press on a tile when NO tile is currently being edited: selects ONLY this 1 tile AND allows immediate free 2D drag
-                                                    Modifier.pointerInput(tile.id, positioned.gridX, positioned.gridY, totalCols) {
-                                                        detectDragGesturesAfterLongPress(
-                                                            onDragStart = {
-                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                                onSelectTileForEdit(tile.id)
-                                                                draggingTileId = tile.id
-                                                                dragOffsetX = 0f
-                                                                dragOffsetY = 0f
-                                                                dragVelX = 0f
-                                                                dragVelY = 0f
-                                                            },
-                                                            onDragEnd = {
-                                                                val folderTarget = findManualFolderDropTarget(
-                                                                    positioned, positionedTiles, dragOffsetX, dragOffsetY, cellStepPx)
-                                                                val deltaCellsX = (dragOffsetX / cellStepPx).roundToInt()
-                                                                val deltaCellsY = (dragOffsetY / cellStepPx).roundToInt()
-                                                                val targetX = (positioned.gridX + deltaCellsX)
-                                                                    .coerceIn(0, (totalCols - positioned.spanX).coerceAtLeast(0))
-                                                                val targetY = (positioned.gridY + deltaCellsY)
-                                                                    .coerceIn(0, 60)
-                                                                draggingTileId = null
-                                                                dragOffsetX = 0f
-                                                                dragOffsetY = 0f
-                                                                dragVelX = 0f
-                                                                dragVelY = 0f
-                                                                if (folderTarget != null) {
-                                                                    onGroupTilesManually(tile.id, folderTarget.tile.id)
-                                                                } else if (deltaCellsX != 0 || deltaCellsY != 0) {
-                                                                    onMoveTileToGrid(tile.id, targetX, targetY, totalCols)
-                                                                }
-                                                            },
-                                                            onDragCancel = {
-                                                                draggingTileId = null
-                                                                dragOffsetX = 0f
-                                                                dragOffsetY = 0f
-                                                                dragVelX = 0f
-                                                                dragVelY = 0f
-                                                            },
-                                                            onDrag = { change, dragAmount ->
-                                                                change.consume()
-                                                                dragOffsetX += dragAmount.x
-                                                                dragOffsetY += dragAmount.y
-                                                                dragVelX = (dragVelX * 0.55f) + (dragAmount.x * 0.45f)
-                                                                dragVelY = (dragVelY * 0.55f) + (dragAmount.y * 0.45f)
-                                                            }
-                                                        )
-                                                    }
-                                                } else Modifier
-                                            } else Modifier
-                                        )
+
                                 ) {
                                     val tileCenterFractionX = ((baseTileX + (baseTileWidth / 2f)) / screenWidth.coerceAtLeast(1.dp))
                                         .coerceIn(0.12f, 0.88f)
@@ -845,6 +786,76 @@ fun LumiaStartGrid(
 
                                     TileView(
                                         tile = tile,
+                                        modifier = Modifier.fillMaxSize().onGloballyPositioned { tileCoords[0] = it },
+                                        dragCallbacks = if (!settings.lockHomeLayout &&
+                                            (selectedTileId == null || isThisTileSelected)
+                                        ) MetroTileDragCallbacks(
+                                            cancelToken = crossPageDragCancelToken,
+                                            onStart = { local ->
+                                                val root = tileCoords[0]?.localToRoot(local) ?: Offset(
+                                                    gridViewportRoot.x + with(density) { baseTileX.toPx() } + local.x,
+                                                    gridViewportRoot.y + with(density) { baseTileY.toPx() } +
+                                                        local.y - scrollState.value
+                                                )
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                draggingTileId = tile.id
+                                                dragOffsetX = 0f
+                                                dragOffsetY = 0f
+                                                dragVelX = 0f
+                                                dragVelY = 0f
+                                                lastFingerRoot[0] = root.x
+                                                lastFingerRoot[1] = root.y
+                                                onCrossPageDragStart(
+                                                    tile.id, root.x, root.y, local.x, local.y
+                                                )
+                                            },
+                                            onMove = { local ->
+                                                val root = tileCoords[0]?.localToRoot(local)
+                                                    ?: Offset(lastFingerRoot[0], lastFingerRoot[1])
+                                                val dx = root.x - lastFingerRoot[0]
+                                                val dy = root.y - lastFingerRoot[1]
+                                                if (dx.isFinite() && dy.isFinite()) {
+                                                    dragOffsetX += dx
+                                                    dragOffsetY += dy
+                                                    dragVelX = dragVelX * 0.55f + dx * 0.45f
+                                                    dragVelY = dragVelY * 0.55f + dy * 0.45f
+                                                    lastFingerRoot[0] = root.x
+                                                    lastFingerRoot[1] = root.y
+                                                    onCrossPageDragMove(tile.id, root.x, root.y)
+                                                }
+                                            },
+                                            onEnd = {
+                                                val target = findManualFolderDropTarget(
+                                                    positioned, positionedTiles,
+                                                    dragOffsetX, dragOffsetY, cellStepPx
+                                                )
+                                                val deltaX = (dragOffsetX / cellStepPx).roundToInt()
+                                                val deltaY = (dragOffsetY / cellStepPx).roundToInt()
+                                                val gx = (positioned.gridX + deltaX)
+                                                    .coerceIn(0, (totalCols - positioned.spanX).coerceAtLeast(0))
+                                                val gy = (positioned.gridY + deltaY).coerceIn(0, 60)
+                                                draggingTileId = null
+                                                dragOffsetX = 0f
+                                                dragOffsetY = 0f
+                                                dragVelX = 0f
+                                                dragVelY = 0f
+                                                val across = onCrossPageDragEnd(tile.id)
+                                                if (!across) {
+                                                    if (target != null) onGroupTilesManually(tile.id, target.tile.id)
+                                                    else if (deltaX != 0 || deltaY != 0)
+                                                        onMoveTileToGrid(tile.id, gx, gy, totalCols)
+                                                }
+                                                onSelectTileForEdit(if (across) null else tile.id)
+                                            },
+                                            onCancel = {
+                                                onCrossPageDragCancel(tile.id)
+                                                draggingTileId = null
+                                                dragOffsetX = 0f
+                                                dragOffsetY = 0f
+                                                dragVelX = 0f
+                                                dragVelY = 0f
+                                            }
+                                        ) else null,
                                         settings = settings,
                                         telemetry = telemetry,
                                         isTileSelected = isThisTileSelected,
@@ -953,7 +964,6 @@ fun LumiaStartGrid(
                                         onReplaceMissingWidget = { targetTile ->
                                             onRequestRebindWidget(targetTile)
                                         },
-                                        modifier = Modifier.fillMaxSize()
                                     )
                                 }
                             }
@@ -1374,7 +1384,7 @@ fun LumiaStartGrid(
 
                             }
                         }
-                        items(filteredAppsForTile, key = { "app:${it.packageName}" }, contentType = { "app" }) { app ->
+                        items(filteredAppsForTile, key = { it.drawerKey }, contentType = { "app" }) { app ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1385,6 +1395,9 @@ fun LumiaStartGrid(
                                         title = app.label,
                                         packageName = app.packageName,
                                         tileType = TileType.APP,
+                                        launcherComponent = app.launcherComponent,
+                                        launcherUserSerial = app.launcherUserSerial,
+                                        launcherIdentityState = "EXACT",
                                         size = selectedNewAppTileSize,
                                         orderIndex = tiles.size,
                                         pageId = currentPage.id,

@@ -679,6 +679,23 @@ class LauncherViewModel(
         }
     }
 
+    fun moveTileToPageAtGridPosition(
+        tileId: String,
+        targetPageId: String,
+        gridX: Int,
+        gridY: Int,
+        totalCols: Int = 4,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        if (_settings.value.lockHomeLayout) {
+            onResult(false)
+            return
+        }
+        viewModelScope.launch {
+            onResult(repository.moveTileToPageAtGridPosition(tileId, targetPageId, gridX, gridY, totalCols))
+        }
+    }
+
     fun pinAppToPage(app: AppItem, pageId: String = _settings.value.defaultHomePageId) {
         viewModelScope.launch {
             repository.pinApp(app, pageId)
@@ -818,8 +835,18 @@ class LauncherViewModel(
         }
     }
 
-    fun launchApp(packageName: String) {
-        repository.launchApp(packageName)
+    fun launchApp(packageName: String): Boolean = repository.launchApp(packageName)
+
+    fun launchApp(app: AppItem): Boolean = repository.launchApp(app)
+
+    fun launchTile(tile: TileEntity): Boolean = repository.launchTile(tile)
+
+    fun rebindAppTile(tileId: String, app: AppItem, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val success = repository.rebindAppTile(tileId, app)
+            if (success) refreshApps()
+            onResult(success)
+        }
     }
 
     fun optimizeMemory(): SystemTelemetry {
