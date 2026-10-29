@@ -784,7 +784,7 @@ fun LumiaStartGrid(
 
                                     TileView(
                                         tile = tile,
-                                        modifier = Modifier.onGloballyPositioned { tileCoords[0] = it },
+                                        modifier = Modifier.fillMaxSize().onGloballyPositioned { tileCoords[0] = it },
                                         dragCallbacks = if (!settings.lockHomeLayout &&
                                             (selectedTileId == null || isThisTileSelected)
                                         ) MetroTileDragCallbacks(
@@ -962,7 +962,6 @@ fun LumiaStartGrid(
                                         onReplaceMissingWidget = { targetTile ->
                                             onRequestRebindWidget(targetTile)
                                         },
-                                        modifier = Modifier.fillMaxSize()
                                     )
                                 }
                             }
