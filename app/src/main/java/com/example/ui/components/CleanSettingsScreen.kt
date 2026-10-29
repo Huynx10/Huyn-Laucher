@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +30,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,8 +45,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private enum class CleanSection(val label: String) {
-    HOME("Màn hình chính"), APPS("Danh sách ứng dụng"),
-    WIDGETS("Widget"), BACKUP("Sao lưu và khôi phục")
+    HOME("Màn hình chính"), APPS("Ứng dụng"),
+    WIDGETS("Widget"), BACKUP("Sao lưu")
 }
 private val bg = Color(0xFF131316)
 private val primary = Color(0xFFF7F7F8)
@@ -80,7 +83,8 @@ fun CleanSettingsScreen(
     var opacity by remember(settings.tileOpacity) { mutableFloatStateOf(settings.tileOpacity) }
     val accent = LumiaPalette.resolveEffectiveAccent(settings).color
 
-    fun back() { if (!busy) { if (section == null) onDismiss() else section = null } }
+    fun back() { if (!busy && !isSavingSettings) { if (section == null) onDismiss() else section = null } }
+    fun close() { if (!busy && !isSavingSettings) onDismiss() }
     BackHandler { back() }
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
     fun chooseHome() {
@@ -101,20 +105,8 @@ fun CleanSettingsScreen(
     MaterialTheme(colorScheme = darkColorScheme(primary = accent, background = bg, surface = bg)) {
     Box(Modifier.fillMaxSize().background(bg).statusBarsPadding().navigationBarsPadding()
         .testTag("clean_settings_screen")) {
-        Column {
-            Row(
-                Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = ::back, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Quay lại", tint = primary)
-                }
-                Text(section?.label ?: "Cài đặt", fontSize = 23.sp, fontWeight = FontWeight.SemiBold,
-                    color = primary, modifier = Modifier.weight(1f).padding(start = 8.dp))
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Default.Close, "Đóng cài đặt", tint = primary)
-                }
-            }
+        Column(modifier = if (busy || isSavingSettings) Modifier.clearAndSetSemantics {} else Modifier) {
+            SettingsHeader(section?.label ?: "Cài đặt", ::back, ::close)
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -122,19 +114,20 @@ fun CleanSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 if (section == null) {
-                    item { Hint("Chọn cách hiển thị màn hình và ứng dụng.") }
+                    item { Hint("Tùy chỉnh màn hình chính và ứng dụng.") }
                     CleanSection.entries.forEach { group ->
                         item(key = group.name) {
                             SettingAction(group.label, when (group) {
                                 CleanSection.HOME -> "Bố cục, Tile và chuyển trang"
-                                CleanSection.APPS -> "A–Z, tìm kiếm và nhóm"
-                                CleanSection.WIDGETS -> "Nội dung thật từ ứng dụng"
+                                CleanSection.APPS -> "A–Z, biểu tượng và kiểu hiển thị"
+                                CleanSection.WIDGETS -> "Widget từ ứng dụng đã cài"
                                 CleanSection.BACKUP -> "Sao lưu và khôi phục bố cục"
                             }, { section = group }, card = true)
                         }
                     }
                     item { Spacer(Modifier.height(12.dp)) }
-                    item { SettingAction("Tùy chỉnh nâng cao", "Hiệu ứng và các tùy chọn khác", onOpenAdvanced) }
+                    item { SettingAction("Tùy chỉnh nâng cao", "Hiệu ứng và các tùy chọn khác",
+                        { if (!busy && !isSavingSettings) onOpenAdvanced() }) }
                 }
                 when (section) {
                     CleanSection.HOME -> {
@@ -184,7 +177,7 @@ fun CleanSettingsScreen(
                     CleanSection.WIDGETS -> {
                         item { Heading("Widget thật từ ứng dụng") }
                         item { Hint("Lumia sử dụng widget từ các ứng dụng đã cài. Android sẽ yêu cầu xác nhận nếu cần.") }
-                        item { SettingAction("Thêm widget", "Trên Home, nhấn giữ vùng trống rồi chọn Thêm ô", onDismiss) }
+                        item { SettingAction("Thêm widget", "Trên Home, nhấn giữ vùng trống rồi chọn Thêm ô", ::close) }
                         item { SettingAction("Đặt làm màn hình chính", "Dùng Lumia khi nhấn nút Home", ::chooseHome) }
                     }
                     CleanSection.BACKUP -> {
@@ -247,6 +240,7 @@ fun CleanSettingsScreen(
         if (busy || isSavingSettings) {
             Box(
                 modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+                    .pointerInput(Unit) { detectTapGestures { } }
                     .testTag("settings_loading"),
                 contentAlignment = Alignment.Center
             ) {
