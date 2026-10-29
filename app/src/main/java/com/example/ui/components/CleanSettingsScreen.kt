@@ -42,8 +42,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private enum class CleanSection(val label: String) {
-    HOME("Màn hình chính"), APPS("Danh sách ứng dụng"),
-    WIDGETS("Widget"), BACKUP("Sao lưu và khôi phục")
+    HOME("Màn hình chính"), APPS("Ứng dụng"),
+    WIDGETS("Widget"), BACKUP("Sao lưu")
 }
 private val bg = Color(0xFF131316)
 private val primary = Color(0xFFF7F7F8)
@@ -80,7 +80,8 @@ fun CleanSettingsScreen(
     var opacity by remember(settings.tileOpacity) { mutableFloatStateOf(settings.tileOpacity) }
     val accent = LumiaPalette.resolveEffectiveAccent(settings).color
 
-    fun back() { if (!busy) { if (section == null) onDismiss() else section = null } }
+    fun back() { if (!busy && !isSavingSettings) { if (section == null) onDismiss() else section = null } }
+    fun close() { if (!busy && !isSavingSettings) onDismiss() }
     BackHandler { back() }
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
     fun chooseHome() {
@@ -102,19 +103,7 @@ fun CleanSettingsScreen(
     Box(Modifier.fillMaxSize().background(bg).statusBarsPadding().navigationBarsPadding()
         .testTag("clean_settings_screen")) {
         Column {
-            Row(
-                Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = ::back, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Quay lại", tint = primary)
-                }
-                Text(section?.label ?: "Cài đặt", fontSize = 23.sp, fontWeight = FontWeight.SemiBold,
-                    color = primary, modifier = Modifier.weight(1f).padding(start = 8.dp))
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Default.Close, "Đóng cài đặt", tint = primary)
-                }
-            }
+            SettingsHeader(section?.label ?: "Cài đặt", ::back, ::close)
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -122,13 +111,13 @@ fun CleanSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 if (section == null) {
-                    item { Hint("Chọn cách hiển thị màn hình và ứng dụng.") }
+                    item { Hint("Tùy chỉnh màn hình chính và ứng dụng.") }
                     CleanSection.entries.forEach { group ->
                         item(key = group.name) {
                             SettingAction(group.label, when (group) {
                                 CleanSection.HOME -> "Bố cục, Tile và chuyển trang"
-                                CleanSection.APPS -> "A–Z, tìm kiếm và nhóm"
-                                CleanSection.WIDGETS -> "Nội dung thật từ ứng dụng"
+                                CleanSection.APPS -> "A–Z, biểu tượng và kiểu hiển thị"
+                                CleanSection.WIDGETS -> "Widget từ ứng dụng đã cài"
                                 CleanSection.BACKUP -> "Sao lưu và khôi phục bố cục"
                             }, { section = group }, card = true)
                         }

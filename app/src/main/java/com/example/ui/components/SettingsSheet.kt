@@ -96,10 +96,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -116,6 +116,7 @@ import com.example.data.remote.CloudBackup
 import com.example.ui.theme.DynamicAccentEngine
 import com.example.ui.theme.LumiaPalette
 import com.example.ui.viewmodel.CloudAuthState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -163,8 +164,22 @@ fun SettingsSheet(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var selectedTab by remember { mutableStateOf<SettingsCategoryTab?>(null) }
-    BackHandler { if (selectedTab != null) selectedTab = null else onDismiss() }
+    var selectedTab by remember { mutableStateOf(SettingsCategoryTab.WALLPAPER_COLOR) }
+    var backupBusy by remember { mutableStateOf(false) }
+    fun back() { if (!backupBusy) onDismiss() }
+    fun close() { if (!backupBusy) onDismiss() }
+    fun runBackup(action: suspend () -> Unit) {
+        if (backupBusy) return
+        backupBusy = true
+        coroutineScope.launch {
+            try { action() }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                Toast.makeText(context, "Không thực hiện được. Hãy thử lại.", Toast.LENGTH_SHORT).show()
+            } finally { backupBusy = false }
+        }
+    }
+    BackHandler { back() }
 
     var selectedAccentHex by remember(settings.accentColorHex) { mutableStateOf(settings.accentColorHex) }
     var autoWallpaperAccent by remember(settings.autoWallpaperAccentEnabled) { mutableStateOf(settings.autoWallpaperAccentEnabled) }
@@ -342,83 +357,50 @@ fun SettingsSheet(
                     modifier = Modifier
                         .fillMaxSize()
                 ) {
-                    // Shared Settings header dimensions and typography.
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(64.dp)
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { if (selectedTab == null) onDismiss() else selectedTab = null },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Quay lại", tint = Color.White)
-                        }
-                        Text(
-                            text = selectedTab?.title ?: "Tùy chỉnh nâng cao",
-                            color = Color.White,
-                            fontSize = 23.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f).padding(start = 8.dp)
-                        )
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Default.Close, "Đóng cài đặt", tint = Color.White)
-                        }
-                    }
+                    SettingsHeader(selectedTab.title, ::back, ::close, "Đóng tùy chỉnh nâng cao")
 
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                itemsIndexed(SettingsCategoryTab.entries) { _, category ->
+                    OutlinedButton(
+                        onClick = { selectedTab = category },
+                        modifier = Modifier.heightIn(min = 48.dp).testTag(category.tag)
+                            .semantics { selected = selectedTab == category },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (selectedTab == category) accent.color.copy(alpha = 0.22f)
+                                else Color.Transparent,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(category.icon, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(category.title)
+                    }
+                }
+            }
 
             // Active Tab Content (Focused, clean, minimal scrolling)
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = 14.dp)
+                    .testTag("settings_advanced_content"),
                 contentPadding = PaddingValues(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 when (selectedTab) {
-                    null -> {
-                        item(key = "settings_home") {
-                            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                                SettingsCategoryTab.entries.forEachIndexed { index, category ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth()
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .clickable { selectedTab = category }
-                                            .padding(horizontal = 16.dp, vertical = 17.dp)
-                                            .testTag(category.tag),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(category.icon, contentDescription = null, tint = accent.color, modifier = Modifier.size(24.dp))
-                                        Spacer(Modifier.width(16.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(category.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                            val subtitle = when (category) {
-                                                SettingsCategoryTab.WALLPAPER_COLOR -> "Theo hệ thống, màu sắc, giao diện tối"
-                                                SettingsCategoryTab.TILES_LAYOUT -> "Sắp xếp ô, kích thước và hiệu ứng"
-                                                SettingsCategoryTab.APP_DRAWER -> "Danh sách A–Z, tìm kiếm và nhóm"
-                                                SettingsCategoryTab.BATTERY_SYSTEM -> "Sao lưu, pin và cài đặt mặc định"
-                                            }
-                                            Text(subtitle, color = Color.White.copy(alpha = 0.64f), fontSize = 12.sp)
-                                        }
-                                        Text("›", color = Color.White.copy(alpha = 0.54f), fontSize = 25.sp)
-                                    }
-                                    if (index < SettingsCategoryTab.entries.lastIndex) {
-                                        HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
-                                    }
-                                }
-                            }
-                        }
-                    }
                     SettingsCategoryTab.WALLPAPER_COLOR -> {
                         item {
                             MinimalGroupCard(title = "HÌNH NỀN") {
                                 // Custom Photo Picker & System Wallpaper Actions
-                                Row(
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Button(
                                         onClick = {
@@ -430,7 +412,7 @@ fun SettingsSheet(
                                         shape = RoundedCornerShape(12.dp),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                         modifier = Modifier
-                                            .weight(1f)
+                                            .fillMaxWidth()
                                             .testTag("pick_custom_wallpaper_button")
                                     ) {
                                         Icon(
@@ -454,7 +436,7 @@ fun SettingsSheet(
                                         shape = RoundedCornerShape(12.dp),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                         modifier = Modifier
-                                            .weight(1f)
+                                            .fillMaxWidth()
                                             .testTag("open_system_wallpaper_button")
                                     ) {
                                         Icon(
@@ -549,6 +531,10 @@ fun SettingsSheet(
                                                     wallpaperSource = WallpaperSource.LUMIA
                                                     applyChanges()
                                                 }
+                                                .semantics {
+                                                    contentDescription = pair.first
+                                                    selected = isSelected
+                                                }
                                                 .padding(5.dp)
                                                 .testTag("wallpaper_option_$idx"),
                                             horizontalAlignment = Alignment.CenterHorizontally
@@ -575,8 +561,7 @@ fun SettingsSheet(
                                                 text = pair.first,
                                                 color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
                                                 fontSize = 10.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                                textAlign = TextAlign.Center
                                             )
                                         }
                                     }
@@ -623,6 +608,8 @@ fun SettingsSheet(
                                                             dynamicAccentMode = mode
                                                             applyChanges()
                                                         }
+                                                        .heightIn(min = 48.dp)
+                                                        .semantics { selected = isModeSelected }
                                                         .padding(vertical = 7.dp)
                                                         .testTag("dynamic_accent_mode_${mode.name.lowercase()}"),
                                                     contentAlignment = Alignment.Center
@@ -632,7 +619,7 @@ fun SettingsSheet(
                                                         color = if (isModeSelected) Color.White else Color.White.copy(alpha = 0.7f),
                                                         fontSize = 10.sp,
                                                         fontWeight = if (isModeSelected) FontWeight.Bold else FontWeight.Medium,
-                                                        maxLines = 1
+                                                        textAlign = TextAlign.Center
                                                     )
                                                 }
                                             }
@@ -660,6 +647,8 @@ fun SettingsSheet(
                                                             selectedAccentHex = swatch.hex
                                                             applyChanges()
                                                         }
+                                                        .heightIn(min = 48.dp)
+                                                        .semantics { selected = isSwatchSelected }
                                                         .padding(vertical = 7.dp, horizontal = 6.dp)
                                                         .testTag("dynamic_wallpaper_swatch_$sIdx"),
                                                     verticalAlignment = Alignment.CenterVertically,
@@ -676,7 +665,7 @@ fun SettingsSheet(
                                                         text = swatch.name,
                                                         color = Color.White,
                                                         fontSize = 10.sp,
-                                                        maxLines = 1
+                                                        textAlign = TextAlign.Center
                                                     )
                                                 }
                                             }
@@ -700,7 +689,7 @@ fun SettingsSheet(
                                             item.hex.equals(selectedAccentHex, ignoreCase = true)
                                         Box(
                                             modifier = Modifier
-                                                .size(34.dp)
+                                                .size(48.dp)
                                                 .clip(CircleShape)
                                                 .background(item.color)
                                                 .border(
@@ -712,6 +701,10 @@ fun SettingsSheet(
                                                     autoWallpaperAccent = false
                                                     selectedAccentHex = item.hex
                                                     applyChanges()
+                                                }
+                                                .semantics {
+                                                    contentDescription = item.name
+                                                    selected = isSelected
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -791,7 +784,6 @@ fun SettingsSheet(
                                                 color = Color.White,
                                                 fontSize = 13.sp,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                maxLines = 2,
                                                 textAlign = TextAlign.Center,
                                                 modifier = Modifier.padding(horizontal = 6.dp)
                                             )
@@ -1217,9 +1209,9 @@ fun SettingsSheet(
                         // 3. Default Launcher & Cloud Sync / Backup
                         item {
                             MinimalGroupCard(title = "MÀN HÌNH CHÍNH MẶC ĐỊNH & ĐÁM MÂY") {
-                                Row(
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Button(
                                         onClick = { requestSetDefaultLauncher() },
@@ -1228,7 +1220,7 @@ fun SettingsSheet(
                                         ),
                                         shape = RoundedCornerShape(10.dp),
                                         modifier = Modifier
-                                            .weight(1f)
+                                            .fillMaxWidth()
                                             .testTag("set_default_launcher_button")
                                     ) {
                                         Icon(
@@ -1247,7 +1239,7 @@ fun SettingsSheet(
                                     OutlinedButton(
                                         onClick = { openSystemDefaultLauncherSettings() },
                                         shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.testTag("open_home_settings_button")
+                                        modifier = Modifier.fillMaxWidth().testTag("open_home_settings_button")
                                     ) {
                                         Text(
                                             text = "Cài đặt Home",
@@ -1363,13 +1355,13 @@ fun SettingsSheet(
                                                             color = Color.White,
                                                             fontSize = 11.sp,
                                                             fontWeight = FontWeight.SemiBold,
-                                                            maxLines = 1
+                                                            textAlign = TextAlign.Start
                                                         )
                                                         Text(
                                                             text = "${backup.tileCount} ô • ${backup.deviceName}",
                                                             color = Color.White.copy(alpha = 0.55f),
                                                             fontSize = 10.sp,
-                                                            maxLines = 1
+                                                            textAlign = TextAlign.Start
                                                         )
                                                     }
                                                     Row {
@@ -1429,21 +1421,21 @@ fun SettingsSheet(
                                 }
 
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Row(
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     OutlinedButton(
                                         onClick = {
-                                            coroutineScope.launch {
+                                            runBackup {
                                                 val json = onExportBackup()
                                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                                 clipboard.setPrimaryClip(ClipData.newPlainText("LumiaBackup", json))
-                                                Toast.makeText(context, "Đã sao chép JSON sao lưu vào bộ nhớ tạm", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, "Đã sao chép bản sao lưu", Toast.LENGTH_SHORT).show()
                                             }
                                         },
                                         shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.ContentCopy,
@@ -1458,7 +1450,7 @@ fun SettingsSheet(
                                     OutlinedButton(
                                         onClick = { showRestoreDialog = !showRestoreDialog },
                                         shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Restore,
@@ -1490,13 +1482,13 @@ fun SettingsSheet(
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Button(
                                                 onClick = {
-                                                    coroutineScope.launch {
+                                                    runBackup {
                                                         val ok = onRestoreBackup(restoreJsonInput)
                                                         if (ok) {
                                                             Toast.makeText(context, "Đã khôi phục bố cục", Toast.LENGTH_SHORT).show()
                                                             onDismiss()
                                                         } else {
-                                                            Toast.makeText(context, "JSON không hợp lệ", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, "Bản sao lưu không hợp lệ", Toast.LENGTH_SHORT).show()
                                                         }
                                                     }
                                                 },
@@ -1515,10 +1507,51 @@ fun SettingsSheet(
             }
             }
         }
+        if (backupBusy) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+                    .testTag("settings_loading"),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = accent.color)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Đang xử lý bản sao lưu…", color = Color.White)
+                }
+            }
+        }
     }
 }
 }
 
+}
+
+@Composable
+internal fun SettingsHeader(
+    title: String,
+    onBack: () -> Unit,
+    onClose: () -> Unit,
+    closeDescription: String = "Đóng cài đặt"
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Quay lại", tint = Color.White)
+        }
+        Text(
+            title,
+            color = Color.White,
+            fontSize = 23.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f).padding(start = 8.dp)
+        )
+        IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
+            Icon(Icons.Default.Close, closeDescription, tint = Color.White)
+        }
+    }
 }
 
 @Composable
