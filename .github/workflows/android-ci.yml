@@ -55,16 +55,16 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
           test -n "$AAPT"
           "$AAPT" dump badging "$APK" > /tmp/lumia-trial-badging.txt
-          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.trial6'" /tmp/lumia-trial-badging.txt
-          # A temporary debug key must never be presented as an in-place Trial 5 upgrade.
+          grep -Fq "package: name='com.aistudio.lumialauncher.wp10m.trial7'" /tmp/lumia-trial-badging.txt
+          # A new temporary debug key must never be presented as an in-place Trial 6 upgrade.
           # Verify the actual APK binary's distinct identity, version and launcher label.
-          grep -Fq "versionName='1.1.0-beta3-s24-trial6'" /tmp/lumia-trial-badging.txt
-          grep -Fq "application-label:'Lumia Trial 6'" /tmp/lumia-trial-badging.txt
+          grep -Fq "versionName='1.1.0-beta3-s24-trial7'" /tmp/lumia-trial-badging.txt
+          grep -Fq "application-label:'Lumia Trial 7'" /tmp/lumia-trial-badging.txt
           sha256sum "$APK"
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lumia-launcher-s24-trial6-apk
+          name: lumia-launcher-s24-trial7-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
