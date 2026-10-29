@@ -33,6 +33,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +78,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -91,6 +94,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -133,6 +137,29 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+/**
+ * The edge timer is scoped to an active pointer session. Adjacent non-HOME pages
+ * are never drag destinations. Awaiting 550ms here is cancellable by Compose
+ * LaunchedEffect when the pointer changes edge or is released; no idle polling.
+ */
+internal suspend fun awaitHomeEdgeDwell(
+    pages: List<LauncherPage>,
+    currentIndex: Int,
+    direction: Int,
+    isStillHeld: () -> Boolean,
+    scrollToPage: suspend (Int) -> Unit
+): Boolean {
+    if (direction !in -1..1 || direction == 0 ||
+        pages.getOrNull(currentIndex)?.pageType != PageType.HOME
+    ) return false
+    val target = currentIndex + direction
+    if (pages.getOrNull(target)?.pageType != PageType.HOME) return false
+    delay(550)
+    if (!isStillHeld()) return false
+    scrollToPage(target)
+    return true
+}
 
 class MainActivity : ComponentActivity() {
     private val viewModel: LauncherViewModel by viewModels { LauncherViewModel.Factory }
@@ -459,6 +486,9 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     var draggingHomeTileId by remember { mutableStateOf<String?>(null) }
     var draggingHomeTileSourcePageId by remember { mutableStateOf<String?>(null) }
     var crossPageDragCancelToken by remember { mutableIntStateOf(0) }
+    // The root (not a lazy pager page) tracks the finger until physical UP.
+    var rootDragFingerDown by remember { mutableStateOf(false) }
+    var rootFinishedAcrossTileId by remember { mutableStateOf<String?>(null) }
     var dragFingerX by remember { mutableFloatStateOf(0.5f) }
     var dragFingerY by remember { mutableFloatStateOf(0.5f) }
     var dragFingerRootX by remember { mutableFloatStateOf(0f) }
@@ -485,22 +515,83 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         else -> 0
     }
 
-    // Hover deliberately at the edge to visit the adjacent HOME page without lifting.
-    // Only active while dragging: no polling or background work when idle.
-    LaunchedEffect(draggingHomeTileId, dragEdgeDirection, pagerState.currentPage) {
+    // Edge dwell is driven by the parent-owned finger position, not the source
+    // composable's local coordinate (which moves when the pager changes pages).
+    LaunchedEffect(draggingHomeTileId, dragEdgeDirection, pagerState.currentPage, pages) {
         val activeTileId = draggingHomeTileId
         val direction = dragEdgeDirection
-        if (activeTileId != null && direction != 0) {
-            delay(550)
-            val next = pagerState.currentPage + direction
-            if (draggingHomeTileId == activeTileId &&
-                dragEdgeDirection == direction &&
-                pages.getOrNull(next)?.pageType == PageType.HOME
-            ) {
-                pagerState.scrollToPage(next)
-            }
+        if (activeTileId != null && rootDragFingerDown && direction != 0) {
+            val originalPage = pagerState.currentPage
+            awaitHomeEdgeDwell(pages, originalPage, direction,
+                isStillHeld = {
+                    rootDragFingerDown && draggingHomeTileId == activeTileId &&
+                        dragEdgeDirection == direction && pagerState.currentPage == originalPage &&
+                        !settings.lockHomeLayout
+                },
+                scrollToPage = { pagerState.scrollToPage(it) }
+            )
         }
     }
+
+    fun cancelCrossPageDrag(restoreSource: Boolean) {
+        val sourceIndex = pages.indexOfFirst { it.id == draggingHomeTileSourcePageId }
+        draggingHomeTileId = null
+        draggingHomeTileSourcePageId = null
+        if (restoreSource && sourceIndex >= 0 && sourceIndex != pagerState.currentPage) {
+            coroutineScope.launch { pagerState.scrollToPage(sourceIndex) }
+        }
+    }
+
+    /**
+     * Called on physical UP by the persistent root observer. The lazy source
+     * pointer node may have been disposed at page switch, so it cannot own commit.
+     * An invalid/full target never edits Room and returns to the source page.
+     */
+    fun finishCrossPageDrag(tileId: String): Boolean {
+        if (draggingHomeTileId != tileId) return rootFinishedAcrossTileId == tileId
+        val source = draggingHomeTileSourcePageId
+        val target = pages.getOrNull(pagerState.currentPage)
+        val crossed = source != null && target?.pageType == PageType.HOME &&
+            target.id != source
+        if (crossed && !settings.lockHomeLayout && target != null) {
+            rootFinishedAcrossTileId = tileId
+            val geometry = homeDropGeometries[target.id]
+            val tile = tiles.firstOrNull { it.id == tileId }
+            val dropCell = if (geometry != null && tile != null) {
+                geometry.resolveDrop(
+                    dragFingerRootX - dragGrabOffsetX,
+                    dragFingerRootY - dragGrabOffsetY,
+                    tile.effectiveSpanX(geometry.columns)
+                )
+            } else null
+            if (dropCell != null && geometry != null) {
+                viewModel.moveTileToPageAtGridPosition(
+                    tileId, target.id, dropCell.first, dropCell.second, geometry.columns
+                ) { moved ->
+                    if (!moved) {
+                        Toast.makeText(context, "Vị trí này không trống. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
+                        val sourceIndex = pages.indexOfFirst { it.id == source }
+                        if (sourceIndex >= 0) coroutineScope.launch { pagerState.scrollToPage(sourceIndex) }
+                    }
+                }
+                viewModel.clearSelectedTile()
+                cancelCrossPageDrag(restoreSource = false)
+            } else {
+                Toast.makeText(context, "Vị trí thả không hợp lệ. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
+                cancelCrossPageDrag(restoreSource = true)
+            }
+            return true
+        }
+        if (crossed) {
+            rootFinishedAcrossTileId = tileId // Consume, never apply a local move on invalid drop.
+            cancelCrossPageDrag(restoreSource = true)
+            return true
+        }
+        cancelCrossPageDrag(restoreSource = false)
+        return false
+    }
+    val latestFinishCrossPageDrag = rememberUpdatedState<(String) -> Boolean>({ finishCrossPageDrag(it) })
+    val latestUpdateFingerRoot = rememberUpdatedState<(Float, Float) -> Unit>({ x, y -> updateFingerRoot(x, y) })
 
     // Back press handling: exit Action Center -> exit Smart Folder -> exit Glance -> deselect single tile -> exit Home Edit Mode -> return to Default Home Page
     BackHandler(
@@ -508,11 +599,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     ) {
         when {
             draggingHomeTileId != null -> {
-                val sourceIndex = pages.indexOfFirst { it.id == draggingHomeTileSourcePageId }
-                draggingHomeTileId = null
-                draggingHomeTileSourcePageId = null
-                crossPageDragCancelToken++ // cancel the source pointer node before finger-up
-                if (sourceIndex >= 0) coroutineScope.launch { pagerState.scrollToPage(sourceIndex) }
+                crossPageDragCancelToken++ // cancel source drag recognizer without committing
+                cancelCrossPageDrag(restoreSource = true)
             }
             activeSmartFolderRequest != null -> viewModel.closeSmartFolder()
             isGlanceScreenOpen -> viewModel.closeGlanceScreen()
@@ -615,6 +703,37 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 launcherRootY = root.y
                 launcherRootWidth = it.size.width.toFloat().coerceAtLeast(1f)
                 launcherRootHeight = it.size.height.toFloat().coerceAtLeast(1f)
+            }
+            // Passive Initial-pass listener keeps the SAME pointer through page disposal.
+            // Never consumes DOWN/MOVE; native widgets retain their own tap/scroll gestures.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    rootDragFingerDown = true
+                    val pointerId = down.id
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == pointerId }
+                        if (change == null || event.changes.count { it.pressed } > 1) {
+                            if (draggingHomeTileId != null) cancelCrossPageDrag(restoreSource = true)
+                            rootDragFingerDown = false
+                            break
+                        }
+                        if (draggingHomeTileId != null) {
+                            latestUpdateFingerRoot.value(
+                                launcherRootX + change.position.x,
+                                launcherRootY + change.position.y
+                            )
+                        }
+                        if (!change.pressed) {
+                            if (draggingHomeTileId != null) {
+                                latestFinishCrossPageDrag.value(draggingHomeTileId!!)
+                            }
+                            rootDragFingerDown = false
+                            break
+                        }
+                    }
+                }
             }
             .then(
                 if (settings.wallpaperSource == WallpaperSource.LUMIA) Modifier.background(wallpaperBrush)
@@ -827,6 +946,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         },
                         onCrossPageDragStart = { tileId, rootX, rootY, grabX, grabY ->
                             if (!settings.lockHomeLayout && homePages.size > 1) {
+                                rootFinishedAcrossTileId = null
                                 draggingHomeTileId = tileId
                                 draggingHomeTileSourcePageId = page.id
                                 dragGrabOffsetX = grabX
@@ -839,48 +959,15 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 updateFingerRoot(rootX, rootY)
                             }
                         },
-                        onCrossPageDragEnd = { tileId ->
-                            val targetPage = pages.getOrNull(pagerState.currentPage)
-                            val crossed = draggingHomeTileId == tileId &&
-                                draggingHomeTileSourcePageId == page.id &&
-                                targetPage != null && targetPage.pageType == PageType.HOME &&
-                                targetPage.id != page.id
-                            if (crossed && targetPage != null) {
-                                val targetGeometry = homeDropGeometries[targetPage.id]
-                                val draggedTile = tiles.firstOrNull { it.id == tileId }
-                                val dropCell = if (targetGeometry != null && draggedTile != null) {
-                                    targetGeometry.resolveDrop(
-                                        dragFingerRootX - dragGrabOffsetX,
-                                        dragFingerRootY - dragGrabOffsetY,
-                                        draggedTile.effectiveSpanX(targetGeometry.columns)
-                                    )
-                                } else null
-                                if (dropCell == null) {
-                                    Toast.makeText(context, "Vị trí thả không hợp lệ. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    viewModel.moveTileToPageAtGridPosition(
-                                        tileId, targetPage.id, dropCell.first, dropCell.second,
-                                        targetGeometry!!.columns
-                                    ) { moved ->
-                                        if (!moved) {
-                                            Toast.makeText(context, "Vị trí này không trống. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                                viewModel.clearSelectedTile()
-                            }
-                            draggingHomeTileId = null
-                            draggingHomeTileSourcePageId = null
-                            crossed
-                        },
+                        onCrossPageDragEnd = { tileId -> finishCrossPageDrag(tileId) },
                         crossPageDragCancelToken = crossPageDragCancelToken,
                         onCrossPageDragCancel = { tileId ->
                             if (draggingHomeTileId == tileId) {
                                 val sourceIndex = pages.indexOfFirst { it.id == draggingHomeTileSourcePageId }
-                                draggingHomeTileId = null
-                                draggingHomeTileSourcePageId = null
-                                if (sourceIndex >= 0 && sourceIndex != pagerState.currentPage) {
-                                    coroutineScope.launch { pagerState.scrollToPage(sourceIndex) }
+                                // Pager may dispose the source recognizer while the finger is STILL down.
+                                // The root observer keeps the drag active until UP / Back / cancellation.
+                                if (!rootDragFingerDown || sourceIndex == pagerState.currentPage) {
+                                    cancelCrossPageDrag(restoreSource = true)
                                 }
                             }
                         },
