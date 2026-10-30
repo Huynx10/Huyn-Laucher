@@ -1,7 +1,10 @@
 package com.example.ui.components
 
 import android.app.SearchManager
+import android.content.ComponentName
+import android.content.ContextWrapper
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.ResolveInfo
 import org.junit.Assert.assertEquals
@@ -49,6 +52,45 @@ class SystemSearchTest {
 
         assertFalse(launchSamsungFinder(context, "query"))
         assertNull(shadowOf(context).nextStartedActivity)
+    }
+
+    @Test
+    fun deniedStartReturnsToLocalSearchWithoutASecondLaunch() {
+        val application = RuntimeEnvironment.getApplication()
+        val intent = finderSearchIntent("query")
+        shadowOf(application.packageManager).setResolveInfosForIntent(
+            intent, listOf(finderResolveInfo(exported = true))
+        )
+        var starts = 0
+        val deniedContext = object : ContextWrapper(application) {
+            override fun startActivity(intent: Intent) {
+                starts++
+                throw SecurityException("Finder denied launch")
+            }
+        }
+
+        assertFalse(launchSamsungFinder(deniedContext, "query"))
+        assertEquals(1, starts)
+    }
+
+    @Test
+    fun exportedLauncherEntryOpensOnlyWhenQueryIsEmpty() {
+        val application = RuntimeEnvironment.getApplication()
+        val component = ComponentName(SAMSUNG_FINDER_PACKAGE, "$SAMSUNG_FINDER_PACKAGE.FrontDoor")
+        val packageManager = shadowOf(application.packageManager)
+        packageManager.addPackage(SAMSUNG_FINDER_PACKAGE)
+        packageManager.addActivityIfNotPresent(component).exported = true
+        packageManager.addIntentFilterForActivity(component, IntentFilter(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        })
+
+        assertFalse(launchSamsungFinder(application, "typed query"))
+        assertNull(shadowOf(application).nextStartedActivity)
+        assertTrue(launchSamsungFinder(application))
+        val started = shadowOf(application).nextStartedActivity
+        assertEquals(Intent.ACTION_MAIN, started.action)
+        assertEquals(component, started.component)
+        assertNull(shadowOf(application).nextStartedActivity)
     }
 
     @Test
