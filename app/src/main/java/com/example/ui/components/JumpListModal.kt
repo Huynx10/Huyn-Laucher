@@ -127,7 +127,7 @@ fun JumpListModal(
                         items(jumpLetters, key = { it }) { char ->
                             val isAvailable = char in availableLetters
                             val shape = RoundedCornerShape(4.dp)
-                            val label = if (char == '#') "Dấu thăng" else "Chữ $char"
+                            val label = if (char == '#') "Khác A đến Z" else "Chữ $char"
                             Box(
                                 modifier = Modifier
                                     .aspectRatio(1f)

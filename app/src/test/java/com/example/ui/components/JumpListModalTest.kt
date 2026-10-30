@@ -4,6 +4,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsProperties.ContentDescription
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -63,6 +64,15 @@ class JumpListModalTest {
             assertEquals(listOf('A'), selected)
             assertEquals(1, dismissCount)
         }
+    }
+
+    @Test fun fallbackGroupExplainsItContainsNamesOutsideAlphabet() {
+        compose.setContent {
+            JumpListModal(setOf('#'), "#0078D7", {}, {})
+        }
+
+        compose.onNodeWithTag("jump_letter_#")
+            .assert(SemanticsMatcher.expectValue(ContentDescription, listOf("Khác A đến Z")))
     }
 
     @Test fun narrowShortWindowScrollsToLastLetterAndOutsideTapDismisses() {
