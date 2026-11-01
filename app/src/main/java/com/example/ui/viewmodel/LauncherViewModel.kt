@@ -703,6 +703,40 @@ class LauncherViewModel(
         }
     }
 
+    fun pinAppAtGridPosition(
+        app: AppItem,
+        pageId: String,
+        gridX: Int,
+        gridY: Int,
+        totalCols: Int,
+        expectedShowMoreTiles: Boolean,
+        expectedTileSpacingDp: Int,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        if (_settings.value.lockHomeLayout ||
+            _settings.value.showMoreTiles != expectedShowMoreTiles ||
+            _settings.value.tileSpacingDp != expectedTileSpacingDp
+        ) {
+            onResult(false)
+            return
+        }
+        viewModelScope.launch {
+            val pinned = try {
+                repository.pinAppAtGridPosition(
+                    app, pageId, gridX, gridY, totalCols,
+                    expectedShowMoreTiles, expectedTileSpacingDp
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e("LauncherViewModel", "Could not pin app at dropped cell", error)
+                false
+            }
+            if (pinned) refreshApps()
+            onResult(pinned)
+        }
+    }
+
     fun pinTile(tile: TileEntity) {
         viewModelScope.launch {
             repository.pinTile(tile)

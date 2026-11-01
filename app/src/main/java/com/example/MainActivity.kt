@@ -114,15 +114,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.data.model.LauncherPage
+import com.example.data.model.AppItem
 import com.example.data.model.PageTransitionEffect
 import com.example.data.model.PageType
 import com.example.data.model.TileType
 import com.example.data.model.TileEntity
+import com.example.data.model.TileSize
 import com.example.data.model.WidgetProviderItem
 import com.example.data.model.WallpaperSource
 import com.example.data.model.Wp10TileStyle
 import com.example.ui.auth.GoogleSignInHelper
 import com.example.ui.components.AppDrawer
+import com.example.ui.components.DrawerAppDragGate
+import com.example.ui.components.drawerHomeEdgeDirection
 import com.example.ui.components.GlanceScreenOverlay
 import com.example.ui.components.LumiaStartGrid
 import com.example.ui.components.HomePageDropGeometry
@@ -490,6 +494,12 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     // Keep drag ownership above pager pages so page changes cannot reset the drag session.
     var draggingHomeTileId by remember { mutableStateOf<String?>(null) }
     var draggingHomeTileSourcePageId by remember { mutableStateOf<String?>(null) }
+    // An All Apps Lazy item may leave composition during the page transition.
+    // The root owns its session until the physical pointer ends.
+    var draggingDrawerApp by remember { mutableStateOf<AppItem?>(null) }
+    var drawerAppHasMoved by remember { mutableStateOf(false) }
+    val drawerDragGate = remember { DrawerAppDragGate() }
+    val drawerDragIntentThresholdPx = with(uiDensity) { 14.dp.toPx() }
     var crossPageDragCancelToken by remember { mutableIntStateOf(0) }
     // The root (not a lazy pager page) tracks the finger until physical UP.
     val rootDragFingerDown = remember { booleanArrayOf(false) }
@@ -536,6 +546,73 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 scrollToPage = { pagerState.scrollToPage(it) }
             )
         }
+    }
+
+    val drawerEdgeDirection = drawerHomeEdgeDirection(
+        draggingDrawerApp != null, drawerAppHasMoved, rootDragFingerDown[0],
+        settings.lockHomeLayout, dragFingerX
+    )
+    LaunchedEffect(draggingDrawerApp, drawerEdgeDirection, pagerState.currentPage, pages) {
+        val appKey = draggingDrawerApp?.drawerKey
+        val originalPage = pagerState.currentPage
+        val source = pages.getOrNull(originalPage)
+        val destination = pages.getOrNull(originalPage + drawerEdgeDirection)
+        if (appKey != null && drawerEdgeDirection != 0 &&
+            (source?.pageType == PageType.ALL_APPS || source?.pageType == PageType.HOME) &&
+            destination?.pageType == PageType.HOME
+        ) {
+            delay(550)
+            if (rootDragFingerDown[0] && draggingDrawerApp?.drawerKey == appKey &&
+                drawerEdgeDirection != 0 && pagerState.currentPage == originalPage &&
+                !settings.lockHomeLayout
+            ) pagerState.scrollToPage(originalPage + drawerEdgeDirection)
+        }
+    }
+
+    fun cancelDrawerAppDrag() {
+        drawerDragGate.cancel()
+        draggingDrawerApp = null
+        drawerAppHasMoved = false
+    }
+
+    fun finishDrawerAppDrag(): Boolean {
+        val app = draggingDrawerApp ?: return false
+        val target = pages.getOrNull(pagerState.currentPage)
+        draggingDrawerApp = null
+        val hadDragIntent = drawerAppHasMoved
+        drawerAppHasMoved = false
+        if (!hadDragIntent) {
+            drawerDragGate.releaseInDrawer()
+            return false
+        }
+        if (target?.pageType != PageType.HOME) {
+            drawerDragGate.releaseInDrawer()
+            return false
+        }
+        if (!drawerDragGate.releaseOnHome()) return false
+        val geometry = homeDropGeometries[target.id]
+        val spanX = geometry?.let { TileSize.MEDIUM.effectiveSpanX(it.columns) }
+        val cell = if (geometry != null && spanX != null && !settings.lockHomeLayout &&
+            geometry.showMoreTilesAtMeasure == settings.showMoreTiles &&
+            geometry.tileSpacingDpAtMeasure == settings.tileSpacingDp
+        ) {
+            geometry.resolveDrop(
+                dragFingerRootX - (spanX - 1) * geometry.cellStepPx / 2f,
+                dragFingerRootY - geometry.cellStepPx / 2f,
+                spanX
+            )
+        } else null
+        if (cell != null && geometry != null) {
+            viewModel.pinAppAtGridPosition(
+                app, target.id, cell.first, cell.second, geometry.columns,
+                settings.showMoreTiles, settings.tileSpacingDp
+            ) { pinned ->
+                if (!pinned) Toast.makeText(context, "Không thể ghim vào vị trí này", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Chọn ô trống trên trang chủ để ghim", Toast.LENGTH_SHORT).show()
+        }
+        return true
     }
 
     fun cancelCrossPageDrag(restoreSource: Boolean) {
@@ -596,13 +673,17 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
         return false
     }
     val latestFinishCrossPageDrag = rememberUpdatedState<(String) -> Boolean>({ finishCrossPageDrag(it) })
+    val latestFinishDrawerAppDrag = rememberUpdatedState<() -> Boolean>({ finishDrawerAppDrag() })
+    val latestCancelDrawerAppDrag = rememberUpdatedState<() -> Unit>({ cancelDrawerAppDrag() })
+    val latestDrawerDragThresholdPx = rememberUpdatedState(drawerDragIntentThresholdPx)
     val latestUpdateFingerRoot = rememberUpdatedState<(Float, Float) -> Unit>({ x, y -> updateFingerRoot(x, y) })
 
     // Back press handling: exit Action Center -> exit Smart Folder -> exit Glance -> deselect single tile -> exit Home Edit Mode -> return to Default Home Page
     BackHandler(
-        enabled = draggingHomeTileId != null || activeSmartFolderRequest != null || isGlanceScreenOpen || selectedTileId != null || isEditMode || pagerState.currentPage != defaultPageIndex
+        enabled = draggingHomeTileId != null || draggingDrawerApp != null || activeSmartFolderRequest != null || isGlanceScreenOpen || selectedTileId != null || isEditMode || pagerState.currentPage != defaultPageIndex
     ) {
         when {
+            draggingDrawerApp != null -> cancelDrawerAppDrag()
             draggingHomeTileId != null -> {
                 crossPageDragCancelToken++ // cancel source drag recognizer without committing
                 cancelCrossPageDrag(restoreSource = true)
@@ -721,14 +802,20 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         val change = event.changes.firstOrNull { it.id == pointerId }
                         if (change == null || event.changes.count { it.pressed } > 1) {
                             if (draggingHomeTileId != null) cancelCrossPageDrag(restoreSource = true)
+                            if (draggingDrawerApp != null) latestCancelDrawerAppDrag.value()
                             rootDragFingerDown[0] = false
                             break
                         }
-                        if (draggingHomeTileId != null) {
+                        if (draggingHomeTileId != null || draggingDrawerApp != null) {
                             latestUpdateFingerRoot.value(
                                 launcherRootX + change.position.x,
                                 launcherRootY + change.position.y
                             )
+                            if (draggingDrawerApp != null && !drawerAppHasMoved) {
+                                drawerAppHasMoved = drawerDragGate.recordMove(
+                                    dragFingerRootX, dragFingerRootY, latestDrawerDragThresholdPx.value
+                                )
+                            }
                         }
                         if (!change.pressed) {
                             if (draggingHomeTileId != null) {
@@ -737,6 +824,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                                 } else {
                                     cancelCrossPageDrag(restoreSource = true)
                                 }
+                            }
+                            if (draggingDrawerApp != null) {
+                                if (event.type == PointerEventType.Release) latestFinishDrawerAppDrag.value()
+                                else latestCancelDrawerAppDrag.value()
                             }
                             rootDragFingerDown[0] = false
                             break
@@ -749,9 +840,10 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 else Modifier.background(Color.Transparent)
             )
             .then(
-                // Home handles empty-space taps in a separate background sibling of its Tiles.
-                // An ancestor detectTapGestures would steal DOWN from long-press drag.
-                if (currentPage?.pageType == PageType.HOME) Modifier
+                // Home and All Apps handle empty space themselves. An ancestor tap
+                // detector can steal DOWN from either long-press drag recognizer.
+                if (currentPage?.pageType == PageType.HOME ||
+                    currentPage?.pageType == PageType.ALL_APPS) Modifier
                 else Modifier.pointerInput(isEditMode, selectedTileId) {
                     detectTapGestures(
                         onTap = {
@@ -791,7 +883,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             // Extra pages are composed only during the gesture, never in idle/background.
             beyondViewportPageCount = if (draggingHomeTileId != null) (pages.size - 1).coerceAtLeast(0)
                 else if (isBatterySaverActive) 0 else 1,
-            userScrollEnabled = draggingHomeTileId == null,
+            userScrollEnabled = draggingHomeTileId == null && draggingDrawerApp == null,
             key = { idx -> pages.getOrNull(idx)?.id ?: "page_$idx" },
             modifier = Modifier
                 .fillMaxSize()
@@ -1084,6 +1176,28 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         onPinAppToPage = { app, targetPageId ->
                             viewModel.pinAppToPage(app, targetPageId)
                         },
+                        onAppDragStart = { app, finger ->
+                            if (!settings.lockHomeLayout && rootDragFingerDown[0] &&
+                                app.launcherComponent != null && app.launcherUserSerial != null
+                            ) {
+                                drawerDragGate.begin(app.drawerKey, finger.x, finger.y)
+                                draggingDrawerApp = app
+                                drawerAppHasMoved = false
+                                updateFingerRoot(finger.x, finger.y)
+                            }
+                        },
+                        onAppDragEnd = { app ->
+                            drawerDragGate.suppressSourceEnd(app.drawerKey, rootDragFingerDown[0])
+                        },
+                        onAppDragAbort = { app ->
+                            if (draggingDrawerApp?.drawerKey == app.drawerKey) cancelDrawerAppDrag()
+                        },
+                        onAppDragRecognizerCancel = { app ->
+                            // Lazy disposal during a valid cross-page drag is not a pointer cancel.
+                            if (!rootDragFingerDown[0] && draggingDrawerApp?.drawerKey == app.drawerKey) {
+                                cancelDrawerAppDrag()
+                            }
+                        },
                         installedWidgets = installedWidgets,
                         onPinWidgetToPage = { widgetItem, targetPageId ->
                             startBindAndPinWidgetFlow(
@@ -1141,6 +1255,27 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     .background(Color.Black.copy(alpha = 0.75f))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             )
+        }
+
+        if (draggingDrawerApp != null && currentPage?.pageType == PageType.HOME) {
+            val app = draggingDrawerApp!!
+            val screen = LocalConfiguration.current
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(
+                        x = (screen.screenWidthDp * dragFingerX).dp - 36.dp,
+                        y = (screen.screenHeightDp * dragFingerY).dp - 36.dp
+                    )
+                    .size(72.dp)
+                    .zIndex(40f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accent.color.copy(alpha = 0.85f))
+                    .border(1.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(app.label.take(12), color = Color.White, fontSize = 11.sp, maxLines = 2)
+            }
         }
 
         pendingAppTargetChoice?.let { pending ->

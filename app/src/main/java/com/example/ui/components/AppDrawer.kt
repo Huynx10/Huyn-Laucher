@@ -180,6 +180,11 @@ fun AppDrawer(
     onPinWidgetToPage: (WidgetProviderItem, String) -> Unit = { _, _ -> },
     onMutateSettings: ((LauncherSettings) -> LauncherSettings) -> LauncherSettings,
     onEnterEditMode: () -> Unit = {},
+    // The parent pager keeps this session alive when a Lazy source is disposed.
+    onAppDragStart: (AppItem, Offset) -> Unit = { _, _ -> },
+    onAppDragEnd: (AppItem) -> Boolean = { false },
+    onAppDragAbort: (AppItem) -> Unit = {},
+    onAppDragRecognizerCancel: (AppItem) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -221,6 +226,7 @@ fun AppDrawer(
     BackHandler(enabled = isAndroidSearchMode || draggingEntry != null || activeFolderDialog != null) {
         when {
             draggingEntry != null -> {
+                (draggingEntry as? GridDrawerEntry.AppEntry)?.let { onAppDragAbort(it.app) }
                 draggingEntry = null
                 hoveredTargetKey = null
                 hoveredFolderId = null
@@ -533,16 +539,17 @@ fun AppDrawer(
             .onGloballyPositioned { coords ->
                 rootBoxPosition = coords.positionInRoot()
             }
-            .pointerInput(isEditMode) {
+    ) {
+        // Background sibling receives only empty-space gestures; a parent
+        // detector can preempt List/Grid app long-press recognizers.
+        Box(Modifier.fillMaxSize().pointerInput(isEditMode) {
                 detectTapGestures(
                     onLongPress = {
-                        // Long-pressing empty space enters Settings / Edit Mode
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onEnterEditMode()
                     }
                 )
-            }
-    ) {
+            })
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -702,6 +709,7 @@ fun AppDrawer(
 
                             val entry = GridDrawerEntry.AppEntry(app)
                             Box(modifier = Modifier.fillMaxWidth()
+                                .testTag("drawer_app_list_${app.drawerKey}")
                                 .onGloballyPositioned { gridItemBounds[entry.key] = it.boundsInRoot() }
                                 .pointerInput(entry.key, selectedFolderId, settings.appDrawerFolders) {
                                     detectDragGesturesAfterLongPress(
@@ -712,6 +720,7 @@ fun AppDrawer(
                                             val bounds = gridItemBounds[entry.key]
                                             dragFingerRootPos = if (bounds == null) rootBoxPosition + start
                                                 else Offset(bounds.left + start.x, bounds.top + start.y)
+                                            onAppDragStart(app, dragFingerRootPos)
                                             hoveredTargetKey = null
                                             hoveredFolderId = null
                                             activeDropIntent = GridDropIntent.NONE
@@ -723,15 +732,19 @@ fun AppDrawer(
                                             updateDragHoverTarget(dragFingerRootPos, entry)
                                         },
                                         onDragEnd = {
-                                            if (with(density) { dragTotalDistancePx.toDp() } < 14.dp) {
-                                                selectedAppForMenu = app
-                                            } else commitGridDrop(entry)
+                                            val handledByHome = onAppDragEnd(app)
+                                            if (!handledByHome) {
+                                                if (with(density) { dragTotalDistancePx.toDp() } < 14.dp) {
+                                                    selectedAppForMenu = app
+                                                } else commitGridDrop(entry)
+                                            }
                                             draggingEntry = null
                                             hoveredTargetKey = null
                                             hoveredFolderId = null
                                             activeDropIntent = GridDropIntent.NONE
                                         },
                                         onDragCancel = {
+                                            onAppDragRecognizerCancel(app)
                                             draggingEntry = null
                                             hoveredTargetKey = null
                                             hoveredFolderId = null
@@ -802,6 +815,7 @@ fun AppDrawer(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .testTag("drawer_app_grid_${entry.key}")
                                     .scale(targetScale)
                                     .onGloballyPositioned { coords ->
                                         gridItemBounds[entry.key] = coords.boundsInRoot()
@@ -822,6 +836,9 @@ fun AppDrawer(
                                                 } else {
                                                     rootBoxPosition + startOffset
                                                 }
+                                                if (entry is GridDrawerEntry.AppEntry) {
+                                                    onAppDragStart(entry.app, dragFingerRootPos)
+                                                }
                                                 hoveredTargetKey = null
                                                 hoveredFolderId = null
                                                 activeDropIntent = GridDropIntent.NONE
@@ -833,15 +850,19 @@ fun AppDrawer(
                                                 updateDragHoverTarget(dragFingerRootPos, entry)
                                             },
                                             onDragEnd = {
+                                                val handledByHome = (entry as? GridDrawerEntry.AppEntry)
+                                                    ?.let { onAppDragEnd(it.app) } == true
                                                 val movedDistanceDp = with(density) { dragTotalDistancePx.toDp() }
-                                                if (movedDistanceDp < 14.dp) {
-                                                    // Short hold without dragging opens quick actions for the app or folder
-                                                    when (entry) {
-                                                        is GridDrawerEntry.AppEntry -> selectedAppForMenu = entry.app
-                                                        is GridDrawerEntry.FolderEntry -> activeFolderDialog = entry.folder
+                                                if (!handledByHome) {
+                                                    if (movedDistanceDp < 14.dp) {
+                                                        // Short hold without dragging opens quick actions for the app or folder
+                                                        when (entry) {
+                                                            is GridDrawerEntry.AppEntry -> selectedAppForMenu = entry.app
+                                                            is GridDrawerEntry.FolderEntry -> activeFolderDialog = entry.folder
+                                                        }
+                                                    } else {
+                                                        commitGridDrop(entry)
                                                     }
-                                                } else {
-                                                    commitGridDrop(entry)
                                                 }
                                                 draggingEntry = null
                                                 hoveredTargetKey = null
@@ -849,6 +870,9 @@ fun AppDrawer(
                                                 activeDropIntent = GridDropIntent.NONE
                                             },
                                             onDragCancel = {
+                                                (entry as? GridDrawerEntry.AppEntry)?.let {
+                                                    onAppDragRecognizerCancel(it.app)
+                                                }
                                                 draggingEntry = null
                                                 hoveredTargetKey = null
                                                 hoveredFolderId = null
@@ -1217,6 +1241,7 @@ fun AppDrawer(
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth()
+                        .testTag("drawer_app_actions")
                         .padding(horizontal = 20.dp, vertical = 12.dp)
                 ) {
                     Text(app.label, color = Color.White, fontSize = 19.sp,

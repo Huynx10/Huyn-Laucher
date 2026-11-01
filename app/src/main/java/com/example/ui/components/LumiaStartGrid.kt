@@ -179,7 +179,9 @@ data class HomePageDropGeometry(
     val horizontalPaddingPx: Float,
     val topPaddingPx: Float,
     val cellStepPx: Float,
-    val columns: Int
+    val columns: Int,
+    val showMoreTilesAtMeasure: Boolean? = null,
+    val tileSpacingDpAtMeasure: Int? = null
 ) {
     fun resolveDrop(tileRootX: Float, tileRootY: Float, spanX: Int): Pair<Int, Int>? {
         if (!tileRootX.isFinite() || !tileRootY.isFinite() ||
@@ -312,14 +314,18 @@ fun LumiaStartGrid(
         val cellStepPx = with(density) { cellStepDp.toPx() }.coerceAtLeast(1f)
         var gridViewportRoot by remember(currentPage.id) { mutableStateOf(Offset.Unspecified) }
         val latestGeometryCallback by rememberUpdatedState(onCrossPageGridGeometry)
-        LaunchedEffect(currentPage.id, gridViewportRoot, scrollState.value, totalCols, cellStepPx) {
+        LaunchedEffect(
+            currentPage.id, gridViewportRoot, scrollState.value, totalCols, cellStepPx,
+            settings.showMoreTiles, settings.tileSpacingDp
+        ) {
             if (gridViewportRoot != Offset.Unspecified) {
                 latestGeometryCallback(
                     HomePageDropGeometry(
                         currentPage.id,
                         gridViewportRoot.x, gridViewportRoot.y, scrollState.value.toFloat(),
                         with(density) { horizontalPadding.toPx() },
-                        with(density) { topPadding.toPx() }, cellStepPx, totalCols
+                        with(density) { topPadding.toPx() }, cellStepPx, totalCols,
+                        settings.showMoreTiles, settings.tileSpacingDp
                     )
                 )
             }

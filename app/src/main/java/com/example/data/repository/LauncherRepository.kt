@@ -67,6 +67,12 @@ class LauncherRepository(
     private val database: LumiaDatabase = LumiaDatabase.getDatabase(context),
     // Candidate factory is injectable so ID collisions can be tested deterministically.
     private val newTileIdCandidate: (String) -> String = { prefix -> "${prefix}_${UUID.randomUUID()}" },
+    // Test seam for a valid installed launcher target; production revalidates via LauncherApps.
+    private val exactAppTargetAvailable: (AppItem) -> Boolean = { app ->
+        LauncherTargetResolver(context).resolve(
+            app.launcherComponent, app.launcherUserSerial, app.packageName
+        ) != null
+    },
     // Test seam: failed Room writes must not release the widget host's live binding.
     private val releaseWidgetBinding: (Int) -> Unit = { id ->
         LumiaWidgetHostManager.getInstance(context).releaseWidgetId(id)
@@ -984,6 +990,65 @@ class LauncherRepository(
             tileDao.insertOrUpdate(tile)
         }
         autoArrangeIfEnabled(pageId)
+    }
+
+    /** Pins a discovered launcher activity only when the exact HOME cell is empty. */
+    suspend fun pinAppAtGridPosition(
+        app: AppItem,
+        pageId: String,
+        gridX: Int,
+        gridY: Int,
+        totalCols: Int,
+        expectedShowMoreTiles: Boolean,
+        expectedTileSpacingDp: Int
+    ): Boolean = withContext(Dispatchers.IO) {
+        val component = app.launcherComponent?.takeIf { it.isNotBlank() } ?: return@withContext false
+        val userSerial = app.launcherUserSerial ?: return@withContext false
+        if (app.packageName.isBlank() || userSerial < 0 ||
+            ComponentName.unflattenFromString(component)?.packageName != app.packageName ||
+            !exactAppTargetAvailable(app.copy(launcherComponent = component, launcherUserSerial = userSerial))
+        ) return@withContext false
+        database.withTransaction {
+            val latestSettings = loadSettings()
+            if (latestSettings.lockHomeLayout ||
+                latestSettings.showMoreTiles != expectedShowMoreTiles ||
+                latestSettings.tileSpacingDp != expectedTileSpacingDp ||
+                loadPages().none { it.id == pageId && it.pageType == PageType.HOME } ||
+                totalCols !in listOf(4, 6, 8)
+            ) return@withTransaction false
+            val spanX = TileSize.MEDIUM.effectiveSpanX(totalCols)
+            val spanY = TileSize.MEDIUM.effectiveSpanY()
+            if (gridX < 0 || gridX + spanX > totalCols || gridY !in 0..60) {
+                return@withTransaction false
+            }
+            val allTiles = tileDao.getAllTiles()
+            val pageTiles = allTiles.filter { it.pageId == pageId }
+            if (pageTiles.any { tile ->
+                    rectsOverlap(
+                        gridX, gridY, spanX, spanY,
+                        tile.gridX.coerceAtLeast(0), tile.gridY.coerceAtLeast(0),
+                        tile.effectiveSpanX(totalCols), tile.effectiveSpanY()
+                    )
+                }
+            ) return@withTransaction false
+            val tile = TileEntity(
+                id = allocateUniqueTileId("app_${app.packageName}", allTiles),
+                title = app.label,
+                packageName = app.packageName,
+                tileType = TileType.APP,
+                launcherComponent = component,
+                launcherUserSerial = userSerial,
+                launcherIdentityState = "EXACT",
+                size = TileSize.MEDIUM,
+                orderIndex = (pageTiles.maxOfOrNull { it.orderIndex } ?: -1) + 1,
+                pageId = pageId,
+                gridX = gridX,
+                gridY = gridY,
+                notificationCount = 0
+            )
+            tileDao.insertNew(tile)
+            true
+        }
     }
 
     suspend fun pinTile(tile: TileEntity) = withContext(Dispatchers.IO) {
