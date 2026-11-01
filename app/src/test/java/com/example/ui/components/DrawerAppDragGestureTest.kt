@@ -84,14 +84,17 @@ class DrawerAppDragGestureTest {
     private fun holdReleaseOpensOneMenuWithoutPin(mode: AllAppsViewMode) {
         var pins = 0
         var launches = 0
-        content(mode, { _ -> launches++ }, {}, { false }, { pins++ })
+        var starts = 0
+        content(mode, { _ -> launches++ }, { starts++ }, { false }, { pins++ })
         val tag = if (mode == AllAppsViewMode.METRO_LIST) "drawer_app_list_${app.drawerKey}"
             else "drawer_app_grid_${app.drawerKey}"
-        compose.onNodeWithTag(tag).performTouchInput {
-            down(center)
-            advanceEventTime(700)
-            up()
-        }
+        val item = compose.onNodeWithTag(tag)
+        // performTouchInput batches every event in one block. Let Compose's gesture
+        // timeout run while the pointer is still down before injecting UP.
+        item.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(700)
+        compose.runOnIdle { assertEquals(1, starts) }
+        item.performTouchInput { up() }
         compose.onAllNodesWithTag("drawer_app_actions").assertCountEquals(1)
         compose.runOnIdle { assertEquals(0, pins); assertEquals(0, launches) }
     }
