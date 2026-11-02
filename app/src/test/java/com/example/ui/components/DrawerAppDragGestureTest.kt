@@ -1,5 +1,18 @@
 package com.example.ui.components
 
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.MutableStateFlow
+import com.example.ui.viewmodel.LauncherViewModel
+import com.example.data.repository.LauncherRepository
+import com.example.data.model.TileType
+import com.example.data.model.TileEntity
+import com.example.data.db.LumiaDatabase
+import com.example.LumiaLauncherApp
+import androidx.test.core.app.ApplicationProvider
+import androidx.room.Room
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.platform.LocalDensity
+import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
@@ -212,4 +225,105 @@ class DrawerAppDragGestureTest {
 
     @Test fun gridBackDisposesLazySourceAndLateUpCannotPin() =
         backDisposesLazySourceAndLateUpCannotPin(AllAppsViewMode.ONE_UI_GRID)
+
+    /**
+     * G05 root-to-Room integration: real launcher pager/root pointer observer,
+     * AppDrawer recognizer, Home geometry, ViewModel and in-memory Room.
+     * No fake onAppDragEnd callback. The catalog fixture is injected into the
+     * ViewModel StateFlow because Robolectric has no installed work-profile app.
+     */
+    @Test fun listRootPointerReleasePersistsOneExactHomeTileWithoutReplacingWidget() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        context.getSharedPreferences("lumia_first_run", Context.MODE_PRIVATE)
+            .edit().putBoolean("guided_v1", true).commit()
+        context.getSharedPreferences("lumia_default_widget_setup", Context.MODE_PRIVATE)
+            .edit().putBoolean("offered_v1", true).commit()
+        val db = Room.inMemoryDatabaseBuilder(context, LumiaDatabase::class.java)
+            .allowMainThreadQueries().build()
+        val widget = TileEntity(
+            id = "existing_widget", title = "Keep widget", tileType = TileType.WIDGET,
+            pageId = "page_home_1", gridX = 3, gridY = 8,
+            appWidgetId = 432, widgetProvider = "com.acme/.Clock"
+        )
+        runBlocking { db.tileDao().insertOrUpdate(widget) }
+        val repo = LauncherRepository(
+            context, db.tileDao(), db,
+            exactAppTargetAvailable = { it == app },
+            releaseWidgetBinding = {}
+        )
+        repo.savePages(listOf(
+            LauncherPage("page_home_1", "Home", PageType.HOME, 0),
+            LauncherPage("page_all_apps", "All Apps", PageType.ALL_APPS, 1)
+        ))
+        repo.saveSettings(repo.loadSettings().copy(
+            defaultHomePageId = "page_home_1",
+            allAppsViewMode = AllAppsViewMode.METRO_LIST,
+            allAppsCategorizedEnabled = false,
+            allAppsGroupByCategory = false,
+            useRealAppIcons = false
+        ))
+        val viewModel = LauncherViewModel(repo, null)
+        var density = 1f
+        compose.setContent {
+            density = LocalDensity.current.density
+            LumiaLauncherApp(viewModel)
+        }
+        compose.waitForIdle()
+        // Only the catalog is controlled; pointer handling and persistence are real.
+        compose.runOnIdle {
+            val field = LauncherViewModel::class.java.getDeclaredField("_apps")
+            field.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val appsFlow = field.get(viewModel) as MutableStateFlow<List<AppItem>>
+            appsFlow.value = listOf(app)
+        }
+
+        val pager = compose.onNodeWithTag("launcher_horizontal_pager")
+        pager.performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        val itemTag = "drawer_app_list_${app.drawerKey}"
+        compose.onNodeWithTag(itemTag).assertIsDisplayed()
+        val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
+        val start = compose.onNodeWithTag(itemTag).fetchSemanticsNode().boundsInRoot.center -
+            pagerBounds.topLeft
+
+        pager.performTouchInput { down(start) }
+        compose.mainClock.advanceTimeBy(700)
+        pager.performTouchInput { moveTo(Offset(2f, start.y)) }
+        // Dwell at the left edge until the pager navigates from All Apps to Home.
+        compose.mainClock.advanceTimeBy(700)
+        compose.waitForIdle()
+        val home = compose.onNodeWithTag("tiles_grid_page_home_1")
+        home.assertIsDisplayed()
+        val homeBounds = home.fetchSemanticsNode().boundsInRoot
+        val stepPx = (homeBounds.width - 24f * density +
+            repo.loadSettings().tileSpacingDp * density) / 4f
+        // The release finger is centered over the first 2-column Tile footprint.
+        val homeFinger = Offset(
+            homeBounds.left + 12f * density + stepPx / 2f,
+            homeBounds.top + 10f * density + stepPx / 2f
+        ) - pagerBounds.topLeft
+        pager.performTouchInput { moveTo(homeFinger); up() }
+        compose.waitUntil(10_000) {
+            runBlocking { db.tileDao().getAllTiles().size == 2 }
+        }
+        // Give any late Lazy-source completion an opportunity to run.
+        compose.mainClock.advanceTimeBy(700)
+        compose.runOnIdle {
+            val rows = runBlocking { db.tileDao().getAllTiles() }
+            assertEquals(2, rows.size)
+            assertEquals(widget, rows.single { it.id == widget.id })
+            val pinned = rows.single { it.id != widget.id }
+            assertEquals(TileType.APP, pinned.tileType)
+            assertEquals("page_home_1", pinned.pageId)
+            assertEquals(0, pinned.gridX)
+            assertEquals(0, pinned.gridY)
+            assertEquals(app.launcherComponent, pinned.launcherComponent)
+            assertEquals(app.launcherUserSerial, pinned.launcherUserSerial)
+        }
+        db.close()
+    }
+
 }
