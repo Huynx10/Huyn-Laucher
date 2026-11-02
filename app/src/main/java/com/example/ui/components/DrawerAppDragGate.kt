@@ -23,12 +23,21 @@ internal class DrawerAppDragGate {
     private var startY = 0f
     private var hasIntent = false
 
-    fun begin(key: String, rootX: Float, rootY: Float) {
-        activeKey = key
+    /** Only a new physical DOWN can unlock a canceled or completed pointer session. */
+    fun onPhysicalDown() {
+        activeKey = null
         consumedKey = null
+        hasIntent = false
+    }
+
+    /** Reject late Lazy starts and competing items during the same physical gesture. */
+    fun begin(key: String, rootX: Float, rootY: Float): Boolean {
+        if (activeKey != null || consumedKey != null) return false
+        activeKey = key
         startX = rootX
         startY = rootY
         hasIntent = false
+        return true
     }
 
     fun recordMove(rootX: Float, rootY: Float, thresholdPx: Float): Boolean {

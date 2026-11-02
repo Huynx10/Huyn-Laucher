@@ -795,6 +795,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    drawerDragGate.onPhysicalDown()
                     rootDragFingerDown[0] = true
                     val pointerId = down.id
                     while (true) {
@@ -1178,9 +1179,9 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         },
                         onAppDragStart = { app, finger ->
                             if (!settings.lockHomeLayout && rootDragFingerDown[0] &&
-                                app.launcherComponent != null && app.launcherUserSerial != null
-                            ) {
+                                app.launcherComponent != null && app.launcherUserSerial != null &&
                                 drawerDragGate.begin(app.drawerKey, finger.x, finger.y)
+                            ) {
                                 draggingDrawerApp = app
                                 drawerAppHasMoved = false
                                 updateFingerRoot(finger.x, finger.y)

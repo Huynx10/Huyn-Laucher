@@ -62,6 +62,21 @@ class DrawerAppDragGateTest {
         assertTrue(gate.suppressSourceEnd(appKey, false))
     }
 
+    @Test fun newPhysicalDownUnlocksFreshDragAfterBackCancel() {
+        val appKey = "app:v2:com.acme/.Editor:10"
+        val gate = DrawerAppDragGate()
+        gate.begin(appKey, 4f, 20f)
+        assertTrue(gate.recordMove(25f, 20f, 14f))
+        gate.cancel()
+        assertFalse(gate.begin(appKey, 4f, 20f))
+
+        gate.onPhysicalDown()
+        assertTrue(gate.begin(appKey, 4f, 20f))
+        assertTrue(gate.recordMove(25f, 20f, 14f))
+        assertTrue(gate.releaseOnHome())
+        assertFalse(gate.releaseOnHome())
+    }
+
     @Test fun secondLazyItemCannotStealTheActivePointer() {
         val firstKey = "app:v2:com.acme/.Editor:10"
         val secondKey = "app:v2:com.acme/.Other:10"
