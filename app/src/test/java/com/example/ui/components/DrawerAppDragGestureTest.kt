@@ -11,6 +11,7 @@ import com.example.LumiaLauncherApp
 import androidx.test.core.app.ApplicationProvider
 import androidx.room.Room
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.platform.LocalDensity
 import android.content.Context
 import androidx.compose.foundation.layout.Box
