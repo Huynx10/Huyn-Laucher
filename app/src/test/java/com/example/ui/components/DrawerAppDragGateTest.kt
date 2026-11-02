@@ -47,4 +47,33 @@ class DrawerAppDragGateTest {
         assertTrue(drawerHomeEdgeDirection(true, true, true, false, 0.02f) == -1)
         assertTrue(drawerHomeEdgeDirection(true, true, true, false, 0.98f) == 1)
     }
+
+    @Test fun backCancelCannotBeRearmedByLateLazyStartBeforeUp() {
+        val appKey = "app:v2:com.acme/.Editor:10"
+        val gate = DrawerAppDragGate()
+        gate.begin(appKey, 4f, 20f)
+        assertTrue(gate.recordMove(25f, 20f, 14f))
+        gate.cancel() // Back while the original physical finger is still down.
+
+        // A late Lazy source callback must not resurrect the canceled gesture.
+        gate.begin(appKey, 4f, 20f)
+        assertFalse(gate.recordMove(25f, 20f, 14f))
+        assertFalse(gate.releaseOnHome())
+        assertTrue(gate.suppressSourceEnd(appKey, false))
+    }
+
+    @Test fun secondLazyItemCannotStealTheActivePointer() {
+        val firstKey = "app:v2:com.acme/.Editor:10"
+        val secondKey = "app:v2:com.acme/.Other:10"
+        val gate = DrawerAppDragGate()
+        gate.begin(firstKey, 4f, 20f)
+        assertTrue(gate.recordMove(25f, 20f, 14f))
+
+        // Only the original app can own this physical gesture.
+        gate.begin(secondKey, 8f, 20f)
+        assertTrue(gate.suppressSourceEnd(firstKey, true))
+        assertFalse(gate.suppressSourceEnd(secondKey, true))
+        assertTrue(gate.releaseOnHome())
+        assertFalse(gate.releaseOnHome()) // No duplicate pin on late UP.
+    }
 }
