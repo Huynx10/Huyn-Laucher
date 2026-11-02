@@ -272,6 +272,11 @@ class DrawerAppDragGestureTest {
             LumiaLauncherApp(viewModel)
         }
         compose.waitForIdle()
+        val pager = compose.onNodeWithTag("launcher_horizontal_pager")
+        pager.performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        // Publish the controlled catalog after pager navigation: the ViewModel's
+        // asynchronous startup app scan can otherwise overwrite an early injection.
         // Only the catalog is controlled; pointer handling and persistence are real.
         compose.runOnIdle {
             val field = LauncherViewModel::class.java.getDeclaredField("_apps")
@@ -281,9 +286,6 @@ class DrawerAppDragGestureTest {
             appsFlow.value = listOf(app)
         }
 
-        val pager = compose.onNodeWithTag("launcher_horizontal_pager")
-        pager.performTouchInput { swipeLeft() }
-        compose.waitForIdle()
         val itemTag = "drawer_app_list_${app.drawerKey}"
         compose.onNodeWithTag(itemTag).assertIsDisplayed()
         val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
