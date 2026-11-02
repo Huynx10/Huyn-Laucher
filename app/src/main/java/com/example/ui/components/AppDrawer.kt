@@ -19,7 +19,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -108,6 +109,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -137,10 +140,69 @@ import com.example.data.model.WidgetProviderItem
 import com.example.data.repository.LauncherIdentityPolicy
 import com.example.ui.theme.LumiaPalette
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.hypot
 import kotlin.math.roundToInt
+
+/**
+ * Keep the app/folder gesture alive until a physical UP. Compose's stock
+ * detectDragGesturesAfterLongPress can call onDragStart on a stationary hold
+ * without calling onDragEnd when that same finger lifts. The drawer needs that
+ * release to open its context menu, and must not treat a cancellation as UP.
+ */
+private suspend fun PointerInputScope.detectDrawerDragAfterLongPress(
+    onStart: (Offset) -> Unit,
+    onMove: (Offset) -> Unit,
+    onRelease: () -> Unit,
+    onCancel: () -> Unit
+) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        val pointerId = down.id
+        val slop = viewConfiguration.touchSlop
+        var lastPosition = down.position
+        val aborted = withTimeoutOrNull<Boolean>(viewConfiguration.longPressTimeoutMillis.toLong()) {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == pointerId }
+                    ?: return@withTimeoutOrNull true
+                if (!change.pressed || event.changes.count { it.pressed } > 1 ||
+                    (change.position - down.position).getDistance() > slop
+                ) return@withTimeoutOrNull true
+                lastPosition = change.position
+            }
+            @Suppress("UNREACHABLE_CODE")
+            false
+        }
+        if (aborted == true) return@awaitEachGesture
+
+        onStart(lastPosition)
+        var released = false
+        try {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                if (event.changes.count { it.pressed } > 1) break
+                if (!change.pressed) {
+                    change.consume()
+                    onRelease()
+                    released = true
+                    break
+                }
+                if (change.position != lastPosition) {
+                    val delta = change.position - lastPosition
+                    lastPosition = change.position
+                    change.consume()
+                    onMove(delta)
+                }
+            }
+        } finally {
+            if (!released) onCancel()
+        }
+    }
+}
 
 private sealed class GridDrawerEntry {
     abstract val key: String
@@ -712,8 +774,8 @@ fun AppDrawer(
                                 .testTag("drawer_app_list_${app.drawerKey}")
                                 .onGloballyPositioned { gridItemBounds[entry.key] = it.boundsInRoot() }
                                 .pointerInput(entry.key, selectedFolderId, settings.appDrawerFolders) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = { start ->
+                                    detectDrawerDragAfterLongPress(
+                                        onStart = { start ->
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                             draggingEntry = entry
                                             dragTotalDistancePx = 0f
@@ -725,13 +787,12 @@ fun AppDrawer(
                                             hoveredFolderId = null
                                             activeDropIntent = GridDropIntent.NONE
                                         },
-                                        onDrag = { change, distance ->
-                                            change.consume()
+                                        onMove = { distance ->
                                             dragFingerRootPos += distance
                                             dragTotalDistancePx += hypot(distance.x, distance.y)
                                             updateDragHoverTarget(dragFingerRootPos, entry)
                                         },
-                                        onDragEnd = {
+                                        onRelease = {
                                             val handledByHome = onAppDragEnd(app)
                                             if (!handledByHome) {
                                                 if (with(density) { dragTotalDistancePx.toDp() } < 14.dp) {
@@ -743,7 +804,7 @@ fun AppDrawer(
                                             hoveredFolderId = null
                                             activeDropIntent = GridDropIntent.NONE
                                         },
-                                        onDragCancel = {
+                                        onCancel = {
                                             onAppDragRecognizerCancel(app)
                                             draggingEntry = null
                                             hoveredTargetKey = null
@@ -822,8 +883,8 @@ fun AppDrawer(
                                     }
                                     .pointerInput(entry.key, gridEntries.size, selectedFolderId,
                                         settings.appDrawerFolders) {
-                                        detectDragGesturesAfterLongPress(
-                                            onDragStart = { startOffset ->
+                                        detectDrawerDragAfterLongPress(
+                                            onStart = { startOffset ->
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 val cellBounds = gridItemBounds[entry.key]
                                                 draggingEntry = entry
@@ -843,13 +904,12 @@ fun AppDrawer(
                                                 hoveredFolderId = null
                                                 activeDropIntent = GridDropIntent.NONE
                                             },
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
+                                            onMove = { dragAmount ->
                                                 dragFingerRootPos += dragAmount
                                                 dragTotalDistancePx += hypot(dragAmount.x, dragAmount.y)
                                                 updateDragHoverTarget(dragFingerRootPos, entry)
                                             },
-                                            onDragEnd = {
+                                            onRelease = {
                                                 val handledByHome = (entry as? GridDrawerEntry.AppEntry)
                                                     ?.let { onAppDragEnd(it.app) } == true
                                                 val movedDistanceDp = with(density) { dragTotalDistancePx.toDp() }
@@ -869,7 +929,7 @@ fun AppDrawer(
                                                 hoveredFolderId = null
                                                 activeDropIntent = GridDropIntent.NONE
                                             },
-                                            onDragCancel = {
+                                            onCancel = {
                                                 (entry as? GridDrawerEntry.AppEntry)?.let {
                                                     onAppDragRecognizerCancel(it.app)
                                                 }
