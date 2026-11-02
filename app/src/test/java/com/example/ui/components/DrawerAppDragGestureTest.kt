@@ -375,11 +375,12 @@ class DrawerAppDragGestureTest {
             LumiaLauncherApp(viewModel)
         }
         compose.waitForIdle()
+        lateinit var appsFlow: MutableStateFlow<List<AppItem>>
         compose.runOnIdle {
             val field = LauncherViewModel::class.java.getDeclaredField("_apps")
             field.isAccessible = true
             @Suppress("UNCHECKED_CAST")
-            val appsFlow = field.get(viewModel) as MutableStateFlow<List<AppItem>>
+            appsFlow = field.get(viewModel) as MutableStateFlow<List<AppItem>>
             appsFlow.value = listOf(app)
         }
 
@@ -399,7 +400,11 @@ class DrawerAppDragGestureTest {
         compose.waitForIdle()
         val home = compose.onNodeWithTag("tiles_grid_page_home_1")
         home.assertIsDisplayed()
-        // This verifies the Lazy List source has actually left composition.
+        // HorizontalPager retains its adjacent All Apps page (beyondViewport=1),
+        // so edge dwell alone does not dispose the Lazy source in this two-page
+        // fixture. Simulate a catalog removal while the physical pointer is
+        // still DOWN: the actual Lazy item must leave composition before Back.
+        compose.runOnIdle { appsFlow.value = emptyList() }
         compose.onAllNodesWithTag(itemTag).assertCountEquals(0)
         val homeBounds = home.fetchSemanticsNode().boundsInRoot
         val stepPx = (homeBounds.width - 24f * density +
