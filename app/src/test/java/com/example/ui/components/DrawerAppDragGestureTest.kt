@@ -378,6 +378,11 @@ class DrawerAppDragGestureTest {
             LumiaLauncherApp(viewModel)
         }
         compose.waitForIdle()
+        val pager = compose.onNodeWithTag("launcher_horizontal_pager")
+        pager.performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        // Inject after pager navigation, matching the stable G05/List Back-only
+        // fixtures; startup app scanning may overwrite an earlier catalog value.
         lateinit var appsFlow: MutableStateFlow<List<AppItem>>
         compose.runOnIdle {
             val field = LauncherViewModel::class.java.getDeclaredField("_apps")
@@ -386,10 +391,6 @@ class DrawerAppDragGestureTest {
             appsFlow = field.get(viewModel) as MutableStateFlow<List<AppItem>>
             appsFlow.value = listOf(app)
         }
-
-        val pager = compose.onNodeWithTag("launcher_horizontal_pager")
-        pager.performTouchInput { swipeLeft() }
-        compose.waitForIdle()
         val itemTag = "drawer_app_list_${app.drawerKey}"
         compose.onNodeWithTag(itemTag).assertIsDisplayed()
         val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
