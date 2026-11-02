@@ -25,6 +25,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import com.example.data.model.AllAppsViewMode
@@ -424,6 +425,115 @@ class DrawerAppDragGestureTest {
         compose.mainClock.advanceTimeBy(700)
         compose.waitForIdle()
         compose.runOnIdle {
+            val rows = runBlocking { db.tileDao().getAllTiles() }
+            assertEquals(listOf(widget), rows)
+            assertEquals(0, rows.count { it.tileType == TileType.APP })
+        }
+        db.close()
+    }
+
+
+    /**
+     * G06 Back-only: unlike the catalog-removal fixture, the real List item
+     * stays composed throughout. The launcher drag preview is a visible
+     * witness that the root still owns the drag when Back is dispatched.
+     * Back must remove that preview before a stale physical MOVE/UP can
+     * reach the otherwise valid empty Home cell.
+     */
+    @Test fun listRootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        context.getSharedPreferences("lumia_first_run", Context.MODE_PRIVATE)
+            .edit().putBoolean("guided_v1", true).commit()
+        context.getSharedPreferences("lumia_default_widget_setup", Context.MODE_PRIVATE)
+            .edit().putBoolean("offered_v1", true).commit()
+        val db = Room.inMemoryDatabaseBuilder(context, LumiaDatabase::class.java)
+            .allowMainThreadQueries().build()
+        val widget = TileEntity(
+            id = "back_only_keeps_widget", title = "Keep widget", tileType = TileType.WIDGET,
+            pageId = "page_home_1", gridX = 3, gridY = 8,
+            appWidgetId = 432, widgetProvider = "com.acme/.Clock"
+        )
+        runBlocking { db.tileDao().insertOrUpdate(widget) }
+        val repo = LauncherRepository(
+            context, db.tileDao(), db,
+            exactAppTargetAvailable = { it == app },
+            releaseWidgetBinding = {}
+        )
+        repo.savePages(listOf(
+            LauncherPage("page_home_1", "Home", PageType.HOME, 0),
+            LauncherPage("page_all_apps", "All Apps", PageType.ALL_APPS, 1)
+        ))
+        repo.saveSettings(repo.loadSettings().copy(
+            defaultHomePageId = "page_home_1",
+            allAppsViewMode = AllAppsViewMode.METRO_LIST,
+            allAppsCategorizedEnabled = false,
+            allAppsGroupByCategory = false,
+            useRealAppIcons = false
+        ))
+        val viewModel = LauncherViewModel(repo, null)
+        var backDispatcher: OnBackPressedDispatcher? = null
+        var density = 1f
+        compose.setContent {
+            density = LocalDensity.current.density
+            backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            LumiaLauncherApp(viewModel)
+        }
+        compose.waitForIdle()
+        val pager = compose.onNodeWithTag("launcher_horizontal_pager")
+        pager.performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        lateinit var appsFlow: MutableStateFlow<List<AppItem>>
+        compose.runOnIdle {
+            val field = LauncherViewModel::class.java.getDeclaredField("_apps")
+            field.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            appsFlow = field.get(viewModel) as MutableStateFlow<List<AppItem>>
+            appsFlow.value = listOf(app)
+        }
+        val itemTag = "drawer_app_list_${app.drawerKey}"
+        compose.onNodeWithTag(itemTag).assertIsDisplayed()
+        val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
+        val start = compose.onNodeWithTag(itemTag).fetchSemanticsNode().boundsInRoot.center -
+            pagerBounds.topLeft
+
+        pager.performTouchInput { down(start) }
+        compose.mainClock.advanceTimeBy(700)
+        pager.performTouchInput { moveTo(Offset(2f, start.y)) }
+        compose.mainClock.advanceTimeBy(700)
+        compose.waitForIdle()
+        val home = compose.onNodeWithTag("tiles_grid_page_home_1")
+        home.assertIsDisplayed()
+        val homeBounds = home.fetchSemanticsNode().boundsInRoot
+        val stepPx = (homeBounds.width - 24f * density +
+            repo.loadSettings().tileSpacingDp * density) / 4f
+        val validEmptyCell = Offset(
+            homeBounds.left + 12f * density + stepPx / 2f,
+            homeBounds.top + 10f * density + stepPx / 2f
+        ) - pagerBounds.topLeft
+
+        // The List item must still exist, and the extra "Editor" Text is the
+        // actual launcher-root drag preview (MainActivity), not a test stub.
+        compose.onNodeWithTag(itemTag).assertExists()
+        compose.runOnIdle { assertEquals(listOf(app), appsFlow.value) }
+        compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(2)
+        assertEquals(listOf(widget), runBlocking { db.tileDao().getAllTiles() })
+
+        // Real Back dispatch while pointer is DOWN. The preview's disappearance
+        // proves that Back canceled the active root session, not catalog removal.
+        compose.runOnIdle { requireNotNull(backDispatcher).onBackPressed() }
+        compose.onNodeWithTag(itemTag).assertExists()
+        compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(1)
+        compose.runOnIdle { assertEquals(listOf(app), appsFlow.value) }
+        assertEquals(listOf(widget), runBlocking { db.tileDao().getAllTiles() })
+
+        pager.performTouchInput { moveTo(validEmptyCell); up() }
+        compose.mainClock.advanceTimeBy(700)
+        compose.waitForIdle()
+        compose.onNodeWithTag(itemTag).assertExists()
+        compose.runOnIdle {
+            assertEquals(listOf(app), appsFlow.value)
             val rows = runBlocking { db.tileDao().getAllTiles() }
             assertEquals(listOf(widget), rows)
             assertEquals(0, rows.count { it.tileType == TileType.APP })
