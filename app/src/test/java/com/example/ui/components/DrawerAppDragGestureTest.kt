@@ -434,13 +434,13 @@ class DrawerAppDragGestureTest {
 
 
     /**
-     * G06 Back-only: unlike the catalog-removal fixture, the real List item
-     * stays composed throughout. The launcher drag preview is a visible
+     * G06 Back-only: unlike the catalog-removal fixture, the actual List/Grid
+     * source stays composed throughout. The launcher drag preview is a visible
      * witness that the root still owns the drag when Back is dispatched.
      * Back must remove that preview before a stale physical MOVE/UP can
      * reach the otherwise valid empty Home cell.
      */
-    @Test fun listRootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows() {
+    private fun rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(mode: AllAppsViewMode) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
             .edit().clear().commit()
@@ -467,7 +467,7 @@ class DrawerAppDragGestureTest {
         ))
         repo.saveSettings(repo.loadSettings().copy(
             defaultHomePageId = "page_home_1",
-            allAppsViewMode = AllAppsViewMode.METRO_LIST,
+            allAppsViewMode = mode,
             allAppsCategorizedEnabled = false,
             allAppsGroupByCategory = false,
             useRealAppIcons = false
@@ -492,7 +492,11 @@ class DrawerAppDragGestureTest {
             appsFlow = field.get(viewModel) as MutableStateFlow<List<AppItem>>
             appsFlow.value = listOf(app)
         }
-        val itemTag = "drawer_app_list_${app.drawerKey}"
+        val itemTag = if (mode == AllAppsViewMode.METRO_LIST) "drawer_app_list_${app.drawerKey}"
+            else "drawer_app_grid_${app.drawerKey}"
+        if (mode == AllAppsViewMode.ONE_UI_GRID) {
+            compose.onNodeWithTag("app_drawer_grid").assertExists()
+        }
         compose.onNodeWithTag(itemTag).assertIsDisplayed()
         val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
         val start = compose.onNodeWithTag(itemTag).fetchSemanticsNode().boundsInRoot.center -
@@ -513,7 +517,7 @@ class DrawerAppDragGestureTest {
             homeBounds.top + 10f * density + stepPx / 2f
         ) - pagerBounds.topLeft
 
-        // The List item must still exist, and the extra "Editor" Text is the
+        // The List/Grid item must still exist, and the extra "Editor" Text is the
         // actual launcher-root drag preview (MainActivity), not a test stub.
         compose.onNodeWithTag(itemTag).assertExists()
         compose.runOnIdle { assertEquals(listOf(app), appsFlow.value) }
@@ -540,5 +544,11 @@ class DrawerAppDragGestureTest {
         }
         db.close()
     }
+
+    @Test fun listRootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows() =
+        rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(AllAppsViewMode.METRO_LIST)
+
+    @Test fun gridRootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows() =
+        rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(AllAppsViewMode.ONE_UI_GRID)
 
 }
