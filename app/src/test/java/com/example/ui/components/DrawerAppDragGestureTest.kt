@@ -327,4 +327,101 @@ class DrawerAppDragGestureTest {
         db.close()
     }
 
+
+    /**
+     * G06 root-to-Room negative path. Keep the physical pointer DOWN while the
+     * Lazy List source disappears on edge dwell, press Back on the real launcher,
+     * then deliver the stale MOVE/UP over a valid empty Home cell. The root
+     * observer must not pin anything after Back canceled its drag session.
+     */
+    @Test fun listRootBackAfterLazyDisposalLateUpLeavesRoomUnchanged() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        context.getSharedPreferences("lumia_first_run", Context.MODE_PRIVATE)
+            .edit().putBoolean("guided_v1", true).commit()
+        context.getSharedPreferences("lumia_default_widget_setup", Context.MODE_PRIVATE)
+            .edit().putBoolean("offered_v1", true).commit()
+        val db = Room.inMemoryDatabaseBuilder(context, LumiaDatabase::class.java)
+            .allowMainThreadQueries().build()
+        val widget = TileEntity(
+            id = "cancel_keeps_widget", title = "Keep widget", tileType = TileType.WIDGET,
+            pageId = "page_home_1", gridX = 3, gridY = 8,
+            appWidgetId = 432, widgetProvider = "com.acme/.Clock"
+        )
+        runBlocking { db.tileDao().insertOrUpdate(widget) }
+        val repo = LauncherRepository(
+            context, db.tileDao(), db,
+            exactAppTargetAvailable = { it == app },
+            releaseWidgetBinding = {}
+        )
+        repo.savePages(listOf(
+            LauncherPage("page_home_1", "Home", PageType.HOME, 0),
+            LauncherPage("page_all_apps", "All Apps", PageType.ALL_APPS, 1)
+        ))
+        repo.saveSettings(repo.loadSettings().copy(
+            defaultHomePageId = "page_home_1",
+            allAppsViewMode = AllAppsViewMode.METRO_LIST,
+            allAppsCategorizedEnabled = false,
+            allAppsGroupByCategory = false,
+            useRealAppIcons = false
+        ))
+        val viewModel = LauncherViewModel(repo, null)
+        var backDispatcher: OnBackPressedDispatcher? = null
+        var density = 1f
+        compose.setContent {
+            density = LocalDensity.current.density
+            backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            LumiaLauncherApp(viewModel)
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            val field = LauncherViewModel::class.java.getDeclaredField("_apps")
+            field.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val appsFlow = field.get(viewModel) as MutableStateFlow<List<AppItem>>
+            appsFlow.value = listOf(app)
+        }
+
+        val pager = compose.onNodeWithTag("launcher_horizontal_pager")
+        pager.performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        val itemTag = "drawer_app_list_${app.drawerKey}"
+        compose.onNodeWithTag(itemTag).assertIsDisplayed()
+        val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
+        val start = compose.onNodeWithTag(itemTag).fetchSemanticsNode().boundsInRoot.center -
+            pagerBounds.topLeft
+
+        pager.performTouchInput { down(start) }
+        compose.mainClock.advanceTimeBy(700)
+        pager.performTouchInput { moveTo(Offset(2f, start.y)) }
+        compose.mainClock.advanceTimeBy(700)
+        compose.waitForIdle()
+        val home = compose.onNodeWithTag("tiles_grid_page_home_1")
+        home.assertIsDisplayed()
+        // This verifies the Lazy List source has actually left composition.
+        compose.onAllNodesWithTag(itemTag).assertCountEquals(0)
+        val homeBounds = home.fetchSemanticsNode().boundsInRoot
+        val stepPx = (homeBounds.width - 24f * density +
+            repo.loadSettings().tileSpacingDp * density) / 4f
+        val validEmptyCell = Offset(
+            homeBounds.left + 12f * density + stepPx / 2f,
+            homeBounds.top + 10f * density + stepPx / 2f
+        ) - pagerBounds.topLeft
+        // Back must cancel the root-owned drag even though the source is gone.
+        compose.runOnIdle { requireNotNull(backDispatcher).onBackPressed() }
+        assertEquals(listOf(widget), runBlocking { db.tileDao().getAllTiles() })
+        // Deliver the old pointer's late release at the same valid cell used
+        // by the positive G05 test; it must not commit a Room APP row.
+        pager.performTouchInput { moveTo(validEmptyCell); up() }
+        compose.mainClock.advanceTimeBy(700)
+        compose.waitForIdle()
+        compose.runOnIdle {
+            val rows = runBlocking { db.tileDao().getAllTiles() }
+            assertEquals(listOf(widget), rows)
+            assertEquals(0, rows.count { it.tileType == TileType.APP })
+        }
+        db.close()
+    }
+
 }
