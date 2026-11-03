@@ -234,7 +234,7 @@ class DrawerAppDragGestureTest {
      * No fake onAppDragEnd callback. The catalog fixture is injected into the
      * ViewModel StateFlow because Robolectric has no installed work-profile app.
      */
-    @Test fun listRootPointerReleasePersistsOneExactHomeTileWithoutReplacingWidget() {
+    private fun rootPointerReleasePersistsOneExactHomeTileWithoutReplacingWidget(mode: AllAppsViewMode) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
             .edit().clear().commit()
@@ -261,7 +261,7 @@ class DrawerAppDragGestureTest {
         ))
         repo.saveSettings(repo.loadSettings().copy(
             defaultHomePageId = "page_home_1",
-            allAppsViewMode = AllAppsViewMode.METRO_LIST,
+            allAppsViewMode = mode,
             allAppsCategorizedEnabled = false,
             allAppsGroupByCategory = false,
             useRealAppIcons = false
@@ -287,7 +287,12 @@ class DrawerAppDragGestureTest {
             appsFlow.value = listOf(app)
         }
 
-        val itemTag = "drawer_app_list_${app.drawerKey}"
+        val itemTag = if (mode == AllAppsViewMode.METRO_LIST) "drawer_app_list_${app.drawerKey}"
+            else "drawer_app_grid_${app.drawerKey}"
+        if (mode == AllAppsViewMode.ONE_UI_GRID) {
+            // Assert the real Grid recognizer/source, not a synthetic callback.
+            compose.onNodeWithTag("app_drawer_grid").assertExists()
+        }
         compose.onNodeWithTag(itemTag).assertIsDisplayed()
         val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
         val start = compose.onNodeWithTag(itemTag).fetchSemanticsNode().boundsInRoot.center -
@@ -301,6 +306,12 @@ class DrawerAppDragGestureTest {
         compose.waitForIdle()
         val home = compose.onNodeWithTag("tiles_grid_page_home_1")
         home.assertIsDisplayed()
+        if (mode == AllAppsViewMode.ONE_UI_GRID) {
+            // The Grid item is still composed and the extra label is the root
+            // drag preview; the real root session survived edge navigation.
+            compose.onNodeWithTag(itemTag).assertExists()
+            compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(2)
+        }
         val homeBounds = home.fetchSemanticsNode().boundsInRoot
         val stepPx = (homeBounds.width - 24f * density +
             repo.loadSettings().tileSpacingDp * density) / 4f
@@ -330,6 +341,13 @@ class DrawerAppDragGestureTest {
         db.close()
     }
 
+
+    @Test fun listRootPointerReleasePersistsOneExactHomeTileWithoutReplacingWidget() =
+        rootPointerReleasePersistsOneExactHomeTileWithoutReplacingWidget(AllAppsViewMode.METRO_LIST)
+
+    /** G05 Grid valid release: root Grid pointer → Home geometry → ViewModel → Room. */
+    @Test fun gridRootPointerReleasePersistsOneExactHomeTileWithoutReplacingWidget() =
+        rootPointerReleasePersistsOneExactHomeTileWithoutReplacingWidget(AllAppsViewMode.ONE_UI_GRID)
 
     /**
      * G06 root-to-Room negative path. Keep the physical pointer DOWN while the
