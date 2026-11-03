@@ -577,7 +577,7 @@ class DrawerAppDragGestureTest {
      * A locked layout rejects drag initiation; an occupied HOME footprint
      * rejects the completed release after the edge transition.
      */
-    private fun rootInvalidDropKeepsRowsAndPageOrder(mode: AllAppsViewMode, locked: Boolean, offHome: Boolean = false) {
+    private fun rootInvalidDropKeepsRowsAndPageOrder(mode: AllAppsViewMode, locked: Boolean, offHome: Boolean = false, offHomeRight: Boolean = false) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
             .edit().clear().commit()
@@ -661,9 +661,13 @@ class DrawerAppDragGestureTest {
             ) - pagerBounds.topLeft
             val releasePoint = if (offHome) {
                 // Move outside the measured Home grid while the root owns DOWN.
-                Offset(-48f * density, occupiedCell.y)
+                if (offHomeRight) Offset(bounds.right - pagerBounds.left + 48f * density, occupiedCell.y)
+                else Offset(-48f * density, occupiedCell.y)
             } else occupiedCell
-            if (offHome) check(releasePoint.x + pagerBounds.left < bounds.left)
+            if (offHome) {
+                if (offHomeRight) check(releasePoint.x + pagerBounds.left > bounds.right)
+                else check(releasePoint.x + pagerBounds.left < bounds.left)
+            }
             pager.performTouchInput { moveTo(releasePoint); up() }
         }
         compose.mainClock.advanceTimeBy(700)
@@ -695,5 +699,12 @@ class DrawerAppDragGestureTest {
 
     @Test fun gridOffHomeReleaseDoesNotPersistApp() =
         rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.ONE_UI_GRID, false, offHome = true)
+
+    /** G06 opposite-side off-grid release: same root/Room fixture, both drawer modes. */
+    @Test fun listOffHomeRightReleaseDoesNotPersistApp() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.METRO_LIST, false, offHome = true, offHomeRight = true)
+
+    @Test fun gridOffHomeRightReleaseDoesNotPersistApp() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.ONE_UI_GRID, false, offHome = true, offHomeRight = true)
 
 }
