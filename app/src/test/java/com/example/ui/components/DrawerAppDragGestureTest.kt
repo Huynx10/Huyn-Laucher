@@ -577,7 +577,7 @@ class DrawerAppDragGestureTest {
      * A locked layout rejects drag initiation; an occupied HOME footprint
      * rejects the completed release after the edge transition.
      */
-    private fun rootInvalidDropKeepsRowsAndPageOrder(mode: AllAppsViewMode, locked: Boolean) {
+    private fun rootInvalidDropKeepsRowsAndPageOrder(mode: AllAppsViewMode, locked: Boolean, offHome: Boolean = false) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
             .edit().clear().commit()
@@ -659,7 +659,12 @@ class DrawerAppDragGestureTest {
                 bounds.left + 12f * density + stepPx / 2f,
                 bounds.top + 10f * density + stepPx / 2f
             ) - pagerBounds.topLeft
-            pager.performTouchInput { moveTo(occupiedCell); up() }
+            val releasePoint = if (offHome) {
+                // Move outside the measured Home grid while the root owns DOWN.
+                Offset(-48f * density, occupiedCell.y)
+            } else occupiedCell
+            if (offHome) check(releasePoint.x + pagerBounds.left < bounds.left)
+            pager.performTouchInput { moveTo(releasePoint); up() }
         }
         compose.mainClock.advanceTimeBy(700)
         compose.waitForIdle()
@@ -684,5 +689,11 @@ class DrawerAppDragGestureTest {
 
     @Test fun gridLockedLayoutDoesNotPersistApp() =
         rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.ONE_UI_GRID, true)
+
+    @Test fun listOffHomeReleaseDoesNotPersistApp() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.METRO_LIST, false, offHome = true)
+
+    @Test fun gridOffHomeReleaseDoesNotPersistApp() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.ONE_UI_GRID, false, offHome = true)
 
 }
