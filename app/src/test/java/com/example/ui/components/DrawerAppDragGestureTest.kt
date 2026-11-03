@@ -459,7 +459,7 @@ class DrawerAppDragGestureTest {
      * Back must remove that preview before a stale physical MOVE/UP can
      * reach the otherwise valid empty Home cell.
      */
-    private fun rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(mode: AllAppsViewMode) {
+    private fun rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(mode: AllAppsViewMode, cancelPointer: Boolean = false) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
             .edit().clear().commit()
@@ -543,15 +543,25 @@ class DrawerAppDragGestureTest {
         compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(2)
         assertEquals(listOf(widget), runBlocking { db.tileDao().getAllTiles() })
 
-        // Real Back dispatch while pointer is DOWN. The preview's disappearance
-        // proves that Back canceled the active root session, not catalog removal.
-        compose.runOnIdle { requireNotNull(backDispatcher).onBackPressed() }
+        // Cancel the physical pointer or dispatch Back while the root owns DOWN.
+        // Both paths must invalidate the preview/session before any reentry.
+        if (cancelPointer) {
+            pager.performTouchInput { cancel() }
+        } else {
+            compose.runOnIdle { requireNotNull(backDispatcher).onBackPressed() }
+        }
         compose.onNodeWithTag(itemTag).assertExists()
         compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(1)
         compose.runOnIdle { assertEquals(listOf(app), appsFlow.value) }
         assertEquals(listOf(widget), runBlocking { db.tileDao().getAllTiles() })
 
-        pager.performTouchInput { moveTo(validEmptyCell); up() }
+        if (cancelPointer) {
+            // A fresh short pointer gesture over the valid cell cannot inherit
+            // the canceled source's long-press or commit its APP identity.
+            pager.performTouchInput { down(validEmptyCell); up() }
+        } else {
+            pager.performTouchInput { moveTo(validEmptyCell); up() }
+        }
         compose.mainClock.advanceTimeBy(700)
         compose.waitForIdle()
         compose.onNodeWithTag(itemTag).assertExists()
@@ -569,6 +579,13 @@ class DrawerAppDragGestureTest {
 
     @Test fun gridRootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows() =
         rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(AllAppsViewMode.ONE_UI_GRID)
+
+    /** G06 List/Grid physical CANCEL followed by a new pointer gesture: no stale root owner. */
+    @Test fun listRootPointerCancelThenReentryDoesNotPersistApp() =
+        rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(AllAppsViewMode.METRO_LIST, cancelPointer = true)
+
+    @Test fun gridRootPointerCancelThenReentryDoesNotPersistApp() =
+        rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(AllAppsViewMode.ONE_UI_GRID, cancelPointer = true)
 
 
     /**
