@@ -570,4 +570,119 @@ class DrawerAppDragGestureTest {
     @Test fun gridRootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows() =
         rootBackOnlyWhileSourcePresentRejectsLateUpAndKeepsRoomRows(AllAppsViewMode.ONE_UI_GRID)
 
+
+    /**
+     * G06 negative root-to-Room matrix. Unlike repository-only collision tests,
+     * these drive the actual List/Grid recognizer and root pointer observer.
+     * A locked layout rejects drag initiation; an occupied HOME footprint
+     * rejects the completed release after the edge transition.
+     */
+    private fun rootInvalidDropKeepsRowsAndPageOrder(mode: AllAppsViewMode, locked: Boolean) {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        context.getSharedPreferences("lumia_first_run", Context.MODE_PRIVATE)
+            .edit().putBoolean("guided_v1", true).commit()
+        context.getSharedPreferences("lumia_default_widget_setup", Context.MODE_PRIVATE)
+            .edit().putBoolean("offered_v1", true).commit()
+        val db = Room.inMemoryDatabaseBuilder(context, LumiaDatabase::class.java)
+            .allowMainThreadQueries().build()
+        val widget = TileEntity(
+            id = "occupied_widget", title = "Occupied", tileType = TileType.WIDGET,
+            pageId = "page_home_1", gridX = 0, gridY = 0,
+            appWidgetId = 432, widgetProvider = "com.acme/.Clock"
+        )
+        runBlocking { db.tileDao().insertOrUpdate(widget) }
+        val repo = LauncherRepository(
+            context, db.tileDao(), db,
+            exactAppTargetAvailable = { it == app },
+            releaseWidgetBinding = {}
+        )
+        val originalPages = listOf(
+            LauncherPage("page_home_1", "Home", PageType.HOME, 0),
+            LauncherPage("page_all_apps", "All Apps", PageType.ALL_APPS, 1)
+        )
+        repo.savePages(originalPages)
+        repo.saveSettings(repo.loadSettings().copy(
+            defaultHomePageId = "page_home_1",
+            allAppsViewMode = mode,
+            allAppsCategorizedEnabled = false,
+            allAppsGroupByCategory = false,
+            lockHomeLayout = locked,
+            useRealAppIcons = false
+        ))
+        val viewModel = LauncherViewModel(repo, null)
+        var density = 1f
+        compose.setContent {
+            density = LocalDensity.current.density
+            LumiaLauncherApp(viewModel)
+        }
+        compose.waitForIdle()
+        val pager = compose.onNodeWithTag("launcher_horizontal_pager")
+        pager.performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            val field = LauncherViewModel::class.java.getDeclaredField("_apps")
+            field.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val appsFlow = field.get(viewModel) as MutableStateFlow<List<AppItem>>
+            appsFlow.value = listOf(app)
+        }
+        val tag = if (mode == AllAppsViewMode.METRO_LIST)
+            "drawer_app_list_${app.drawerKey}" else "drawer_app_grid_${app.drawerKey}"
+        if (mode == AllAppsViewMode.ONE_UI_GRID) {
+            compose.onNodeWithTag("app_drawer_grid").assertExists()
+        }
+        compose.onNodeWithTag(tag).assertIsDisplayed()
+        val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
+        val start = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.center -
+            pagerBounds.topLeft
+        pager.performTouchInput { down(start) }
+        compose.mainClock.advanceTimeBy(700)
+        pager.performTouchInput { moveTo(Offset(2f, start.y)) }
+        compose.mainClock.advanceTimeBy(700)
+        compose.waitForIdle()
+
+        if (locked) {
+            // Layout lock prevents even the edge transition while the pointer is down.
+            compose.onNodeWithTag(tag).assertExists()
+            compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(1)
+            pager.performTouchInput { up() }
+        } else {
+            val home = compose.onNodeWithTag("tiles_grid_page_home_1")
+            home.assertIsDisplayed()
+            compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(2)
+            val bounds = home.fetchSemanticsNode().boundsInRoot
+            val stepPx = (bounds.width - 24f * density +
+                repo.loadSettings().tileSpacingDp * density) / 4f
+            val occupiedCell = Offset(
+                bounds.left + 12f * density + stepPx / 2f,
+                bounds.top + 10f * density + stepPx / 2f
+            ) - pagerBounds.topLeft
+            pager.performTouchInput { moveTo(occupiedCell); up() }
+        }
+        compose.mainClock.advanceTimeBy(700)
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(listOf(widget), runBlocking { db.tileDao().getAllTiles() })
+            assertEquals(0, runBlocking { db.tileDao().getAllTiles() }.count {
+                it.tileType == TileType.APP
+            })
+            assertEquals(originalPages, repo.loadPages())
+        }
+        db.close()
+    }
+
+    @Test fun listOccupiedHomeCellDoesNotPersistApp() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.METRO_LIST, false)
+
+    @Test fun gridOccupiedHomeCellDoesNotPersistApp() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.ONE_UI_GRID, false)
+
+    @Test fun listLockedLayoutDoesNotPersistApp() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.METRO_LIST, true)
+
+    @Test fun gridLockedLayoutDoesNotPersistApp() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.ONE_UI_GRID, true)
+
 }
