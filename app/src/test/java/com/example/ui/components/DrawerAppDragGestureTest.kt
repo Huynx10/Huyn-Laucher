@@ -594,7 +594,7 @@ class DrawerAppDragGestureTest {
      * A locked layout rejects drag initiation; an occupied HOME footprint
      * rejects the completed release after the edge transition.
      */
-    private fun rootInvalidDropKeepsRowsAndPageOrder(mode: AllAppsViewMode, locked: Boolean, offHome: Boolean = false, offHomeRight: Boolean = false) {
+    private fun rootInvalidDropKeepsRowsAndPageOrder(mode: AllAppsViewMode, locked: Boolean, offHome: Boolean = false, offHomeRight: Boolean = false, internalDrawerOnly: Boolean = false) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
             .edit().clear().commit()
@@ -654,38 +654,47 @@ class DrawerAppDragGestureTest {
         val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
         val start = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.center -
             pagerBounds.topLeft
-        pager.performTouchInput { down(start) }
-        compose.mainClock.advanceTimeBy(700)
-        pager.performTouchInput { moveTo(Offset(2f, start.y)) }
-        compose.mainClock.advanceTimeBy(700)
-        compose.waitForIdle()
-
-        if (locked) {
-            // Layout lock prevents even the edge transition while the pointer is down.
-            compose.onNodeWithTag(tag).assertExists()
-            compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(1)
-            pager.performTouchInput { up() }
+        if (internalDrawerOnly) {
+            // G04: finish a long-press drag entirely inside All Apps, without
+            // entering the Home edge-dwell region or invoking a Home drop.
+            pager.performTouchInput { down(start) }
+            compose.mainClock.advanceTimeBy(700)
+            pager.performTouchInput { moveTo(start + Offset(28f, 0f)); up() }
         } else {
-            val home = compose.onNodeWithTag("tiles_grid_page_home_1")
-            home.assertIsDisplayed()
-            compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(2)
-            val bounds = home.fetchSemanticsNode().boundsInRoot
-            val stepPx = (bounds.width - 24f * density +
-                repo.loadSettings().tileSpacingDp * density) / 4f
-            val occupiedCell = Offset(
-                bounds.left + 12f * density + stepPx / 2f,
-                bounds.top + 10f * density + stepPx / 2f
-            ) - pagerBounds.topLeft
-            val releasePoint = if (offHome) {
-                // Move outside the measured Home grid while the root owns DOWN.
-                if (offHomeRight) Offset(bounds.right - pagerBounds.left + 48f * density, occupiedCell.y)
-                else Offset(-48f * density, occupiedCell.y)
-            } else occupiedCell
-            if (offHome) {
-                if (offHomeRight) check(releasePoint.x + pagerBounds.left > bounds.right)
-                else check(releasePoint.x + pagerBounds.left < bounds.left)
+            pager.performTouchInput { down(start) }
+            compose.mainClock.advanceTimeBy(700)
+            pager.performTouchInput { moveTo(Offset(2f, start.y)) }
+            compose.mainClock.advanceTimeBy(700)
+            compose.waitForIdle()
+    
+            if (locked) {
+                // Layout lock prevents even the edge transition while the pointer is down.
+                compose.onNodeWithTag(tag).assertExists()
+                compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(1)
+                pager.performTouchInput { up() }
+            } else {
+                val home = compose.onNodeWithTag("tiles_grid_page_home_1")
+                home.assertIsDisplayed()
+                compose.onAllNodesWithText(app.label, useUnmergedTree = true).assertCountEquals(2)
+                val bounds = home.fetchSemanticsNode().boundsInRoot
+                val stepPx = (bounds.width - 24f * density +
+                    repo.loadSettings().tileSpacingDp * density) / 4f
+                val occupiedCell = Offset(
+                    bounds.left + 12f * density + stepPx / 2f,
+                    bounds.top + 10f * density + stepPx / 2f
+                ) - pagerBounds.topLeft
+                val releasePoint = if (offHome) {
+                    // Move outside the measured Home grid while the root owns DOWN.
+                    if (offHomeRight) Offset(bounds.right - pagerBounds.left + 48f * density, occupiedCell.y)
+                    else Offset(-48f * density, occupiedCell.y)
+                } else occupiedCell
+                if (offHome) {
+                    if (offHomeRight) check(releasePoint.x + pagerBounds.left > bounds.right)
+                    else check(releasePoint.x + pagerBounds.left < bounds.left)
+                }
+                pager.performTouchInput { moveTo(releasePoint); up() }
             }
-            pager.performTouchInput { moveTo(releasePoint); up() }
+    
         }
         compose.mainClock.advanceTimeBy(700)
         compose.waitForIdle()
@@ -698,6 +707,13 @@ class DrawerAppDragGestureTest {
         }
         db.close()
     }
+
+    /** G04 root-to-Room: an internal List/Grid drag cannot pin or reorder Home. */
+    @Test fun listInternalDrawerDragDoesNotPersistOrReorder() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.METRO_LIST, false, internalDrawerOnly = true)
+
+    @Test fun gridInternalDrawerDragDoesNotPersistOrReorder() =
+        rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.ONE_UI_GRID, false, internalDrawerOnly = true)
 
     @Test fun listOccupiedHomeCellDoesNotPersistApp() =
         rootInvalidDropKeepsRowsAndPageOrder(AllAppsViewMode.METRO_LIST, false)
