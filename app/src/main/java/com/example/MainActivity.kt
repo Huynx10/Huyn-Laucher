@@ -1570,6 +1570,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                     onDismiss = { viewModel.closeSettings() }
                 )
             } else SettingsSheet(
+                isSavingSettings = isSavingSettings,
                 settings = settings,
                 telemetry = telemetry,
                 customWallpaperBitmap = customWallpaperBitmap,
