@@ -659,7 +659,13 @@ class DrawerAppDragGestureTest {
             // entering the Home edge-dwell region or invoking a Home drop.
             pager.performTouchInput { down(start) }
             compose.mainClock.advanceTimeBy(700)
-            pager.performTouchInput { moveTo(start + Offset(28f, 0f)); up() }
+            pager.performTouchInput { moveTo(start + Offset(28f, 0f)) }
+            compose.waitForIdle()
+            // The original drawer source must remain mounted during the
+            // internal gesture; Home must not become the active drop target.
+            compose.onNodeWithTag(tag).assertIsDisplayed()
+            compose.onNodeWithTag("tiles_grid_page_home_1").assertDoesNotExist()
+            pager.performTouchInput { up() }
         } else {
             pager.performTouchInput { down(start) }
             compose.mainClock.advanceTimeBy(700)
@@ -698,6 +704,11 @@ class DrawerAppDragGestureTest {
         }
         compose.mainClock.advanceTimeBy(700)
         compose.waitForIdle()
+        if (internalDrawerOnly) {
+            // Releasing within All Apps must retain the drawer and its source.
+            compose.onNodeWithTag(tag).assertIsDisplayed()
+            compose.onNodeWithTag("tiles_grid_page_home_1").assertDoesNotExist()
+        }
         compose.runOnIdle {
             assertEquals(listOf(widget), runBlocking { db.tileDao().getAllTiles() })
             assertEquals(0, runBlocking { db.tileDao().getAllTiles() }.count {
