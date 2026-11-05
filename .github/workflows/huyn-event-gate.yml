@@ -1,0 +1,145 @@
+name: Huyn Launcher - Scoped Event Gate
+
+# Staged in a Draft PR. workflow_run and issue_comment activate only when
+# this workflow exists on default branch after independent review.
+on:
+  push:
+    branches: [ci/huyn-event-orchestrator-20261105]
+    paths:
+      - '.github/workflows/huyn-event-gate.yml'
+      - 'tools/huyn-event-gate/**'
+  workflow_run:
+    workflows: ['Lumia Launcher Android CI']
+    types: [completed]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      task:
+        description: Only fixed read-only Finder triage allowed
+        required: true
+        type: choice
+        options: [f1-readonly]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: huyn-event-${{ github.event.workflow_run.id || github.event.comment.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  hosted-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+      source_sha: ${{ steps.gate.outputs.source_sha }}
+      event_kind: ${{ steps.gate.outputs.event_kind }}
+      event_key: ${{ steps.gate.outputs.event_key }}
+    steps:
+      - name: Checkout trusted code only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && 'ci/huyn-event-orchestrator-20261105' || 'main' }}
+          persist-credentials: false
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Policy regression suite
+        if: github.event_name == 'push'
+        run: node --test tools/huyn-event-gate/*.test.mjs
+      - name: Verify event and exact current PR head
+        id: gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTOR: ${{ github.actor }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync, writeFileSync } from 'node:fs';
+          import { gateEvent, verifyLivePr } from './tools/huyn-event-gate/policy.mjs';
+          const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          const event = gateEvent({
+            eventName: process.env.EVENT_NAME, actor: process.env.EVENT_ACTOR,
+            ref: process.env.EVENT_REF, repository: process.env.EVENT_REPO, payload
+          });
+          let gate = { verified: false, reason: event.reason ?? 'pilot_only' };
+          if (event.authorized && event.pr) {
+            const res = await fetch('https://api.github.com/repos/Huynx10/Huyn-Laucher/pulls/41', {
+              headers: {
+                'Accept': 'application/vnd.github+json',
+                'Authorization': 'Bearer ' + process.env.GH_TOKEN,
+                'X-GitHub-Api-Version': '2022-11-28'
+              }
+            });
+            if (res.ok) gate = verifyLivePr({ pr: await res.json(), authorizedEvent: event });
+            else gate = { verified: false, reason: 'github_pr_read_failed_' + res.status };
+          }
+          const approved = Boolean(event.authorized && event.runLocal && gate.verified);
+          const safeSha = approved ? gate.sourceSha : '';
+          const eventKey = event.authorized ? event.eventKey : 'rejected';
+          const kind = approved ? event.kind : 'NOT_DISPATCHED';
+          for (const [key,value] of Object.entries({ approved, source_sha: safeSha, event_key: eventKey, event_kind: kind }))
+            appendFileSync(process.env.GITHUB_OUTPUT, key + '=' + value + '\n');
+          const envelope = { accepted: event.authorized, approvedForReadOnlyRunner: approved,
+            eventKey, kind: event.kind ?? 'REJECTED', sourceSha: safeSha || null,
+            reason: gate.reason ?? (approved ? 'exact_live_pr_verified' : 'pilot_not_dispatched'),
+            independentQaStillRequired: true, writerLeaseStillRequired: true };
+          writeFileSync('huyn-event-envelope.json', JSON.stringify(envelope, null, 2) + '\n');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            '\n### Huyn scoped event gate\n' +
+            '- Event: ' + envelope.kind + '\n' +
+            '- Authorized input: ' + envelope.accepted + '\n' +
+            '- Live PR SHA gate: ' + (gate.verified ? 'VERIFIED' : 'NOT_VERIFIED') + '\n' +
+            '- iMac read-only dispatch: ' + approved + '\n' +
+            '- Code-write/release approval: NEVER\n');
+          console.log('Event gate:', envelope.kind, 'iMac dispatch:', approved);
+          NODE
+      - name: Upload bounded event audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: huyn-gate-envelope-${{ github.run_id }}
+          path: huyn-event-envelope.json
+          retention-days: 7
+
+  f1-local-readonly:
+    needs: hosted-gate
+    if: needs.hosted-gate.outputs.approved == 'true'
+    runs-on: [self-hosted, macOS, ARM64, huyn-codex]
+    timeout-minutes: 8
+    permissions: {}
+    env:
+      APPROVED_SHA: ${{ needs.hosted-gate.outputs.source_sha }}
+      APPROVED_EVENT: ${{ needs.hosted-gate.outputs.event_kind }}
+    steps:
+      - name: Fixed Codex read-only checkpoint (no checkout or GitHub credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:$PATH"
+          [[ "$(uname -m)" == "arm64" ]]
+          [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$APPROVED_EVENT" == "CI_F1" || "$APPROVED_EVENT" == "OWNER_F1_PROBE" ]]
+          /opt/homebrew/bin/codex login status >/dev/null
+          d="$(mktemp -d "${RUNNER_TEMP:-/tmp}/huyn-f1-check.XXXXXX")"
+          trap 'rm -rf "$d"' EXIT
+          cd "$d"
+          prompt="Return exactly HUYN_F1_REVIEW_REQUIRED with no other text. Read-only gate only; do not read files, run tools, edit code, merge or release."
+          /opt/homebrew/bin/codex exec --ephemeral --sandbox read-only \
+            --skip-git-repo-check --output-last-message "$d/final.txt" \
+            "$prompt" >"$d/stdout.txt" 2>"$d/stderr.txt"
+          [[ "$(tr -d '\r\n' < "$d/final.txt")" == "HUYN_F1_REVIEW_REQUIRED" ]]
+          echo "HUYN_F1_REVIEW_REQUIRED"
+          {
+            echo "### Read-only F1 gate"
+            echo "- Live PR head SHA: $APPROVED_SHA"
+            echo "- Codex invocation: PASS (no source checkout)"
+            echo "- F1 fix, QA, and writer handoff: NOT PERFORMED"
+          } >> "$GITHUB_STEP_SUMMARY"
