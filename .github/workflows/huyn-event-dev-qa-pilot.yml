@@ -1,0 +1,150 @@
+name: Huyn Event - Autonomous Dev QA Pilot
+
+# One isolated event-driven development demonstration.
+# Never run untrusted PR contents or checkout the repo on the owner's iMac.
+on:
+  push:
+    branches:
+      - ci/huyn-event-dev-qa-pilot-20261105
+    paths:
+      - '.github/workflows/huyn-event-dev-qa-pilot.yml'
+
+permissions: {}
+
+concurrency:
+  group: huyn-dev-qa-pilot
+  cancel-in-progress: false
+
+jobs:
+  dev-codex-local:
+    if: github.repository == 'Huynx10/Huyn-Laucher' && github.ref == 'refs/heads/ci/huyn-event-dev-qa-pilot-20261105' && github.actor == 'Huynx10'
+    runs-on: [self-hosted, macOS, ARM64, huyn-codex]
+    timeout-minutes: 10
+    steps:
+      - name: Generate F4 p95 frame-time code with Codex Local (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:$PATH"
+          [[ "$(uname -m)" == "arm64" ]]
+          /opt/homebrew/bin/codex login status >/dev/null 2>&1
+          out="${RUNNER_TEMP:-/tmp}/huyn-dev-pilot-$GITHUB_RUN_ID"
+          mkdir -p "$out"
+          chmod 700 "$out"
+          cd "$out"
+          prompt='Produce exactly the content of a small ES module in plain JavaScript with only one exported function named p95FrameMs. Signature p95FrameMs(samples). Return null unless samples is a nonempty array of finite nonnegative numbers. Do not mutate input. Otherwise compute the nearest-rank 95th percentile: sort a copy ascending and select index Math.ceil(0.95 * length) - 1. No imports, no dependencies, no filesystem/network, no globals other than JavaScript built-ins, no tests in your answer. Output ONLY runnable module source code, without explanation or markdown fences. Do not read local files or use tools.'
+          /opt/homebrew/bin/codex exec --ephemeral --sandbox read-only \
+            --skip-git-repo-check --output-last-message "$out/agent.txt" \
+            "$prompt" >"$out/codex-stdout.txt" 2>"$out/codex-stderr.txt"
+          node --input-type=module - "$out/agent.txt" "$out/p95FrameMs.mjs" <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const source = readFileSync(process.argv[2], 'utf8').trim();
+          const match = source.match(/^```(?:javascript|js)?\s*\n([\s\S]*?)\n```$/i);
+          const code = (match ? match[1] : source).trim();
+          if (code.length < 70 || code.length > 6000 ||
+              !/^export\s+function\s+p95FrameMs\s*\(/.test(code) ||
+              /(?:\bimport\b|\brequire\b|\bprocess\b|\bglobalThis\b|\beval\b|\bFunction\b|\bfetch\b|\bWebAssembly\b|\bexec\b|\bchild_process\b|\bfs\b|https?:|\bnew\s+Function\b)/.test(code)) {
+            throw new Error('Generated code was outside the allowed standalone pure-function contract');
+          }
+          writeFileSync(process.argv[3], code + '\n');
+          console.log('Codex produced one bounded standalone ESM module (' + code.length + ' chars).');
+          NODE
+          echo "Codex Local produced a candidate. Source is executed only later on GitHub-hosted QA." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload candidate source (not a Git commit)
+        uses: actions/upload-artifact@v4
+        with:
+          name: huyn-f4-generated-code-${{ github.run_id }}
+          path: ${{ runner.temp }}/huyn-dev-pilot-${{ github.run_id }}/p95FrameMs.mjs
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Purge temporary Codex output
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP:-/tmp}/huyn-dev-pilot-$GITHUB_RUN_ID"
+
+  independent-qa:
+    needs: dev-codex-local
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Retrieve generated candidate from iMac
+        uses: actions/download-artifact@v4
+        with:
+          name: huyn-f4-generated-code-${{ github.run_id }}
+          path: candidate
+      - name: Validate and execute independent p95 specification tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import assert from 'node:assert/strict';
+          const checks = [];
+          function check(name, fn) {
+            fn();
+            checks.push(name);
+            console.log('PASS:', name);
+          }
+          try {
+            const src = readFileSync('candidate/p95FrameMs.mjs', 'utf8');
+            assert.ok(src.length < 6001 && /^export\s+function\s+p95FrameMs\s*\(/.test(src.trim()), 'candidate interface');
+            assert.ok(!/(?:\bimport\b|\brequire\b|\bprocess\b|\bglobalThis\b|\beval\b|\bFunction\b|\bfetch\b|\bWebAssembly\b|\bexec\b|\bchild_process\b|\bfs\b|https?:)/.test(src), 'no side-effect APIs');
+            const { p95FrameMs } = await import('./candidate/p95FrameMs.mjs');
+            check('empty samples -> null', () => assert.equal(p95FrameMs([]), null));
+            check('one frame', () => assert.equal(p95FrameMs([16]), 16));
+            check('unsorted four frames', () => assert.equal(p95FrameMs([48, 16, 0, 32]), 48));
+            check('nearest rank, 20 frames', () => assert.equal(p95FrameMs([99,4,12,7,5,23,8,9,1,6,11,2,3,10,13,14,15,16,17,18]), 23));
+            check('float samples', () => assert.equal(p95FrameMs([20.5,12.3,14.1,18.9,16.7]),20.5));
+            check('invalid values rejected', () => { for(const v of [null, undefined, {}, [-1], [Infinity], [NaN], [1,'2'], [1,null]]) assert.equal(p95FrameMs(v), null); });
+            check('input never mutated', () => { const a=[18,5,1]; assert.equal(p95FrameMs(a),18); assert.deepEqual(a,[18,5,1]); });
+            const verdict = { status:'PASS',task:'F4-p95-pilot',checks:checks.length,verifiedSource:'artifact',event:'push',ciSha:process.env.GITHUB_SHA,automaticHandoff:'READY_FOR_HUMAN_REVIEW',androidSourceUnchanged:true };
+            writeFileSync('qa-verdict.json', JSON.stringify(verdict,null,2)+'\n');
+            console.log('Independent QA verdict: PASS, checks:',checks.length);
+          } catch (e) {
+            writeFileSync('qa-verdict.json',JSON.stringify({status:'FAIL',task:'F4-p95-pilot',reason:String(e),checks:checks.length,ciSha:process.env.GITHUB_SHA},null,2)+'\n');
+            console.error('Independent QA verdict: FAIL:',e.message);
+            process.exitCode=1;
+          }
+          NODE
+      - name: Upload independent QA verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: huyn-f4-qa-verdict-${{ github.run_id }}
+          path: qa-verdict.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  automatic-handoff:
+    needs: independent-qa
+    if: success()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Download QA verdict
+        uses: actions/download-artifact@v4
+        with:
+          name: huyn-f4-qa-verdict-${{ github.run_id }}
+          path: verdict
+      - name: Verify QA PASS and record the next owner gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const v = JSON.parse(readFileSync('verdict/qa-verdict.json','utf8'));
+          if (v.status !== 'PASS' || v.automaticHandoff !== 'READY_FOR_HUMAN_REVIEW' || v.androidSourceUnchanged !== true)
+            throw new Error('QA did not authorize the next read-only review gate');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            '### Automatic event-driven handoff\n' +
+            '- Trigger: GitHub push (not a scheduled task)\n' +
+            '- Codex Local generated module: artifact\n' +
+            '- Independent hosted QA: PASS, ' + v.checks + ' assertions\n' +
+            '- Next owner: Product/Regression review (not autonomously started)\n' +
+            '- Android source, merge, signing, release: UNCHANGED\n');
+          console.log('AUTO_HANDOFF_REVIEW_READY');
+          NODE
