@@ -2,7 +2,7 @@ export function p95FrameMs(samples) {
   if (
     !Array.isArray(samples) ||
     samples.length === 0 ||
-    !samples.every(
+    !Array.from(samples).every(
       (value) => typeof value === "number" && Number.isFinite(value) && value >= 0
     )
   ) {
