@@ -43,7 +43,7 @@ jobs:
       - name: Checkout trusted code only
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'push' && 'ci/huyn-event-orchestrator-20261105' || 'main' }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Node.js
         uses: actions/setup-node@v4
@@ -120,7 +120,7 @@ jobs:
       APPROVED_SHA: ${{ needs.hosted-gate.outputs.source_sha }}
       APPROVED_EVENT: ${{ needs.hosted-gate.outputs.event_kind }}
     steps:
-      - name: Fixed Codex read-only checkpoint (no checkout or GitHub credentials)
+      - name: Runner readiness checkpoint (no model call or source checkout)
         shell: bash
         run: |
           set -euo pipefail
@@ -129,18 +129,11 @@ jobs:
           [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$APPROVED_EVENT" == "CI_F1" || "$APPROVED_EVENT" == "OWNER_F1_PROBE" ]]
           /opt/homebrew/bin/codex login status >/dev/null
-          d="$(mktemp -d "${RUNNER_TEMP:-/tmp}/huyn-f1-check.XXXXXX")"
-          trap 'rm -rf "$d"' EXIT
-          cd "$d"
-          prompt="Return exactly HUYN_F1_REVIEW_REQUIRED with no other text. Read-only gate only; do not read files, run tools, edit code, merge or release."
-          /opt/homebrew/bin/codex exec --ephemeral --sandbox read-only \
-            --skip-git-repo-check --output-last-message "$d/final.txt" \
-            "$prompt" >"$d/stdout.txt" 2>"$d/stderr.txt"
-          [[ "$(tr -d '\r\n' < "$d/final.txt")" == "HUYN_F1_REVIEW_REQUIRED" ]]
-          echo "HUYN_F1_REVIEW_REQUIRED"
+          /opt/homebrew/bin/codex --version
+          echo "HUYN_F1_RUNNER_READY"
           {
             echo "### Read-only F1 gate"
             echo "- Live PR head SHA: $APPROVED_SHA"
-            echo "- Codex invocation: PASS (no source checkout)"
+            echo "- Runner readiness: PASS (no model call, no source checkout)"
             echo "- F1 fix, QA, and writer handoff: NOT PERFORMED"
           } >> "$GITHUB_STEP_SUMMARY"

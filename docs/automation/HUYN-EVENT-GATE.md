@@ -36,3 +36,7 @@
 The existing `Huyn` runner resides on the owner's macOS account and can access that account's files: do not run untrusted source, checkout PRs, or use write-capable GitHub tokens in its job. A separate least-privilege account or isolated runner should be adopted before code-writing delegation. `main`, APK preview, PR #39–#42, signing and release workflows remain unchanged by this staged branch.
 
 This gate deliberately has **no cross-chat wake-up API** and cannot directly notify old ChatGPT Project conversations. GitHub run artifacts and issue/PR state are the auditable interface for coordinator and QA.
+
+## Review optimization (05/11/2026)
+
+Hosted checkout is pinned to `github.sha` instead of a moving branch name. For production events this is the event's trusted default-branch commit; pilot pushes use their exact source commit. The local stage checks Codex binary/login readiness only, without a paid model invocation merely to echo a marker. This does not exercise code generation. Existing historical model-probe evidence remains separate. Durable cross-run deduplication, worker execution and independent security review remain activation gates; concurrency only serializes matching events and does not provide exactly-once execution.
