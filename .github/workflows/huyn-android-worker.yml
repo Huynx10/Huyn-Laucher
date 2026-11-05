@@ -155,6 +155,21 @@ jobs:
           failure=cases[0].find('failure')
           assert 'AssertionError' in failure.attrib.get('type','') and 'ComponentInfo' in failure.attrib.get('message','') and 'null' in failure.attrib.get('message',''), 'Baseline failure was not the explicit-component assertion'
           PY
+      - name: Create temporary debug signing keystore (QA only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          chmod 700 "$HOME/.android"
+          if [[ -e "$HOME/.android/debug.keystore" ]]; then
+            echo "::error::Unexpected preexisting debug keystore; refuse to overwrite"
+            exit 1
+          fi
+          keytool -genkeypair -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          chmod 600 "$HOME/.android/debug.keystore"
       - name: Apply constrained candidate and run Android verification
         run: |
           cp worker-input/candidate.kt app/src/main/java/com/example/ui/components/SystemSearch.kt
