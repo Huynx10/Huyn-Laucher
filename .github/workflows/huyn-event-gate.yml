@@ -82,7 +82,7 @@ jobs:
           }
           const event = gateEvent({
             eventName: process.env.EVENT_NAME, actor: process.env.EVENT_ACTOR,
-            ref: process.env.EVENT_REF, repository: process.env.EVENT_REPO, payload
+            runId: process.env.GITHUB_RUN_ID, ref: process.env.EVENT_REF, repository: process.env.EVENT_REPO, payload
           });
           let gate = { verified: false, reason: event.reason ?? 'pilot_only' };
           if (event.authorized && event.pr) {
@@ -130,6 +130,7 @@ jobs:
     timeout-minutes: 8
     permissions: {}
     env:
+      APPROVED_KEY: ${{ needs.hosted-gate.outputs.event_key }}
       APPROVED_SHA: ${{ needs.hosted-gate.outputs.source_sha }}
       APPROVED_EVENT: ${{ needs.hosted-gate.outputs.event_kind }}
     steps:
@@ -141,9 +142,32 @@ jobs:
           [[ "$(uname -m)" == "arm64" ]]
           [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$APPROVED_EVENT" == "CI_F1" || "$APPROVED_EVENT" == "OWNER_F1_PROBE" ]]
+          # BEGIN PERSISTENT READINESS CLAIM (tested directly from this workflow)
+          umask 077
+          [[ "${APPROVED_KEY:-}" =~ ^[a-zA-Z0-9:._-]{1,200}$ ]]
+          [[ "${APPROVED_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
+          : "${RUNNER_TOOL_CACHE:?Persistent runner tool cache is required}"
+          ledger="$RUNNER_TOOL_CACHE/huyn-readiness-claims-v1"
+          [[ ! -L "$ledger" ]]
+          mkdir -p "$ledger"
+          chmod 700 "$ledger"
+          digest="$(printf '%s\n%s\n' "$APPROVED_KEY" "$APPROVED_SHA" | shasum -a 256 | cut -d ' ' -f 1)"
+          claim="$ledger/$digest"
+          if ! mkdir "$claim" 2>/dev/null; then
+            if [[ -d "$claim" && ! -L "$claim" ]]; then
+              echo "HUYN_READINESS_DUPLICATE_OR_INTERRUPTED_SKIP"
+              exit 0
+            fi
+            echo "Readiness claim storage error" >&2
+            exit 1
+          fi
+          # Keep the claim even on error/interruption: manual review required.
+          printf '%s\n%s\n' "$APPROVED_KEY" "$APPROVED_SHA" > "$claim/identity"
+          # END PERSISTENT READINESS CLAIM
           /opt/homebrew/bin/codex login status >/dev/null
           /opt/homebrew/bin/codex --version
           echo "HUYN_F1_RUNNER_READY"
+          printf 'complete\n' > "$claim/completed"
           {
             echo "### Read-only F1 gate"
             echo "- Live PR head SHA: $APPROVED_SHA"

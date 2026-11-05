@@ -69,7 +69,7 @@ test('deny forged issue, PR comments, edited comments and actor spoofing', () =>
   assert.equal(gateEvent({ ...ownerComment, payload: { ...ownerComment.payload, comment: { ...ownerComment.payload.comment, user: { login: 'outsider' } } } }).authorized, false);
 });
 test('workflow_dispatch requires owner and one explicitly permitted task', () => {
-  const input = { eventName: 'workflow_dispatch', repository: repository.full_name, ref: mainRef, actor: 'Huynx10',
+  const input = { runId: '123', eventName: 'workflow_dispatch', repository: repository.full_name, ref: mainRef, actor: 'Huynx10',
     payload: { repository, sender: { login: 'Huynx10' }, inputs: { task: 'f1-readonly' } } };
   assert.equal(gateEvent(input).authorized, true);
   assert.equal(gateEvent({ ...input, payload: { ...input.payload, inputs: { task: 'write-code' } } }).authorized, false);
@@ -97,4 +97,12 @@ test('workflow display name alone is not trusted', () => {
   for (const patch of [{ path: '.github/workflows/other.yml' }, { workflow_id: 1 }, { path: undefined }, { workflow_id: undefined }]) {
     assert.equal(gateEvent({ ...ci, payload: { ...ci.payload, workflow_run: { ...run, ...patch } } }).authorized, false);
   }
+});
+
+ test('manual invocation uses run ID, rejects missing ID, reruns preserve identity', () => {
+  const base = { runId: '123', eventName: 'workflow_dispatch', repository: repository.full_name, ref: mainRef, actor: 'Huynx10', payload: { repository, sender: { login: 'Huynx10' }, inputs: { task: 'f1-readonly' } } };
+  assert.equal(gateEvent(base).eventKey, 'manual:123');
+  assert.notEqual(gateEvent(base).eventKey, gateEvent({ ...base, runId: '124' }).eventKey);
+  assert.equal(gateEvent({ ...base, runId: undefined }).authorized, false);
+  assert.equal(gateEvent(ci).eventKey, gateEvent({ ...ci, payload: { ...ci.payload, workflow_run: { ...run, run_attempt: 2 } } }).eventKey);
 });

@@ -9,7 +9,7 @@ const allowedWorkflowName = 'Lumia Launcher Android CI';
 const allowedWorkflowPath = '.github/workflows/android-ci.yml';
 const allowedWorkflowId = 393632398;
 
-export function gateEvent({ eventName, repository, actor, ref, payload }) {
+export function gateEvent({ eventName, repository, actor, ref, payload, runId }) {
   if (repository !== SOURCE_REPO || !payload || payload.repository?.full_name !== SOURCE_REPO)
     return { authorized: false, reason: 'repository_mismatch' };
   if (eventName === 'push') {
@@ -31,7 +31,7 @@ export function gateEvent({ eventName, repository, actor, ref, payload }) {
       return { authorized: false, reason: 'ci_not_verified_or_out_of_scope' };
     // The hosted gate MUST fetch live PR #41 HEAD and compare exact source SHA.
     return { authorized: true, kind: 'CI_F1', runLocal: true, sourceSha: run.head_sha.toLowerCase(),
-      pr: F1_PR, eventKey: 'ci:' + run.id + ':' + (run.run_attempt ?? 1) + ':' + run.head_sha.toLowerCase() };
+      pr: F1_PR, eventKey: 'ci:' + run.id + ':' + run.head_sha.toLowerCase() };
   }
   if (eventName === 'issue_comment') {
     const c = payload.comment;
@@ -43,10 +43,10 @@ export function gateEvent({ eventName, repository, actor, ref, payload }) {
       pr: F1_PR, eventKey: 'owner:' + c.id };
   }
   if (eventName === 'workflow_dispatch') {
-    if (actor !== OWNER || payload.sender?.login !== OWNER || payload.inputs?.task !== 'f1-readonly')
+    if (actor !== OWNER || payload.sender?.login !== OWNER || payload.inputs?.task !== 'f1-readonly' || !/^[1-9][0-9]*$/.test(String(runId ?? '')))
       return { authorized: false, reason: 'untrusted_manual_request' };
     return { authorized: true, kind: 'OWNER_F1_PROBE', runLocal: true, sourceSha: null,
-      pr: F1_PR, eventKey: 'manual:' + String(payload.sender.id ?? OWNER) };
+      pr: F1_PR, eventKey: 'manual:' + String(runId) };
   }
   return { authorized: false, reason: 'unsupported_event' };
 }
