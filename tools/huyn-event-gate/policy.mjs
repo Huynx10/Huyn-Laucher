@@ -6,6 +6,8 @@ export const F1_ISSUE = 29;
 const shaPattern = /^[a-f0-9]{40}$/i;
 const testBranch = 'refs/heads/ci/huyn-event-orchestrator-20261105';
 const allowedWorkflowName = 'Lumia Launcher Android CI';
+const allowedWorkflowPath = '.github/workflows/android-ci.yml';
+const allowedWorkflowId = 393632398;
 
 export function gateEvent({ eventName, repository, actor, ref, payload }) {
   if (repository !== SOURCE_REPO || !payload || payload.repository?.full_name !== SOURCE_REPO)
@@ -22,6 +24,7 @@ export function gateEvent({ eventName, repository, actor, ref, payload }) {
     const linked = run?.pull_requests;
     const number = Array.isArray(linked) && linked.length === 1 ? linked[0]?.number : null;
     if (payload.action !== 'completed' || run?.name !== allowedWorkflowName ||
+        run.path !== allowedWorkflowPath || run.workflow_id !== allowedWorkflowId ||
         run.conclusion !== 'success' || run.event !== 'pull_request' ||
         number !== F1_PR || run.head_repository?.full_name !== SOURCE_REPO ||
         !shaPattern.test(run.head_sha ?? '') || !Number.isInteger(run.id))

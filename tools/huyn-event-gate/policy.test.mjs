@@ -5,7 +5,7 @@ import { gateEvent, verifyLivePr } from './policy.mjs';
 const HEAD = '463ddd020118dced0124668457090a4101b2576d';
 const repository = { full_name: 'Huynx10/Huyn-Laucher' };
 const mainRef = 'refs/heads/main';
-const run = { id: 40996632375, run_attempt: 1, name: 'Lumia Launcher Android CI',
+const run = { path: '.github/workflows/android-ci.yml', workflow_id: 393632398, id: 40996632375, run_attempt: 1, name: 'Lumia Launcher Android CI',
   conclusion: 'success', event: 'pull_request', head_sha: HEAD,
   head_repository: repository, pull_requests: [{ number: 41 }] };
 const ci = { eventName: 'workflow_run', repository: repository.full_name, actor: 'Huynx10',
@@ -91,4 +91,10 @@ test('no workflow_run event can authorize code writes or skip QA lease', () => {
   assert.equal(result.requiresQA, true);
   assert.equal(result.requiresWriterLease, true);
   assert.equal('mayWrite' in result, false);
+});
+
+test('workflow display name alone is not trusted', () => {
+  for (const patch of [{ path: '.github/workflows/other.yml' }, { workflow_id: 1 }, { path: undefined }, { workflow_id: undefined }]) {
+    assert.equal(gateEvent({ ...ci, payload: { ...ci.payload, workflow_run: { ...run, ...patch } } }).authorized, false);
+  }
 });
