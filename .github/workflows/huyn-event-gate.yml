@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/huyn-event-gate.yml'
       - 'tools/huyn-event-gate/**'
+      - 'docs/automation/HUYN-EVENT-GATE.md'
   workflow_run:
     workflows: ['Lumia Launcher Android CI']
     types: [completed]
