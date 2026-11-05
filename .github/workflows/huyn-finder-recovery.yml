@@ -183,10 +183,10 @@ jobs:
           const current=readFileSync(sourcePath,'utf8');
           const originalTest=readFileSync(testPath,'utf8');
           const anchor='assertEquals("Máy ảnh", started.getStringExtra(SearchManager.QUERY))';
-          const extended=anchor+'\\n        assertEquals(ComponentName(SAMSUNG_FINDER_PACKAGE, "$SAMSUNG_FINDER_PACKAGE.SearchActivity"), started.component)\\n        assertTrue(started.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)';
+          const extended=anchor+'\n        assertEquals(ComponentName(SAMSUNG_FINDER_PACKAGE, "$SAMSUNG_FINDER_PACKAGE.SearchActivity"), started.component)\n        assertTrue(started.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)';
           if (s.pr!==41 || s.sha!=='463ddd020118dced0124668457090a4101b2576d' || s.branch!=='fix/finder-public-intent-20261030' || current!==s.source || originalTest!==s.tests) throw Error('Source head or scope mismatch');
           if (s.source.split(prior).length!==2 || s.tests.split(anchor).length!==2 || !s.source.includes('if (activity?.exported != true || activity.packageName != SAMSUNG_FINDER_PACKAGE) return false')) throw Error('Unsupported source contract');
-          const expected=s.source.replace('import android.content.Intent\\n','import android.content.Intent\\nimport android.content.ComponentName\\n').replace(prior,after);
+          const expected=s.source.replace('import android.content.Intent\n','import android.content.Intent\nimport android.content.ComponentName\n').replace(prior,after);
           if (cand!==expected || mod.sha!==s.sha || mod.digest!==sha(cand) || qa.verdict!=='PASS' || qa.sourceSha!==s.sha || qa.candidateDigest!==sha(cand) || qa.workflowSha!==process.env.GITHUB_SHA || qa.baselineRegression!=='FAIL_ASSERTION' || qa.lint!=='PASS' || qa.unitAndRobolectric!=='PASS' || qa.assembleDebug!=='PASS') throw Error('Prior reviewed candidate or independent QA evidence invalid');
           writeFileSync(sourcePath,cand);
           writeFileSync(testPath,s.tests.replace(anchor,extended));
