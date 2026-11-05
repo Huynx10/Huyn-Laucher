@@ -4,6 +4,7 @@ import android.app.SearchManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.ComponentName
 import android.content.pm.PackageManager
 
 // Finder is optional OEM software. Its package is a capability probe, not a One UI API contract.
@@ -26,7 +27,7 @@ private fun startExportedFinderActivity(context: Context, intent: Intent): Boole
     if (activity?.exported != true || activity.packageName != SAMSUNG_FINDER_PACKAGE) return false
 
     return try {
-        context.startActivity(intent)
+        context.startActivity(Intent(intent).setComponent(ComponentName(activity.packageName, activity.name)))
         true
     } catch (_: ActivityNotFoundException) {
         false

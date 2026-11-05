@@ -40,6 +40,8 @@ class SystemSearchTest {
         assertEquals(SearchManager.INTENT_ACTION_GLOBAL_SEARCH, started.action)
         assertEquals(SAMSUNG_FINDER_PACKAGE, started.`package`)
         assertEquals("Máy ảnh", started.getStringExtra(SearchManager.QUERY))
+        assertEquals(ComponentName(SAMSUNG_FINDER_PACKAGE, "$SAMSUNG_FINDER_PACKAGE.SearchActivity"), started.component)
+        assertTrue(started.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
         assertNull(shadowOf(context).nextStartedActivity)
     }
 
