@@ -193,9 +193,9 @@ jobs:
           assert.equal(verdict.ciSha, process.env.GITHUB_SHA);
           assert.equal(verdict.candidateSha256, digest);
           assert.equal(verdict.checks, 7);
-          assert.match(src, /^export\\s+function\\s+p95FrameMs\\s*\\(/);
+          assert.match(src, /^export\s+function\s+p95FrameMs\s*\(/);
           assert.ok(src.length > 70 && src.length < 6001);
-          assert.ok(!/(?:\\bimport\\b|\\brequire\\b|\\bprocess\\b|\\bglobalThis\\b|\\beval\\b|\\bFunction\\b|\\bfetch\\b|\\bWebAssembly\\b|\\bexec\\b|\\bchild_process\\b|\\bfs\\b|https?:)/.test(src));
+          assert.ok(!/(?:\bimport\b|\brequire\b|\bprocess\b|\bglobalThis\b|\beval\b|\bFunction\b|\bfetch\b|\bWebAssembly\b|\bexec\b|\bchild_process\b|\bfs\b|https?:)/.test(src));
           console.log('QA artifact and candidate SHA-256 verified before any repository write.');
           NODE
       - name: Create a new isolated candidate branch and Draft PR (hosted only)
