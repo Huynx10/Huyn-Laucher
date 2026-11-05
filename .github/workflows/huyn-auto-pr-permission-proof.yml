@@ -1,0 +1,179 @@
+name: Huyn Event - Auto Draft PR Permission Proof
+
+# Only this isolated workflow-source push can trigger this one-time proof.
+# No checkout, arbitrary code execution, or GitHub write token on iMac.
+on:
+  push:
+    branches:
+      - ci/huyn-auto-pr-permission-proof-20261105
+    paths:
+      - '.github/workflows/huyn-auto-pr-permission-proof.yml'
+
+permissions: {}
+
+concurrency:
+  group: huyn-auto-pr-permission-proof
+  cancel-in-progress: false
+
+jobs:
+  codex-local:
+    if: github.repository == 'Huynx10/Huyn-Laucher' && github.actor == 'Huynx10' && github.ref == 'refs/heads/ci/huyn-auto-pr-permission-proof-20261105'
+    runs-on: [self-hosted, macOS, ARM64, huyn-codex]
+    timeout-minutes: 8
+    permissions: {}
+    steps:
+      - name: Run fixed read-only Codex contract (no repo checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:$PATH"
+          [[ "$(uname -m)" == "arm64" ]]
+          /opt/homebrew/bin/codex login status >/dev/null 2>&1
+          d="${RUNNER_TEMP:-/tmp}/huyn-autopr-proof-$GITHUB_RUN_ID"
+          mkdir -p "$d"
+          chmod 700 "$d"
+          cd "$d"
+          prompt="Reply with only the exact text HUYN_EVENT_AUTO_PR_PROOF_OK. Do not read files, execute commands or call tools."
+          /opt/homebrew/bin/codex exec --ephemeral --sandbox read-only \
+            --skip-git-repo-check --output-last-message "$d/result.txt" \
+            "$prompt" >"$d/stdout.txt" 2>"$d/stderr.txt"
+          if [[ "$(cat "$d/result.txt")" != "HUYN_EVENT_AUTO_PR_PROOF_OK" ]]; then
+            echo "::error::Codex returned a nonmatching result"
+            exit 1
+          fi
+          echo "Codex Local verified a fixed read-only result with no repo access." >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload exact-result artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: huyn-codex-proof-${{ github.run_id }}
+          path: ${{ runner.temp }}/huyn-autopr-proof-${{ github.run_id }}/result.txt
+          if-no-files-found: error
+          retention-days: 3
+      - name: Remove ephemeral Codex output
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "${RUNNER_TEMP:-/tmp}/huyn-autopr-proof-$GITHUB_RUN_ID"
+
+  independent-hosted-qa:
+    needs: codex-local
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Download Codex result from same workflow
+        uses: actions/download-artifact@v4
+        with:
+          name: huyn-codex-proof-${{ github.run_id }}
+          path: input
+      - name: Validate fixed result without executing generated code
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import assert from 'node:assert/strict';
+          const data = readFileSync('input/result.txt');
+          assert.ok(data.length > 0 && data.length < 100);
+          assert.equal(data.toString('utf8').trim(), 'HUYN_EVENT_AUTO_PR_PROOF_OK');
+          const verdict = {
+            status: 'PASS', qaType: 'fixed_response_only', 
+            sourceRun: process.env.GITHUB_RUN_ID, sourceSha: process.env.GITHUB_SHA,
+            digestSha256: createHash('sha256').update(data).digest('hex'),
+            noAndroidCodeExecuted: true, allowedNext: 'hosted_proof_draft_pr_only'
+          };
+          writeFileSync('qa-verdict.json', JSON.stringify(verdict,null,2)+'\n');
+          console.log('Independent hosted QA: PASS');
+          NODE
+      - name: Upload bounded QA verdict
+        uses: actions/upload-artifact@v4
+        with:
+          name: huyn-qa-proof-${{ github.run_id }}
+          path: qa-verdict.json
+          if-no-files-found: error
+          retention-days: 3
+
+  hosted-publisher:
+    needs: independent-hosted-qa
+    if: github.repository == 'Huynx10/Huyn-Laucher' && github.actor == 'Huynx10' && github.ref == 'refs/heads/ci/huyn-auto-pr-permission-proof-20261105'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout verified base from main (hosted only)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - name: Retrieve approved Codex result
+        uses: actions/download-artifact@v4
+        with:
+          name: huyn-codex-proof-${{ github.run_id }}
+          path: input
+      - name: Retrieve independent hosted QA verdict
+        uses: actions/download-artifact@v4
+        with:
+          name: huyn-qa-proof-${{ github.run_id }}
+          path: verdict
+      - name: Verify bound QA verdict and publish proof Draft PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import assert from 'node:assert/strict';
+          const verdict=JSON.parse(readFileSync('verdict/qa-verdict.json','utf8'));
+          const bytes=readFileSync('input/result.txt');
+          assert.equal(verdict.status,'PASS');
+          assert.equal(verdict.qaType,'fixed_response_only');
+          assert.equal(verdict.sourceSha,process.env.GITHUB_SHA);
+          assert.equal(verdict.sourceRun,process.env.GITHUB_RUN_ID);
+          assert.equal(verdict.noAndroidCodeExecuted,true);
+          assert.equal(verdict.allowedNext,'hosted_proof_draft_pr_only');
+          assert.equal(verdict.digestSha256,createHash('sha256').update(bytes).digest('hex'));
+          assert.equal(bytes.toString('utf8').trim(),'HUYN_EVENT_AUTO_PR_PROOF_OK');
+          console.log('Hosted publisher: QA verdict and source artifact verified');
+          NODE
+          target="auto/huyn-autopr-proof-$GITHUB_RUN_ID"
+          file="docs/automation/proofs/huyn-autopr-proof-$GITHUB_RUN_ID.md"
+          if git ls-remote --exit-code --heads origin "refs/heads/$target" >/dev/null 2>&1; then
+            echo "::error::Branch already exists; refusing to overwrite"
+            exit 1
+          fi
+          if [[ -e "$file" ]]; then
+            echo "::error::Proof file already exists"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$target"
+          mkdir -p docs/automation/proofs
+          {
+            echo "# Huyn Event → Codex → QA → Draft PR proof"
+            echo
+            echo "Run: $GITHUB_RUN_ID"
+            echo "Workflow SHA: $GITHUB_SHA"
+            echo "Codex artifact marker: HUYN_EVENT_AUTO_PR_PROOF_OK"
+            echo "QA: PASS (exact string and SHA-256)"
+            echo "Generated by GitHub-hosted publisher; no application code modified."
+            echo "Do not merge this proof automatically."
+          } >"$file"
+          git add -- "$file"
+          staged="$(git diff --cached --name-only)"
+          if [[ "$staged" != "$file" ]]; then
+            echo "::error::Unapproved file set"
+            exit 1
+          fi
+          git commit -m "ci: audit event-driven Draft PR permission proof $GITHUB_RUN_ID"
+          git push origin "HEAD:refs/heads/$target"
+          gh pr create --repo "Huynx10/Huyn-Laucher" --draft --base main \
+            --head "$target" \
+            --title "chore(ci): event-driven automatic Draft PR proof #$GITHUB_RUN_ID" \
+            --body "GitHub push triggered Codex Local (fixed read-only output), independently verified on hosted QA, then GitHub-hosted publisher created this Draft PR automatically. Originating run: https://github.com/Huynx10/Huyn-Laucher/actions/runs/$GITHUB_RUN_ID. No Android code, signing, release, merge or Project-chat wake-up."
+          echo "AUTO_DRAFT_PR_CREATED_FOR_RUN_$GITHUB_RUN_ID" >>"$GITHUB_STEP_SUMMARY"
