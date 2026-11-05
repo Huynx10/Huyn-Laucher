@@ -3,6 +3,18 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 export const SOURCE = 'app/src/main/java/com/example/ui/components/SystemSearch.kt';
 export const TEST = 'app/src/test/java/com/example/ui/components/SystemSearchTest.kt';
+export function selectCanonicalFinderHead(pr, branchRef) {
+  if (pr?.state !== 'open' || pr?.head?.repo?.full_name !== 'Huynx10/Huyn-Laucher' ||
+      pr?.base?.ref !== 'main' || !/^fix\/[A-Za-z0-9._/-]+$/.test(pr?.head?.ref ?? '') ||
+      !/^[a-f0-9]{40}$/.test(pr?.head?.sha ?? ''))
+    throw new Error('PR identity mismatch');
+  if (branchRef?.ref !== 'refs/heads/' + pr.head.ref ||
+      branchRef?.object?.type !== 'commit' ||
+      !/^[a-f0-9]{40}$/.test(branchRef?.object?.sha ?? ''))
+    throw new Error('Canonical branch ref mismatch');
+  return { sha: branchRef.object.sha, branch: pr.head.ref,
+    metadataLag: branchRef.object.sha !== pr.head.sha };
+}
 export const sha256 = text => createHash('sha256').update(text).digest('hex');
 export function expectedSource(source) {
   const old = 'context.startActivity(intent)';

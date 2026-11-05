@@ -41,12 +41,14 @@ jobs:
           node --input-type=module <<'NODE'
           import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
           import {execFileSync} from 'node:child_process';
-          import {SOURCE,TEST,expectedSource} from './tools/huyn-android-worker/worker.mjs';
+          import {SOURCE,TEST,expectedSource,selectCanonicalFinderHead} from './tools/huyn-android-worker/worker.mjs';
           const p=JSON.parse(readFileSync('bundle/pr.json'));
-          if(p.state!=='open'||p.head.repo.full_name!=='Huynx10/Huyn-Laucher'||p.base.ref!=='main'||!/^[a-f0-9]{40}$/.test(p.head.sha)||!/^fix\/[A-Za-z0-9._/-]+$/.test(p.head.ref))throw Error('PR identity mismatch');
-          const get=path=>JSON.parse(execFileSync('gh',['api',`repos/Huynx10/Huyn-Laucher/contents/${path}?ref=${p.head.sha}`],{encoding:'utf8'}));
+          const refData=JSON.parse(execFileSync('gh',['api',`repos/Huynx10/Huyn-Laucher/git/ref/heads/${p.head.ref}`],{encoding:'utf8'}));
+          const pinned=selectCanonicalFinderHead(p,refData);
+          if(pinned.metadataLag)appendFileSync(process.env.GITHUB_STEP_SUMMARY,'PR metadata HEAD lagged behind canonical Git branch ref; safe ref SHA selected.\n');
+          const get=path=>JSON.parse(execFileSync('gh',['api',`repos/Huynx10/Huyn-Laucher/contents/${path}?ref=${pinned.sha}`],{encoding:'utf8'}));
           const decode=p=>Buffer.from(get(p).content,'base64').toString('utf8');
-          const s={pr:41,sha:p.head.sha,branch:p.head.ref,source:decode(SOURCE),tests:decode(TEST)};
+          const s={pr:41,sha:pinned.sha,branch:pinned.branch,source:decode(SOURCE),tests:decode(TEST)};
           const workRequired=expectedSource(s.source)!==s.source;
           appendFileSync(process.env.GITHUB_OUTPUT,`work_required=${workRequired}\n`);
           if(!workRequired)appendFileSync(process.env.GITHUB_STEP_SUMMARY,'Finder hardening already satisfied; no-op, no new commit.\n');
@@ -62,6 +64,35 @@ jobs:
             bundle/worker.mjs
           retention-days: 3
           if-no-files-found: error
+  verified-noop:
+    needs: snapshot
+    if: needs.snapshot.outputs.work_required == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read, actions: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ needs.snapshot.outputs.sha }}', persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-snapshot-${{ github.run_id }}', path: worker-input}
+      - name: Assert completed Finder task is exact and no new code write is needed
+        env: {GH_TOKEN: '${{ github.token }}', PINNED_SHA: '${{ needs.snapshot.outputs.sha }}', PINNED_BRANCH: '${{ needs.snapshot.outputs.branch }}'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_SHA"
+          test "$(gh api repos/Huynx10/Huyn-Laucher/git/ref/heads/$PINNED_BRANCH --jq .object.sha)" = "$PINNED_SHA"
+          node --input-type=module <<'NODE'
+          import {readFileSync} from 'node:fs';
+          import {SOURCE,TEST,expectedSource} from './worker-input/worker.mjs';
+          const s=JSON.parse(readFileSync('worker-input/snapshot.json','utf8'));
+          const now=readFileSync(SOURCE,'utf8');
+          const testSrc=readFileSync(TEST,'utf8');
+          if(now!==s.source || testSrc!==s.tests || now!==expectedSource(now)) throw Error('Finder NO-OP source mismatch');
+          if(!testSrc.includes('started.component') || !testSrc.includes('Intent.FLAG_ACTIVITY_NEW_TASK')) throw Error('Finder regression coverage absent');
+          console.log('NOOP_VERIFIED_AT_CANONICAL_REF',s.sha);
+          NODE
+          echo 'Completed source unchanged; canonical branch SHA and regression checks verified; no writer invoked.' >> "$GITHUB_STEP_SUMMARY"
   author:
     needs: snapshot
     if: needs.snapshot.outputs.work_required == 'true'
@@ -230,7 +261,7 @@ jobs:
         env: {BASE_SHA: '${{ needs.snapshot.outputs.sha }}', TARGET_BRANCH: '${{ needs.snapshot.outputs.branch }}'}
         run: |
           set -euo pipefail
-          test "$(gh api repos/Huynx10/Huyn-Laucher/pulls/41 --jq .head.sha)" = "$BASE_SHA"
+          test "$(gh api repos/Huynx10/Huyn-Laucher/git/ref/heads/$TARGET_BRANCH --jq .object.sha)" = "$BASE_SHA"
           test "$(gh api repos/Huynx10/Huyn-Laucher/pulls/41 --jq .state)" = open
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -251,12 +282,24 @@ jobs:
         with: {java-version: '17', distribution: temurin}
       - uses: gradle/actions/setup-gradle@v3
         with: {gradle-version: '9.3.1'}
+      - name: Provision ephemeral debug keystore for exact HEAD QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          chmod 700 "$HOME/.android"
+          test ! -e "$HOME/.android/debug.keystore"
+          keytool -genkeypair -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          chmod 600 "$HOME/.android/debug.keystore"
       - name: Verify published PR head and run exact-commit Android QA
         env: {GH_TOKEN: '${{ github.token }}', EXPECTED_SHA: '${{ needs.publish.outputs.published_sha }}'}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$(gh api repos/Huynx10/Huyn-Laucher/pulls/41 --jq .head.sha)" = "$EXPECTED_SHA"
+          test "$(gh api repos/Huynx10/Huyn-Laucher/git/ref/heads/fix/finder-public-intent-20261030 --jq .object.sha)" = "$EXPECTED_SHA"
           gradle :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
           printf '%s\n' "$EXPECTED_SHA" > final-source-sha.txt
           sha256sum app/build/outputs/apk/debug/*.apk > final-apk-sha256.txt
