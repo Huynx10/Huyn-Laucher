@@ -1,0 +1,210 @@
+name: Huyn Finder - Recover QA from Verified Codex Artifacts
+
+# One-time event-driven recovery. Never re-invoke Codex or reset its durable task claim.
+on:
+  push:
+    branches: [ci/huyn-finder-recovery-20261105]
+    paths: ['.github/workflows/huyn-finder-recovery.yml']
+
+permissions: {}
+
+concurrency:
+  group: huyn-finder-pr41-publisher
+  cancel-in-progress: false
+
+jobs:
+  android-qa:
+    if: github.repository == 'Huynx10/Huyn-Laucher' && github.actor == 'Huynx10' && github.ref == 'refs/heads/ci/huyn-finder-recovery-20261105'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout frozen PR41 source without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: 463ddd020118dced0124668457090a4101b2576d
+          persist-credentials: false
+      - name: Download prior source snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: finder-snapshot-42058344131
+          path: worker-input
+          run-id: 42058344131
+          github-token: ${{ github.token }}
+      - name: Download prior Codex candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: finder-candidate-42058344131
+          path: worker-input
+          run-id: 42058344131
+          github-token: ${{ github.token }}
+      - name: Download prior independent Codex review
+        uses: actions/download-artifact@v4
+        with:
+          name: finder-review-42058344131
+          path: worker-input
+          run-id: 42058344131
+          github-token: ${{ github.token }}
+      - name: Verify exact pinned source, candidate and signed-off reviewer
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { SOURCE, TEST, verifyCandidate, augmentTests, sha256 } from './worker-input/worker.mjs';
+          const s=JSON.parse(readFileSync('worker-input/snapshot.json','utf8'));
+          const c=readFileSync('worker-input/candidate.kt','utf8');
+          const model=JSON.parse(readFileSync('worker-input/candidate.json','utf8'));
+          const review=JSON.parse(readFileSync('worker-input/review-verdict.json','utf8'));
+          if (s.pr!==41 || s.sha!=='463ddd020118dced0124668457090a4101b2576d' || s.branch!=='fix/finder-public-intent-20261030') throw Error('Invalid source snapshot');
+          if (readFileSync(SOURCE,'utf8')!==s.source || readFileSync(TEST,'utf8')!==s.tests) throw Error('PR41 content drift');
+          verifyCandidate(s.source,c);
+          if (!model.changed || model.sha!==s.sha || model.digest!==sha256(c) || review.verdict!=='PASS' || review.sha!==s.sha || review.digest!==sha256(c)) throw Error('Prior Codex/QA evidence mismatch');
+          writeFileSync(TEST,augmentTests(s.tests));
+          console.log('Pinned PR41 SHA, exact source/test and prior candidate/review digest VERIFIED');
+          NODE
+      - name: Setup Java and Gradle
+        uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v3
+        with: {gradle-version: '9.3.1'}
+      - name: Provision throwaway debug signing key for Android QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          chmod 700 "$HOME/.android"
+          test ! -e "$HOME/.android/debug.keystore"
+          keytool -genkeypair -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          chmod 600 "$HOME/.android/debug.keystore"
+      - name: RED proof - unpatched source fails exact regression assertion
+        shell: bash
+        run: |
+          set +e
+          gradle :app:testDebugUnitTest --tests com.example.ui.components.SystemSearchTest.exportedFinderGlobalSearchOpensExactlyOnceWithQuery > baseline-test.log 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          python3 - <<'PY'
+          import glob,xml.etree.ElementTree as E
+          cases=[t for p in glob.glob('app/build/test-results/testDebugUnitTest/*.xml') for t in E.parse(p).getroot().iter('testcase') if t.attrib.get('name')=='exportedFinderGlobalSearchOpensExactlyOnceWithQuery']
+          assert len(cases)==1 and cases[0].find('failure') is not None, 'Baseline failed for compilation/setup rather than expected assertion'
+          f=cases[0].find('failure')
+          assert 'AssertionError' in f.attrib.get('type','') and 'ComponentInfo' in f.attrib.get('message','') and 'null' in f.attrib.get('message',''), 'Baseline assertion mismatch'
+          print('RED baseline assertion VERIFIED')
+          PY
+      - name: Apply exactly one recovered candidate and run GREEN Android checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp worker-input/candidate.kt app/src/main/java/com/example/ui/components/SystemSearch.kt
+          gradle :app:lintDebug :app:testDebugUnitTest :app:assembleDebug --no-configuration-cache
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { SOURCE, TEST, sha256, verifyCandidate, augmentTests } from './worker-input/worker.mjs';
+          const s=JSON.parse(readFileSync('worker-input/snapshot.json','utf8'));
+          const c=readFileSync('worker-input/candidate.kt','utf8');
+          verifyCandidate(s.source,c);
+          if (readFileSync(SOURCE,'utf8')!==c || readFileSync(TEST,'utf8')!==augmentTests(s.tests)) throw Error('Checked files drifted');
+          const v={verdict:'PASS',sourceSha:s.sha,candidateDigest:sha256(c),baselineRegression:'FAIL_ASSERTION',lint:'PASS',unitAndRobolectric:'PASS',assembleDebug:'PASS',workflowSha:process.env.GITHUB_SHA};
+          writeFileSync('qa-verdict.json',JSON.stringify(v,null,2)+'\n');
+          console.log('ANDROID_QA_GREEN_WITH_EXACT_SHA');
+          NODE
+      - name: Upload Android QA evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: finder-recovery-qa-${{ github.run_id }}
+          path: |
+            qa-verdict.json
+            baseline-test.log
+            app/build/test-results/testDebugUnitTest/*.xml
+            app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  hosted-publisher:
+    needs: android-qa
+    if: success()
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact frozen PR41 source (trusted hosted only)
+        uses: actions/checkout@v4
+        with:
+          ref: 463ddd020118dced0124668457090a4101b2576d
+          persist-credentials: true
+      - name: Retrieve prior source snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: finder-snapshot-42058344131
+          path: worker-input
+          run-id: 42058344131
+          github-token: ${{ github.token }}
+      - name: Retrieve previously reviewed Codex candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: finder-candidate-42058344131
+          path: worker-input
+          run-id: 42058344131
+          github-token: ${{ github.token }}
+      - name: Retrieve independently completed Android QA verdict
+        uses: actions/download-artifact@v4
+        with:
+          name: finder-recovery-qa-${{ github.run_id }}
+          path: qa-result
+      - name: Check exact source transformation, QA digest, and test scope WITHOUT executing candidate code
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync,writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const sourcePath='app/src/main/java/com/example/ui/components/SystemSearch.kt';
+          const testPath='app/src/test/java/com/example/ui/components/SystemSearchTest.kt';
+          const s=JSON.parse(readFileSync('worker-input/snapshot.json','utf8'));
+          const cand=readFileSync('worker-input/candidate.kt','utf8');
+          const mod=JSON.parse(readFileSync('worker-input/candidate.json','utf8'));
+          const qa=JSON.parse(readFileSync('qa-result/qa-verdict.json','utf8'));
+          const sha=x=>createHash('sha256').update(x).digest('hex');
+          const prior='context.startActivity(intent)';
+          const after='context.startActivity(Intent(intent).setComponent(ComponentName(activity.packageName, activity.name)))';
+          const current=readFileSync(sourcePath,'utf8');
+          const originalTest=readFileSync(testPath,'utf8');
+          const anchor='assertEquals("Máy ảnh", started.getStringExtra(SearchManager.QUERY))';
+          const extended=anchor+'\\n        assertEquals(ComponentName(SAMSUNG_FINDER_PACKAGE, "$SAMSUNG_FINDER_PACKAGE.SearchActivity"), started.component)\\n        assertTrue(started.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)';
+          if (s.pr!==41 || s.sha!=='463ddd020118dced0124668457090a4101b2576d' || s.branch!=='fix/finder-public-intent-20261030' || current!==s.source || originalTest!==s.tests) throw Error('Source head or scope mismatch');
+          if (s.source.split(prior).length!==2 || s.tests.split(anchor).length!==2 || !s.source.includes('if (activity?.exported != true || activity.packageName != SAMSUNG_FINDER_PACKAGE) return false')) throw Error('Unsupported source contract');
+          const expected=s.source.replace('import android.content.Intent\\n','import android.content.Intent\\nimport android.content.ComponentName\\n').replace(prior,after);
+          if (cand!==expected || mod.sha!==s.sha || mod.digest!==sha(cand) || qa.verdict!=='PASS' || qa.sourceSha!==s.sha || qa.candidateDigest!==sha(cand) || qa.workflowSha!==process.env.GITHUB_SHA || qa.baselineRegression!=='FAIL_ASSERTION' || qa.lint!=='PASS' || qa.unitAndRobolectric!=='PASS' || qa.assembleDebug!=='PASS') throw Error('Prior reviewed candidate or independent QA evidence invalid');
+          writeFileSync(sourcePath,cand);
+          writeFileSync(testPath,s.tests.replace(anchor,extended));
+          console.log('Candidate transform, QA SHA, and two-file target VERIFIED; no untrusted artifact executed');
+          NODE
+          git add -- app/src/main/java/com/example/ui/components/SystemSearch.kt app/src/test/java/com/example/ui/components/SystemSearchTest.kt
+          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = 2
+          git diff --cached --check
+      - name: Pin live PR41 HEAD and fast-forward push only (never merge)
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='463ddd020118dced0124668457090a4101b2576d'
+          actual="$(gh api repos/Huynx10/Huyn-Laucher/pulls/41 --jq '.head.sha')"
+          test "$actual" = "$expected"
+          test "$(gh api repos/Huynx10/Huyn-Laucher/pulls/41 --jq '.state')" = "open"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(finder): pin exported public search intent to resolved component'
+          git push origin HEAD:refs/heads/fix/finder-public-intent-20261030
+          echo 'Finder PR41 source updated by fail-closed recovery after red/green Android QA; no merge or release.' >> "$GITHUB_STEP_SUMMARY"
