@@ -1,0 +1,176 @@
+name: Huyn Launcher - Scoped Event Gate
+
+# Staged in a Draft PR. workflow_run and issue_comment activate only when
+# this workflow exists on default branch after independent review.
+on:
+  push:
+    branches: [ci/huyn-event-orchestrator-20261105]
+    paths:
+      - '.github/workflows/huyn-event-gate.yml'
+      - 'tools/huyn-event-gate/**'
+      - 'docs/automation/HUYN-EVENT-GATE.md'
+  workflow_run:
+    workflows: ['Lumia Launcher Android CI']
+    types: [completed]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      task:
+        description: Only fixed read-only Finder triage allowed
+        required: true
+        type: choice
+        options: [f1-readonly]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: huyn-event-${{ github.event.workflow_run.id || github.event.comment.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  hosted-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+      source_sha: ${{ steps.gate.outputs.source_sha }}
+      event_kind: ${{ steps.gate.outputs.event_kind }}
+      event_key: ${{ steps.gate.outputs.event_key }}
+    steps:
+      - name: Checkout trusted code only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Policy regression suite
+        if: github.event_name == 'push'
+        run: node --test tools/huyn-event-gate/*.test.mjs
+      - name: Verify event and exact current PR head
+        id: gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTOR: ${{ github.actor }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync, writeFileSync } from 'node:fs';
+          import { gateEvent, verifyLivePr } from './tools/huyn-event-gate/policy.mjs';
+          const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          if (process.env.EVENT_NAME === 'workflow_run') {
+            const id = payload.workflow_run?.id;
+            if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid CI run identity');
+            const response = await fetch('https://api.github.com/repos/Huynx10/Huyn-Laucher/actions/runs/' + id, {
+              headers: { 'Accept': 'application/vnd.github+json',
+                'Authorization': 'Bearer ' + process.env.GH_TOKEN }
+            });
+            if (!response.ok) throw new Error('Cannot independently verify CI run');
+            const liveRun = await response.json();
+            if (liveRun.id !== id || liveRun.head_sha !== payload.workflow_run.head_sha)
+              throw new Error('CI run identity changed');
+            payload.workflow_run = liveRun;
+          }
+          const event = gateEvent({
+            eventName: process.env.EVENT_NAME, actor: process.env.EVENT_ACTOR,
+            runId: process.env.GITHUB_RUN_ID, ref: process.env.EVENT_REF, repository: process.env.EVENT_REPO, payload
+          });
+          let gate = { verified: false, reason: event.reason ?? 'pilot_only' };
+          if (event.authorized && event.pr) {
+            const res = await fetch('https://api.github.com/repos/Huynx10/Huyn-Laucher/pulls/41', {
+              headers: {
+                'Accept': 'application/vnd.github+json',
+                'Authorization': 'Bearer ' + process.env.GH_TOKEN,
+                'X-GitHub-Api-Version': '2022-11-28'
+              }
+            });
+            if (res.ok) gate = verifyLivePr({ pr: await res.json(), authorizedEvent: event });
+            else gate = { verified: false, reason: 'github_pr_read_failed_' + res.status };
+          }
+          const approved = Boolean(event.authorized && event.runLocal && gate.verified);
+          const safeSha = approved ? gate.sourceSha : '';
+          const eventKey = event.authorized ? event.eventKey : 'rejected';
+          const kind = approved ? event.kind : 'NOT_DISPATCHED';
+          for (const [key,value] of Object.entries({ approved, source_sha: safeSha, event_key: eventKey, event_kind: kind }))
+            appendFileSync(process.env.GITHUB_OUTPUT, key + '=' + value + '\n');
+          const envelope = { accepted: event.authorized, approvedForReadOnlyRunner: approved,
+            eventKey, kind: event.kind ?? 'REJECTED', sourceSha: safeSha || null,
+            reason: gate.reason ?? (approved ? 'exact_live_pr_verified' : 'pilot_not_dispatched'),
+            independentQaStillRequired: true, writerLeaseStillRequired: true };
+          writeFileSync('huyn-event-envelope.json', JSON.stringify(envelope, null, 2) + '\n');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            '\n### Huyn scoped event gate\n' +
+            '- Event: ' + envelope.kind + '\n' +
+            '- Authorized input: ' + envelope.accepted + '\n' +
+            '- Live PR SHA gate: ' + (gate.verified ? 'VERIFIED' : 'NOT_VERIFIED') + '\n' +
+            '- iMac read-only dispatch: ' + approved + '\n' +
+            '- Code-write/release approval: NEVER\n');
+          console.log('Event gate:', envelope.kind, 'iMac dispatch:', approved);
+          NODE
+      - name: Upload bounded event audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: huyn-gate-envelope-${{ github.run_id }}
+          path: huyn-event-envelope.json
+          retention-days: 7
+
+  f1-local-readonly:
+    needs: hosted-gate
+    if: needs.hosted-gate.outputs.approved == 'true'
+    runs-on: [self-hosted, macOS, ARM64, huyn-codex]
+    timeout-minutes: 8
+    permissions: {}
+    env:
+      APPROVED_KEY: ${{ needs.hosted-gate.outputs.event_key }}
+      APPROVED_SHA: ${{ needs.hosted-gate.outputs.source_sha }}
+      APPROVED_EVENT: ${{ needs.hosted-gate.outputs.event_kind }}
+    steps:
+      - name: Runner readiness checkpoint (no model call or source checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:$PATH"
+          [[ "$(uname -m)" == "arm64" ]]
+          [[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$APPROVED_EVENT" == "CI_F1" || "$APPROVED_EVENT" == "OWNER_F1_PROBE" ]]
+          # BEGIN PERSISTENT READINESS CLAIM (tested directly from this workflow)
+          umask 077
+          [[ "${APPROVED_KEY:-}" =~ ^[a-zA-Z0-9:._-]{1,200}$ ]]
+          [[ "${APPROVED_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
+          : "${RUNNER_TOOL_CACHE:?Persistent runner tool cache is required}"
+          ledger="$RUNNER_TOOL_CACHE/huyn-readiness-claims-v1"
+          [[ ! -L "$ledger" ]]
+          mkdir -p "$ledger"
+          chmod 700 "$ledger"
+          digest="$(printf '%s\n%s\n' "$APPROVED_KEY" "$APPROVED_SHA" | shasum -a 256 | cut -d ' ' -f 1)"
+          claim="$ledger/$digest"
+          if ! mkdir "$claim" 2>/dev/null; then
+            if [[ -d "$claim" && ! -L "$claim" ]]; then
+              echo "HUYN_READINESS_DUPLICATE_OR_INTERRUPTED_SKIP"
+              exit 0
+            fi
+            echo "Readiness claim storage error" >&2
+            exit 1
+          fi
+          # Keep the claim even on error/interruption: manual review required.
+          printf '%s\n%s\n' "$APPROVED_KEY" "$APPROVED_SHA" > "$claim/identity"
+          # END PERSISTENT READINESS CLAIM
+          /opt/homebrew/bin/codex login status >/dev/null
+          /opt/homebrew/bin/codex --version
+          echo "HUYN_F1_RUNNER_READY"
+          printf 'complete\n' > "$claim/completed"
+          {
+            echo "### Read-only F1 gate"
+            echo "- Live PR head SHA: $APPROVED_SHA"
+            echo "- Runner readiness: PASS (no model call, no source checkout)"
+            echo "- F1 fix, QA, and writer handoff: NOT PERFORMED"
+          } >> "$GITHUB_STEP_SUMMARY"
