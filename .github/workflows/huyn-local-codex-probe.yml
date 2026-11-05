@@ -1,0 +1,71 @@
+name: Huyn Launcher - iMac Codex Read-only Probe
+
+# One-time push probe: workflow runs only on this isolated branch.
+# It never checks out or executes PR/app source and has no GitHub write token.
+on:
+  push:
+    branches:
+      - ci/huyn-local-runner-probe-20261105
+    paths:
+      - .github/workflows/huyn-local-codex-probe.yml
+
+permissions: {}
+
+concurrency:
+  group: huyn-local-runner-probe
+  cancel-in-progress: false
+
+jobs:
+  codex-local-probe:
+    if: github.repository == 'Huynx10/Huyn-Laucher' && github.ref == 'refs/heads/ci/huyn-local-runner-probe-20261105'
+    runs-on: [self-hosted, macOS, ARM64, huyn-codex]
+    timeout-minutes: 10
+    steps:
+      - name: Validate runner architecture and Codex login
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:$PATH"
+          if [[ "$(uname -m)" != "arm64" ]]; then
+            echo "::error::Runner architecture is not ARM64"
+            exit 1
+          fi
+          if [[ ! -x /opt/homebrew/bin/codex ]]; then
+            echo "::error::Codex CLI missing at /opt/homebrew/bin/codex"
+            exit 1
+          fi
+          echo "Runner name: ${RUNNER_NAME:-unknown}"
+          echo "Runner architecture: $(uname -m)"
+          /opt/homebrew/bin/codex --version
+          if ! /opt/homebrew/bin/codex login status >/dev/null 2>&1; then
+            echo "::error::Codex ChatGPT login unavailable to the launchd runner account"
+            exit 1
+          fi
+          echo "Codex authentication verified; credentials not printed"
+          {
+            echo "### Huyn Launcher - iMac Runner"
+            echo "Connected runner: ${RUNNER_NAME:-unknown}"
+            echo "Apple Silicon: confirmed"
+            echo "Codex login: confirmed"
+            echo "No application source checkout or GitHub write operations"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Execute fixed read-only Codex smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:$PATH"
+          probe_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/huyn-codex-probe.XXXXXX")"
+          trap 'rm -rf "$probe_dir"' EXIT
+          cd "$probe_dir"
+          fixed_prompt="Return exactly HUYN_CODEX_LOCAL_PROBE_OK and nothing else. Do not inspect the machine, open files or run tools."
+          if ! /opt/homebrew/bin/codex exec --ephemeral --sandbox read-only --skip-git-repo-check --output-last-message "$probe_dir/final.txt" "$fixed_prompt" >"$probe_dir/stdout.txt" 2>"$probe_dir/stderr.txt"; then
+            echo "::error::Codex read-only smoke failed (no private logs uploaded)"
+            exit 1
+          fi
+          if [[ ! -f "$probe_dir/final.txt" ]] || [[ "$(tr -d '\r\n' < "$probe_dir/final.txt")" != "HUYN_CODEX_LOCAL_PROBE_OK" ]]; then
+            echo "::error::Codex completed with an unexpected final message"
+            exit 1
+          fi
+          echo "HUYN_CODEX_LOCAL_PROBE_OK"
+          echo "Codex local fixed-response smoke: PASS (read-only)" >> "$GITHUB_STEP_SUMMARY"
