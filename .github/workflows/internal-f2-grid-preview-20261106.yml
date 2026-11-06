@@ -49,7 +49,7 @@ jobs:
           grep -Fq "versionName='1.1.0-beta3-p1b1-internal'" /tmp/internal-badging.txt
           grep -Fq "application-label:'Lumia P1-B1 (internal)'" /tmp/internal-badging.txt
           printf 'SOURCE_SHA=%s\n' "$GITHUB_SHA" > internal-build-provenance.txt
-          printf "F2_BASE_PREVIEW_SHA=999efcd18c4b3dfd87f4825cc0114b2ed5bd0b70\nF2_FEATURE_SHA=812a5a8fc27f3a448133ddf741ba1a3ed0396bcb\nBUILD_KIND=INTERNAL_DEBUG_NOT_BETA\n" >> internal-build-provenance.txt
+          printf "F2_BASE_PREVIEW_SHA=999efcd18c4b3dfd87f4825cc0114b2ed5bd0b70\nBUILD_KIND=INTERNAL_DEBUG_NOT_BETA\n" >> internal-build-provenance.txt
           sha256sum "$APK" | tee -a internal-build-provenance.txt
       - name: Upload INTERNAL debug APK and checksum (not beta release)
         uses: actions/upload-artifact@v4
