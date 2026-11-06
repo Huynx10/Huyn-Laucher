@@ -20,6 +20,10 @@ interface TileDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(tile: TileEntity)
 
+    // New drag drops must never replace an existing row if an ID race occurs.
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertNew(tile: TileEntity)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(tiles: List<TileEntity>)
 

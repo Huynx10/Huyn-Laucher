@@ -7,6 +7,7 @@ import com.example.data.db.LumiaDatabase
 import com.example.data.db.TileDao
 import com.example.data.model.*
 import com.example.data.repository.LauncherRepository
+import com.example.ui.components.HomePageDropGeometry
 import com.example.data.repository.validateCloudBackupJson
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -369,6 +370,77 @@ class DataSafetyRegressionTest {
         assertEquals(3, rows.map { it.gridX to it.gridY }.toSet().size)
     }
 
+    @Test fun crossPageDropMovesSameWidgetIdOnlyToEmptyCell() = runBlocking {
+        val widget = TileEntity(
+            "drag_widget", "Clock", tileType = TileType.WIDGET,
+            appWidgetId = 211, widgetProvider = "example/.Clock",
+            pageId = "page_home_1", orderIndex = 2, gridX = 0, gridY = 0
+        )
+        val occupied = TileEntity(
+            "occupied", "Other", pageId = "page_home_2",
+            orderIndex = 7, gridX = 0, gridY = 0
+        )
+        db.tileDao().insertAll(listOf(widget, occupied))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 0, 0))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", -1, 2))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 4, 2))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 2, 61))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_1", 2, 2))
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_all_apps", 2, 2))
+        assertEquals(setOf(widget, occupied), db.tileDao().getAllTiles().toSet())
+
+        assertTrue(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 2, 3))
+        val rows = db.tileDao().getAllTiles()
+        assertEquals(2, rows.size)
+        assertEquals(occupied, rows.single { it.id == occupied.id })
+        val moved = rows.single { it.id == widget.id }
+        assertEquals("page_home_2", moved.pageId)
+        assertEquals(2, moved.gridX)
+        assertEquals(3, moved.gridY)
+        assertEquals(8, moved.orderIndex)
+        assertEquals(widget.id, moved.id)
+        assertEquals(widget.appWidgetId, moved.appWidgetId)
+        assertEquals(widget.widgetProvider, moved.widgetProvider)
+        assertEquals(widget.size, moved.size)
+        assertFalse(repo.moveTileToPageAtGridPosition(widget.id, "page_home_2", 1, 3))
+        assertEquals(rows.toSet(), db.tileDao().getAllTiles().toSet())
+    }
+
+    @Test fun crossPageDropUsesDestinationViewportScrollAndWideGrid() {
+        val destination = HomePageDropGeometry(
+            pageId = "page_home_2",
+            viewportRootX = 12f, viewportRootY = 80f,
+            scrollYPx = 120f, horizontalPaddingPx = 12f,
+            topPaddingPx = 10f, cellStepPx = 100f, columns = 8
+        )
+        // Source-page scroll is irrelevant: the same root finger position maps
+        // to a different row only when the destination page itself scrolls.
+        assertEquals(7 to 3, destination.resolveDrop(724f, 270f, spanX = 1))
+        assertEquals(7 to 2, destination.copy(scrollYPx = 0f)
+            .resolveDrop(724f, 270f, spanX = 1))
+        assertNull(destination.resolveDrop(724f, 270f, spanX = 2))
+        assertNull(destination.copy(columns = 6).resolveDrop(724f, 270f, spanX = 1))
+        assertNull(destination.resolveDrop(Float.NaN, 270f, spanX = 1))
+        assertNull(destination.resolveDrop(724f, 6080f, spanX = 1))
+    }
+
+    @Test fun crossPageDropAcceptsValidEightColumnViewportWithoutChangingIdentity() = runBlocking {
+        val app = TileEntity(
+            "wide_app", "Wide", tileType = TileType.APP,
+            pageId = "page_home_1", orderIndex = 1, gridX = 0, gridY = 0
+        )
+        db.tileDao().insertOrUpdate(app)
+        assertFalse(repo.moveTileToPageAtGridPosition(app.id, "page_home_2", 6, 3, 4))
+        assertEquals(app, db.tileDao().getAllTiles().single { it.id == app.id })
+        assertTrue(repo.moveTileToPageAtGridPosition(app.id, "page_home_2", 6, 3, 8))
+        val moved = db.tileDao().getAllTiles().single { it.id == app.id }
+        assertEquals(app.id, moved.id)
+        assertEquals("page_home_2", moved.pageId)
+        assertEquals(6, moved.gridX)
+        assertEquals(3, moved.gridY)
+        assertEquals(app.tileType, moved.tileType)
+    }
+
     @Test fun samePageReassignmentFailsFastWithoutChangingWidgetRows() = runBlocking {
         val widget = TileEntity("same_page_widget", "Widget", tileType = TileType.WIDGET,
             appWidgetId = 151, widgetProvider = "example/.Provider",
@@ -721,7 +793,7 @@ class DataSafetyRegressionTest {
             old.version = 2
         }
         val migrated = Room.databaseBuilder(context, LumiaDatabase::class.java, name)
-            .addMigrations(LumiaDatabase.MIGRATION_2_4, LumiaDatabase.MIGRATION_4_5)
+            .addMigrations(LumiaDatabase.MIGRATION_2_4, LumiaDatabase.MIGRATION_4_5, LumiaDatabase.MIGRATION_5_6)
             .allowMainThreadQueries().build()
         try {
             val tile = migrated.tileDao().getAllTiles().single()

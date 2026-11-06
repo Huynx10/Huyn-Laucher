@@ -679,10 +679,61 @@ class LauncherViewModel(
         }
     }
 
+    fun moveTileToPageAtGridPosition(
+        tileId: String,
+        targetPageId: String,
+        gridX: Int,
+        gridY: Int,
+        totalCols: Int = 4,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        if (_settings.value.lockHomeLayout) {
+            onResult(false)
+            return
+        }
+        viewModelScope.launch {
+            onResult(repository.moveTileToPageAtGridPosition(tileId, targetPageId, gridX, gridY, totalCols))
+        }
+    }
+
     fun pinAppToPage(app: AppItem, pageId: String = _settings.value.defaultHomePageId) {
         viewModelScope.launch {
             repository.pinApp(app, pageId)
             refreshApps()
+        }
+    }
+
+    fun pinAppAtGridPosition(
+        app: AppItem,
+        pageId: String,
+        gridX: Int,
+        gridY: Int,
+        totalCols: Int,
+        expectedShowMoreTiles: Boolean,
+        expectedTileSpacingDp: Int,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        if (_settings.value.lockHomeLayout ||
+            _settings.value.showMoreTiles != expectedShowMoreTiles ||
+            _settings.value.tileSpacingDp != expectedTileSpacingDp
+        ) {
+            onResult(false)
+            return
+        }
+        viewModelScope.launch {
+            val pinned = try {
+                repository.pinAppAtGridPosition(
+                    app, pageId, gridX, gridY, totalCols,
+                    expectedShowMoreTiles, expectedTileSpacingDp
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e("LauncherViewModel", "Could not pin app at dropped cell", error)
+                false
+            }
+            if (pinned) refreshApps()
+            onResult(pinned)
         }
     }
 
@@ -818,8 +869,18 @@ class LauncherViewModel(
         }
     }
 
-    fun launchApp(packageName: String) {
-        repository.launchApp(packageName)
+    fun launchApp(packageName: String): Boolean = repository.launchApp(packageName)
+
+    fun launchApp(app: AppItem): Boolean = repository.launchApp(app)
+
+    fun launchTile(tile: TileEntity): Boolean = repository.launchTile(tile)
+
+    fun rebindAppTile(tileId: String, app: AppItem, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val success = repository.rebindAppTile(tileId, app)
+            if (success) refreshApps()
+            onResult(success)
+        }
     }
 
     fun optimizeMemory(): SystemTelemetry {

@@ -92,6 +92,7 @@ fun TileView(
     isResizingActive: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    dragCallbacks: MetroTileDragCallbacks? = null,
     onResize: () -> Unit,
     onIncreaseSize: () -> Unit = onResize,
     onDecreaseSize: () -> Unit = onResize,
@@ -258,6 +259,7 @@ fun TileView(
             .metroTilt(
                 enabled = settings.turnstileAnimationEnabled && !isBatterySaverActive && !isTileSelected && !isHomeEditMode,
                 onLongClick = onLongClick,
+                dragCallbacks = dragCallbacks,
                 onClick = {
                     if (isTileSelected) onFinishSingleEdit?.invoke() else onClick()
                 }

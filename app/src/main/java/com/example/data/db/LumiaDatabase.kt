@@ -9,7 +9,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.TileEntity
 
-@Database(entities = [TileEntity::class], version = 5, exportSchema = false)
+@Database(entities = [TileEntity::class], version = 6, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class LumiaDatabase : RoomDatabase() {
     abstract fun tileDao(): TileDao
@@ -40,6 +40,15 @@ abstract class LumiaDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `tiles` ADD COLUMN `customSpanX` INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE `tiles` ADD COLUMN `customSpanY` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        // Additive APP identity fields; all existing Tile IDs and AppWidgetHost IDs survive.
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tiles` ADD COLUMN `launcherComponent` TEXT")
+                db.execSQL("ALTER TABLE `tiles` ADD COLUMN `launcherUserSerial` INTEGER")
+                db.execSQL("ALTER TABLE `tiles` ADD COLUMN `launcherIdentityState` TEXT NOT NULL DEFAULT 'LEGACY'")
             }
         }
 
@@ -82,7 +91,7 @@ abstract class LumiaDatabase : RoomDatabase() {
                     LumiaDatabase::class.java,
                     "lumia_launcher_db"
                 )
-                    .addMigrations(MIGRATION_1_4, MIGRATION_2_4, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_4, MIGRATION_2_4, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                 INSTANCE = instance
                 instance

@@ -70,11 +70,22 @@ fun resolveLinkedAppForTile(
     installedApps: List<AppItem>
 ): AppItem? {
     if (installedApps.isEmpty()) return null
+    if (tile.tileType == TileType.APP) {
+        when (tile.launcherIdentityState) {
+            "EXACT" -> return installedApps.firstOrNull {
+                it.launcherComponent == tile.launcherComponent &&
+                    it.launcherUserSerial == tile.launcherUserSerial &&
+                    it.packageName == tile.packageName
+            }
+            "UNRESOLVED" -> return null
+        }
+    }
 
     if (tile.packageName.isNotBlank() && !tile.packageName.startsWith("{")) {
-        installedApps.find { it.packageName.equals(tile.packageName, ignoreCase = true) }?.let {
-            return it
-        }
+        val matches = installedApps.filter { it.packageName.equals(tile.packageName, ignoreCase = true) }
+        // Legacy APP must not display a random work-profile or secondary activity.
+        if (tile.tileType == TileType.APP && matches.size > 1) return null
+        matches.firstOrNull()?.let { return it }
     }
 
     return when (tile.tileType) {
@@ -134,13 +145,18 @@ fun AppDrivenLiveTileContent(
         return
     }
 
-    val linkedApp = remember(tile.id, tile.packageName, tile.tileType, installedApps) {
+    val linkedApp = remember(tile.id, tile.packageName, tile.tileType,
+        tile.launcherComponent, tile.launcherUserSerial, tile.launcherIdentityState, installedApps) {
         resolveLinkedAppForTile(tile, installedApps)
     }
 
     val effectivePackage = linkedApp?.packageName ?: tile.packageName
     val appIconBitmap = if (useRealAppIcons && effectivePackage.isNotBlank() && !effectivePackage.startsWith("{")) {
-        rememberAppIcon(effectivePackage)
+        when {
+            linkedApp != null -> rememberAppIcon(linkedApp)
+            tile.tileType == TileType.APP -> null // No arbitrary package icon for missing exact target.
+            else -> rememberAppIcon(effectivePackage)
+        }
     } else null
 
     val displayTitle = remember(tile.title, tile.tileType, linkedApp?.label) {
