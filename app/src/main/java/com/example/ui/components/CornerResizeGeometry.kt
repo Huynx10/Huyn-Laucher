@@ -19,7 +19,11 @@ internal fun resolveCornerResize(
     minHeight: Int = 1
 ): GridResizeRect {
     require(columns > 0 && minWidth in 1..columns && minHeight > 0)
-    require(rect.width in 1..columns && rect.height > 0)
+    require(rect.x >= 0 && rect.y >= 0 && rect.width in 1..columns && rect.height > 0)
+    require(rect.x.toLong() + rect.width <= columns.toLong())
+    require(rect.width >= minWidth && rect.height >= minHeight)
+    // A top/left drag must be able to preserve the opposite (right/bottom) anchor.
+    require(rect.x + rect.width >= minWidth && rect.y + rect.height >= minHeight)
     val left = rect.x
     val right = rect.x + rect.width
     val top = rect.y
