@@ -73,4 +73,14 @@ class CornerResizeGeometryTest {
                 deltaColumns = Int.MIN_VALUE, deltaRows = 0, columns = 6, minWidth = 1))
     }
 
+    @Test fun bottomResizeClampsAtFiniteRowBoundary() {
+        assertEquals(GridResizeRect(2, 3, 2, 5),
+            resolveCornerResize(initial, ResizeCorner.BOTTOM_END, 0, 100, columns = 6, rows = 8))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsRectangleExtendingPastFiniteRowBoundary() {
+        resolveCornerResize(initial, ResizeCorner.TOP_START, 0, 0, columns = 6, rows = 5)
+    }
+
 }
