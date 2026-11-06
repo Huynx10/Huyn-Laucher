@@ -41,4 +41,18 @@ class CornerResizeGeometryTest {
         assertEquals(GridResizeRect(2, 3, 4, 3),
             resolveCornerResize(initial, ResizeCorner.BOTTOM_END, deltaColumns = 100, deltaRows = 0, columns = 6))
     }
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsRectangleExtendingPastGrid() {
+        resolveCornerResize(GridResizeRect(5, 1, 2, 2), ResizeCorner.TOP_START, -1, -1, columns = 6)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsNegativeOrigin() {
+        resolveCornerResize(GridResizeRect(-1, 1, 2, 2), ResizeCorner.BOTTOM_END, 1, 1, columns = 6)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsMinimumWidthGreaterThanExistingRightAnchor() {
+        resolveCornerResize(GridResizeRect(0, 1, 1, 2), ResizeCorner.TOP_START, 0, 0, columns = 6, minWidth = 2)
+    }
 }
