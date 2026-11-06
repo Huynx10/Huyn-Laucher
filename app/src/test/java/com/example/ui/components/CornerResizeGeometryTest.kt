@@ -83,4 +83,25 @@ class CornerResizeGeometryTest {
         resolveCornerResize(initial, ResizeCorner.TOP_START, 0, 0, columns = 6, rows = 5)
     }
 
+    @Test fun zeroDeltaPreservesRectangleForEveryCorner() {
+        ResizeCorner.values().forEach { corner ->
+            assertEquals(initial,
+                resolveCornerResize(initial, corner, 0, 0, columns = 6, rows = 8))
+        }
+    }
+
+    @Test fun topEndClampsToTopBoundaryWithoutMovingBottomLeftAnchor() {
+        assertEquals(GridResizeRect(2, 0, 4, 6),
+            resolveCornerResize(initial, ResizeCorner.TOP_END,
+                deltaColumns = Int.MAX_VALUE, deltaRows = Int.MIN_VALUE,
+                columns = 6, rows = 8))
+    }
+
+    @Test fun bottomStartClampsAtBottomBoundaryWithoutMovingTopRightAnchor() {
+        assertEquals(GridResizeRect(0, 3, 4, 5),
+            resolveCornerResize(initial, ResizeCorner.BOTTOM_START,
+                deltaColumns = Int.MIN_VALUE, deltaRows = Int.MAX_VALUE,
+                columns = 6, rows = 8))
+    }
+
 }
