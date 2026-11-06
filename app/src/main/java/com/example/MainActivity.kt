@@ -501,6 +501,8 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
     val drawerDragGate = remember { DrawerAppDragGate() }
     val drawerDragIntentThresholdPx = with(uiDensity) { 14.dp.toPx() }
     var crossPageDragCancelToken by remember { mutableIntStateOf(0) }
+    // Prevent an older failed Room write callback from scrolling over a newer drag.
+    var crossPageDropGeneration by remember { mutableIntStateOf(0) }
     // The root (not a lazy pager page) tracks the finger until physical UP.
     val rootDragFingerDown = remember { booleanArrayOf(false) }
     var rootFinishedAcrossTileId by remember { mutableStateOf<String?>(null) }
@@ -647,10 +649,18 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                 )
             } else null
             if (dropCell != null && geometry != null) {
+                val completedGeneration = crossPageDropGeneration
                 viewModel.moveTileToPageAtGridPosition(
                     tileId, target.id, dropCell.first, dropCell.second, geometry.columns
                 ) { moved ->
-                    if (!moved) {
+                    if (!moved && canRestoreFailedCrossPageDrop(
+                            completedGeneration = completedGeneration,
+                            currentGeneration = crossPageDropGeneration,
+                            activeDragTileId = draggingHomeTileId,
+                            committedTargetPageId = target.id,
+                            currentPageId = pages.getOrNull(pagerState.currentPage)?.id
+                        )
+                    ) {
                         Toast.makeText(context, "Vị trí này không trống. Ô Tile chưa được di chuyển.", Toast.LENGTH_SHORT).show()
                         val sourceIndex = pages.indexOfFirst { it.id == source }
                         if (sourceIndex >= 0) coroutineScope.launch { pagerState.scrollToPage(sourceIndex) }
@@ -1053,6 +1063,7 @@ fun LumiaLauncherApp(viewModel: LauncherViewModel) {
                         },
                         onCrossPageDragStart = { tileId, rootX, rootY, grabX, grabY ->
                             if (!settings.lockHomeLayout && homePages.size > 1) {
+                                crossPageDropGeneration++
                                 rootFinishedAcrossTileId = null
                                 draggingHomeTileId = tileId
                                 draggingHomeTileSourcePageId = page.id
