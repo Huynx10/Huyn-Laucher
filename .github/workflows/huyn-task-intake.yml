@@ -1,0 +1,94 @@
+name: Huyn typed task intake and QA-only dispatch
+on:
+  push:
+    branches: [ci/huyn-task-intake-20261106]
+    paths: ['tools/huyn-task-intake/**', '.github/workflows/huyn-task-intake.yml']
+  issue_comment:
+    types: [created]
+permissions: {}
+concurrency:
+  group: huyn-task-intake
+  queue: max
+  cancel-in-progress: false
+jobs:
+  policy-tests:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --test tools/huyn-task-intake/*.test.mjs
+  intake:
+    if: github.event_name == 'issue_comment' && github.ref == 'refs/heads/main' && github.actor == 'Huynx10' && github.event.issue.number == 29
+    runs-on: ubuntu-latest
+    permissions: {contents: write, actions: read}
+    outputs:
+      approved: ${{ steps.authorize.outputs.approved }}
+      task: ${{ steps.authorize.outputs.task }}
+      source_sha: ${{ steps.authorize.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - id: authorize
+        name: Validate owner and reserve durable exact-SHA claim (hosted only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/huyn-task-intake/intake.mjs
+      - if: steps.authorize.outputs.approved == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: huyn-typed-task-${{ github.run_id }}
+          path: task-envelope.json
+          if-no-files-found: error
+          retention-days: 30
+  qa-f2:
+    needs: intake
+    if: needs.intake.outputs.approved == 'true' && needs.intake.outputs.task == 'f2-qa'
+    runs-on: ubuntu-latest
+    permissions: {contents: read}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with: {java-version: '17', distribution: temurin}
+      - uses: gradle/actions/setup-gradle@v3
+        with: {gradle-version: '9.3.1'}
+      - name: Run Android code/lint and Robolectric QA at pinned source
+        run: gradle :app:lintDebug :app:testDebugUnitTest
+      - name: Record machine-checkable LIMITED evidence
+        run: |
+          echo "source_sha=${{ needs.intake.outputs.source_sha }}" > f2-qa-evidence.txt
+          echo "scope=automated_code_tests_only" >> f2-qa-evidence.txt
+          echo "physical_s24=UNKNOWN" >> f2-qa-evidence.txt
+          echo "independent_review=NOT_PERFORMED" >> f2-qa-evidence.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: huyn-f2-qa-${{ github.run_id }}
+          path: f2-qa-evidence.txt
+          retention-days: 14
+  f3-analysis:
+    needs: intake
+    if: needs.intake.outputs.approved == 'true' && needs.intake.outputs.task == 'f3-readonly'
+    runs-on: ubuntu-latest
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.source_sha }}
+          persist-credentials: false
+      - name: Record scoped source evidence; NO writer activated
+        run: |
+          git rev-parse HEAD
+          test -f app/src/main/java/com/example/ui/components/TileView.kt
+          test -f app/src/main/java/com/example/ui/components/LumiaStartGrid.kt
+          echo "F3 readiness only; exclusive lease and Dev/QA still required" >> "$GITHUB_STEP_SUMMARY"
