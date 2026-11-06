@@ -57,9 +57,10 @@ android {
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
       // Isolated test package: the prior debug APK uses an unrelated temporary key.
-      // A new CI debug key cannot update the prior trial; use a distinct test identity.
-      applicationIdSuffix = ".trial5"
-      versionNameSuffix = "-s24-trial5"
+      // Internal identity-only P1-B slice; frozen Trial7 remains at dea5383b.
+      // No APK artifact is uploaded or handed off for this unreviewed code slice.
+      applicationIdSuffix = ".p1b1"
+      versionNameSuffix = "-p1b1-internal"
     }
   }
   compileOptions {
