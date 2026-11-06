@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -139,6 +140,7 @@ import com.example.data.model.LauncherSettings
 import com.example.data.model.WidgetProviderItem
 import com.example.data.repository.LauncherIdentityPolicy
 import com.example.ui.theme.LumiaPalette
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
@@ -224,6 +226,8 @@ private sealed class GridDrawerEntry {
 private enum class GridDropIntent {
     NONE,
     GROUP_INTO_FOLDER,
+    CREATE_APP_PAIR_FOLDER,
+    REJECT_APP_PAIR_FOLDER,
     REORDER_SLOT,
     REMOVE_FROM_FOLDER,
     DELETE_FOLDER
@@ -278,6 +282,8 @@ fun AppDrawer(
     var hoveredTargetKey by remember { mutableStateOf<String?>(null) }
     var hoveredFolderId by remember { mutableStateOf<String?>(null) }
     var activeDropIntent by remember { mutableStateOf(GridDropIntent.NONE) }
+    var hoveredCenterKey by remember { mutableStateOf<String?>(null) }
+    var centerHoverSinceMs by remember { mutableStateOf(0L) }
 
     LaunchedEffect(selectedFolderId, settings.appDrawerFolders) {
         if (selectedFolderId != null && settings.appDrawerFolders.none { it.id == selectedFolderId }) {
@@ -290,6 +296,8 @@ fun AppDrawer(
             draggingEntry != null -> {
                 (draggingEntry as? GridDrawerEntry.AppEntry)?.let { onAppDragAbort(it.app) }
                 draggingEntry = null
+                hoveredCenterKey = null
+                centerHoverSinceMs = 0L
                 hoveredTargetKey = null
                 hoveredFolderId = null
                 activeDropIntent = GridDropIntent.NONE
@@ -449,6 +457,11 @@ fun AppDrawer(
         map
     }
 
+    // Legacy folders store package-only membership; do not collapse distinct profiles.
+    val packageCounts = remember(categorizedApps) {
+        categorizedApps.groupingBy { it.packageName }.eachCount()
+    }
+
     fun createManualFolder(app: AppItem) {
         // Existing folder JSON is package-only. Never silently group multiple targets.
         if (categorizedApps.count { it.packageName == app.packageName } != 1) return
@@ -470,6 +483,23 @@ fun AppDrawer(
             )
         }
         activeFolderDialog = folder
+    }
+
+    fun createAppPairFolder(sourceApp: AppItem, targetApp: AppItem) {
+        val decision = DrawerFolderMergePolicy.decide(
+            sourceApp.packageName, targetApp.packageName, packageCounts,
+            inCenter = true, dwellMs = DrawerFolderMergePolicy.DWELL_MS, isRootGrid = true
+        )
+        if (decision != DrawerAppMergeDecision.CREATE_FOLDER) {
+            Toast.makeText(context, "Không thể nhóm ứng dụng trùng hồ sơ", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val folderId = "folder_${UUID.randomUUID()}"
+        val updated = onMutateSettings { latest ->
+            createDrawerPairFolder(latest, sourceApp.packageName, targetApp.packageName,
+                sourceApp.drawerKey, targetApp.drawerKey, folderId)
+        }
+        activeFolderDialog = updated.appDrawerFolders.firstOrNull { it.id == folderId }
     }
 
     fun addAppToExistingFolder(sourceApp: AppItem, targetFolderId: String) {
@@ -546,6 +576,8 @@ fun AppDrawer(
                 }
             }?.key
             if (folderTarget != null) {
+                hoveredCenterKey = null
+                centerHoverSinceMs = 0L
                 hoveredFolderId = folderTarget
                 hoveredTargetKey = null
                 activeDropIntent = when (folderTarget) {
@@ -558,13 +590,47 @@ fun AppDrawer(
         }
         hoveredFolderId = null
         val hitEntry = gridItemBounds.entries.firstOrNull { (key, rect) ->
-            key != dragged.key && rect.contains(fingerRootPos)
+            key != dragged.key && rect.contains(fingerRootPos) && gridEntries.any { it.key == key }
         }
         hoveredTargetKey = hitEntry?.key
+        val targetApp = gridEntries.firstOrNull { it.key == hitEntry?.key } as? GridDrawerEntry.AppEntry
+        val rootGrid = selectedFolderId == null && !isAndroidSearchMode &&
+            settings.allAppsViewMode == AllAppsViewMode.ONE_UI_GRID
+        val inCenter = hitEntry?.value?.let { DrawerFolderMergePolicy.inMergeCenter(it, fingerRootPos) } == true
+        val centerCandidate = if (rootGrid && dragged is GridDrawerEntry.AppEntry &&
+            targetApp != null && inCenter) hitEntry?.key else null
+        if (centerCandidate != hoveredCenterKey) {
+            hoveredCenterKey = centerCandidate
+            centerHoverSinceMs = if (centerCandidate != null) SystemClock.uptimeMillis() else 0L
+        }
+        val dwellMs = if (centerCandidate != null) {
+            (SystemClock.uptimeMillis() - centerHoverSinceMs).coerceAtLeast(0L)
+        } else 0L
         activeDropIntent = when {
             hitEntry == null -> GridDropIntent.NONE
-            dragged is GridDrawerEntry.AppEntry && hitEntry.key.startsWith("folder:") -> GridDropIntent.GROUP_INTO_FOLDER
+            dragged is GridDrawerEntry.AppEntry && hitEntry.key.startsWith("folder:") ->
+                GridDropIntent.GROUP_INTO_FOLDER
+            dragged is GridDrawerEntry.AppEntry && targetApp != null -> when (
+                DrawerFolderMergePolicy.decide(dragged.app.packageName, targetApp.app.packageName,
+                    packageCounts, inCenter, dwellMs, rootGrid)
+            ) {
+                DrawerAppMergeDecision.CREATE_FOLDER -> GridDropIntent.CREATE_APP_PAIR_FOLDER
+                DrawerAppMergeDecision.REJECT_AMBIGUOUS -> GridDropIntent.REJECT_APP_PAIR_FOLDER
+                DrawerAppMergeDecision.REORDER -> GridDropIntent.REORDER_SLOT
+            }
             else -> GridDropIntent.REORDER_SLOT
+        }
+    }
+
+    // After a stationary hold, show the grouping preview before the finger lifts.
+    LaunchedEffect(hoveredCenterKey, centerHoverSinceMs, draggingEntry?.key) {
+        val candidate = hoveredCenterKey
+        val dragged = draggingEntry
+        if (candidate != null && dragged is GridDrawerEntry.AppEntry) {
+            delay(DrawerFolderMergePolicy.DWELL_MS)
+            if (hoveredCenterKey == candidate && draggingEntry?.key == dragged.key) {
+                updateDragHoverTarget(dragFingerRootPos, dragged)
+            }
         }
     }
 
@@ -575,6 +641,14 @@ fun AppDrawer(
                 val folderId = hoveredFolderId ?: hoveredTargetKey?.removePrefix("folder:")
                 if (folderId == "__new__") createManualFolder(app)
                 else if (folderId != null) addAppToExistingFolder(app, folderId)
+            }
+            GridDropIntent.CREATE_APP_PAIR_FOLDER -> if (app != null) {
+                val target = gridEntries.firstOrNull { it.key == hoveredTargetKey }
+                    as? GridDrawerEntry.AppEntry
+                if (target != null) createAppPairFolder(app, target.app)
+            }
+            GridDropIntent.REJECT_APP_PAIR_FOLDER -> {
+                Toast.makeText(context, "Không thể nhóm ứng dụng trùng hồ sơ", Toast.LENGTH_SHORT).show()
             }
             GridDropIntent.REMOVE_FROM_FOLDER -> if (app != null && selectedFolderId != null) {
                 removeAppFromFolder(app)
@@ -778,6 +852,8 @@ fun AppDrawer(
                                         onStart = { start ->
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                             draggingEntry = entry
+                                            hoveredCenterKey = null
+                                            centerHoverSinceMs = 0L
                                             dragTotalDistancePx = 0f
                                             val bounds = gridItemBounds[entry.key]
                                             dragFingerRootPos = if (bounds == null) rootBoxPosition + start
@@ -800,6 +876,8 @@ fun AppDrawer(
                                                 } else commitGridDrop(entry)
                                             }
                                             draggingEntry = null
+                                            hoveredCenterKey = null
+                                            centerHoverSinceMs = 0L
                                             hoveredTargetKey = null
                                             hoveredFolderId = null
                                             activeDropIntent = GridDropIntent.NONE
@@ -807,6 +885,8 @@ fun AppDrawer(
                                         onCancel = {
                                             onAppDragRecognizerCancel(app)
                                             draggingEntry = null
+                                            hoveredCenterKey = null
+                                            centerHoverSinceMs = 0L
                                             hoveredTargetKey = null
                                             hoveredFolderId = null
                                             activeDropIntent = GridDropIntent.NONE
@@ -851,7 +931,8 @@ fun AppDrawer(
                         items(gridEntries, key = { it.key }) { entry ->
                             val isBeingDragged = draggingEntry?.key == entry.key
                             val isHoverTarget = hoveredTargetKey == entry.key
-                            val isFolderMergeTarget = isHoverTarget && activeDropIntent == GridDropIntent.GROUP_INTO_FOLDER
+                            val isFolderMergeTarget = isHoverTarget && (activeDropIntent == GridDropIntent.GROUP_INTO_FOLDER ||
+                                activeDropIntent == GridDropIntent.CREATE_APP_PAIR_FOLDER)
                             val isReorderTarget = isHoverTarget && activeDropIntent == GridDropIntent.REORDER_SLOT
 
                             val targetScale = if (draggingEntry == null) {
@@ -888,6 +969,8 @@ fun AppDrawer(
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 val cellBounds = gridItemBounds[entry.key]
                                                 draggingEntry = entry
+                                                hoveredCenterKey = null
+                                                centerHoverSinceMs = 0L
                                                 dragTotalDistancePx = 0f
                                                 dragFingerRootPos = if (cellBounds != null) {
                                                     Offset(
@@ -914,6 +997,7 @@ fun AppDrawer(
                                                     ?.let { onAppDragEnd(it.app) } == true
                                                 val movedDistanceDp = with(density) { dragTotalDistancePx.toDp() }
                                                 if (!handledByHome) {
+                                                    updateDragHoverTarget(dragFingerRootPos, entry)
                                                     if (movedDistanceDp < 14.dp) {
                                                         // Short hold without dragging opens quick actions for the app or folder
                                                         when (entry) {
@@ -925,6 +1009,8 @@ fun AppDrawer(
                                                     }
                                                 }
                                                 draggingEntry = null
+                                                hoveredCenterKey = null
+                                                centerHoverSinceMs = 0L
                                                 hoveredTargetKey = null
                                                 hoveredFolderId = null
                                                 activeDropIntent = GridDropIntent.NONE
@@ -934,6 +1020,8 @@ fun AppDrawer(
                                                     onAppDragRecognizerCancel(it.app)
                                                 }
                                                 draggingEntry = null
+                                                hoveredCenterKey = null
+                                                centerHoverSinceMs = 0L
                                                 hoveredTargetKey = null
                                                 hoveredFolderId = null
                                                 activeDropIntent = GridDropIntent.NONE
