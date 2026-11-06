@@ -34,5 +34,6 @@ internal fun resolveCornerResize(
     val newRight = if (movingLeft) right else (right.toLong() + deltaColumns).coerceIn((left + minWidth).toLong(), columns.toLong()).toInt()
     val newTop = if (movingTop) (top.toLong() + deltaRows).coerceIn(0L, bottom - minHeight).toInt() else top
     val newBottom = if (movingTop) bottom else (bottom + deltaRows).coerceAtLeast(top.toLong() + minHeight)
-    require(newBottom - newTop <= Int.MAX_VALUE)\n    return GridResizeRect(newLeft, newTop, newRight - newLeft, (newBottom - newTop).toInt())
+    require(newBottom - newTop <= Int.MAX_VALUE)
+    return GridResizeRect(newLeft, newTop, newRight - newLeft, (newBottom - newTop).toInt())
 }
