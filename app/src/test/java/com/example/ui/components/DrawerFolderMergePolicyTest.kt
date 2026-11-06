@@ -36,6 +36,18 @@ class DrawerFolderMergePolicyTest {
         assertEquals(DrawerAppMergeDecision.REJECT_AMBIGUOUS, decide(target = "pkg.missing"))
     }
 
+    @Test fun hiddenCategoryWorkProfileDuplicateIsRejected() {
+        val allInstalled = listOf("pkg.a", "pkg.b", "pkg.work", "pkg.work")
+        val visibleCategory = listOf("pkg.a", "pkg.b", "pkg.work")
+        val unsafeFilteredCounts = DrawerFolderMergePolicy.countAllInstalledPackages(visibleCategory)
+        val safeCounts = DrawerFolderMergePolicy.countAllInstalledPackages(allInstalled)
+        assertEquals(1, unsafeFilteredCounts["pkg.work"])
+        assertEquals(2, safeCounts["pkg.work"])
+        assertEquals(DrawerAppMergeDecision.REJECT_AMBIGUOUS,
+            DrawerFolderMergePolicy.decide("pkg.a", "pkg.work", safeCounts,
+                inCenter = true, dwellMs = 400L, isRootGrid = true))
+    }
+
     @Test fun centerRegionIsStrictlyCentralHalf() {
         val rect = Rect(10f, 20f, 110f, 120f)
         assertTrue(DrawerFolderMergePolicy.inMergeCenter(rect, Offset(60f, 70f)))

@@ -12,6 +12,10 @@ internal enum class DrawerAppMergeDecision { REORDER, CREATE_FOLDER, REJECT_AMBI
 internal object DrawerFolderMergePolicy {
     const val DWELL_MS = 400L
 
+    /** Use unfiltered installed targets: category filtering must not hide profile duplicates. */
+    fun countAllInstalledPackages(allPackageNames: List<String>): Map<String, Int> =
+        allPackageNames.groupingBy { it }.eachCount()
+
     fun inMergeCenter(bounds: Rect, finger: Offset): Boolean =
         bounds.width > 0f && bounds.height > 0f &&
             finger.x >= bounds.left + bounds.width * 0.25f &&

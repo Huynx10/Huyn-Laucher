@@ -458,8 +458,9 @@ fun AppDrawer(
     }
 
     // Legacy folders store package-only membership; do not collapse distinct profiles.
-    val packageCounts = remember(categorizedApps) {
-        categorizedApps.groupingBy { it.packageName }.eachCount()
+    // Count ALL installed app targets, including other categories and user profiles.
+    val packageCounts = remember(apps) {
+        DrawerFolderMergePolicy.countAllInstalledPackages(apps.map { it.packageName })
     }
 
     fun createManualFolder(app: AppItem) {
