@@ -1,0 +1,62 @@
+name: Huyn beta signing readiness (hosted, no publishing)
+on:
+  push:
+    branches: [ci/beta-signing-preflight-20261106]
+permissions:
+  contents: read
+jobs:
+  signing-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Check persistent signing secrets against approved certificate
+        shell: bash
+        env:
+          BETA_KEYSTORE_BASE64: ${{ secrets.BETA_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.BETA_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.BETA_KEY_PASSWORD }}
+          BETA_CERT_SHA256: ${{ secrets.BETA_CERT_SHA256 }}
+          RELEASE_OPT_IN: ${{ vars.BETA_RELEASE_ENABLED }}
+        run: |
+          set -euo pipefail
+          umask 077
+          for variable in BETA_KEYSTORE_BASE64 STORE_PASSWORD KEY_PASSWORD BETA_CERT_SHA256; do
+            if [[ -z "${!variable:-}" ]]; then
+              echo "::error::Required release signing configuration $variable is missing"
+              exit 1
+            fi
+          done
+          secret_file="$(mktemp)"
+          trap 'rm -f "$secret_file"' EXIT
+          printf '%s' "$BETA_KEYSTORE_BASE64" | base64 --decode > "$secret_file"
+          test -s "$secret_file"
+          bash scripts/verify-beta-keystore.sh "$secret_file" "$BETA_CERT_SHA256"
+          if [[ "$RELEASE_OPT_IN" != true ]]; then
+            echo "BETA_RELEASE_ENABLED is not true; release auto-publish is safely disabled"
+          else
+            echo "BETA_RELEASE_ENABLED=true; main pushes with successful CI would trigger beta workflow"
+          fi
+          echo "Signing key presence and certificate identity verified; no APK assembled or published" >> "$GITHUB_STEP_SUMMARY"
+      - name: Confirm last published beta uses same signing certificate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BETA_CERT_SHA256: ${{ secrets.BETA_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          work_dir="$(mktemp -d)"
+          trap 'rm -rf "$work_dir"' EXIT
+          gh release download v1.1.0-beta.208-g3031d19d2f42 --pattern '*.apk' --dir "$work_dir"
+          test "$(find "$work_dir" -maxdepth 1 -type f -name '*.apk' | wc -l)" -eq 1
+          apk="$(find "$work_dir" -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          signer="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$signer"
+          bash scripts/verify-beta-signature.sh "$apk" "$BETA_CERT_SHA256" "$signer"
+          echo "Historic beta signing certificate matches pinned GitHub release identity" >> "$GITHUB_STEP_SUMMARY"
