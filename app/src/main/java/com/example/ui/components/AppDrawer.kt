@@ -759,6 +759,8 @@ fun AppDrawer(
                         if (hoveredFolderId == "__new__") "Thả để tạo thư mục"
                         else "Thả vào ${title ?: "thư mục"}"
                     }
+                    GridDropIntent.CREATE_APP_PAIR_FOLDER -> "Thả để tạo thư mục từ hai ứng dụng"
+                    GridDropIntent.REJECT_APP_PAIR_FOLDER -> "Không thể nhóm ứng dụng trùng hồ sơ"
                     GridDropIntent.REORDER_SLOT -> "Thả để đổi vị trí"
                     GridDropIntent.REMOVE_FROM_FOLDER -> "Thả để bỏ khỏi thư mục"
                     GridDropIntent.DELETE_FOLDER -> "Thả để xóa thư mục"
