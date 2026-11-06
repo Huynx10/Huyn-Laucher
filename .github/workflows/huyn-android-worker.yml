@@ -1,0 +1,316 @@
+name: Huyn Android Finder Worker
+on:
+  push:
+    branches: [ci/huyn-android-worker-20261105]
+    paths: ['.github/workflows/huyn-android-worker.yml', 'tools/huyn-android-worker/**']
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: huyn-android-writer-pr41
+  cancel-in-progress: false
+jobs:
+  snapshot:
+    if: >-
+      github.repository == 'Huynx10/Huyn-Laucher' && github.actor == 'Huynx10' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/ci/huyn-android-worker-20261105') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'issue_comment' && github.ref == 'refs/heads/main' &&
+      github.event.issue.number == 29 && !github.event.issue.pull_request &&
+      github.event.comment.user.login == 'Huynx10' && github.event.comment.body == '/huyn finder-harden' && github.event.action == 'created'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read, pull-requests: read}
+    outputs:
+      sha: ${{ steps.snapshot.outputs.sha }}
+      branch: ${{ steps.snapshot.outputs.branch }}
+      work_required: ${{ steps.snapshot.outputs.work_required }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.sha }}', persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --test tools/huyn-android-worker/*.test.mjs
+      - id: snapshot
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          set -euo pipefail
+          mkdir bundle
+          gh api repos/Huynx10/Huyn-Laucher/pulls/41 > bundle/pr.json
+          node --input-type=module <<'NODE'
+          import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          import {SOURCE,TEST,expectedSource,selectCanonicalFinderHead} from './tools/huyn-android-worker/worker.mjs';
+          const p=JSON.parse(readFileSync('bundle/pr.json'));
+          const refData=JSON.parse(execFileSync('gh',['api',`repos/Huynx10/Huyn-Laucher/git/ref/heads/${p.head.ref}`],{encoding:'utf8'}));
+          const pinned=selectCanonicalFinderHead(p,refData);
+          if(pinned.metadataLag)appendFileSync(process.env.GITHUB_STEP_SUMMARY,'PR metadata HEAD lagged behind canonical Git branch ref; safe ref SHA selected.\n');
+          const get=path=>JSON.parse(execFileSync('gh',['api',`repos/Huynx10/Huyn-Laucher/contents/${path}?ref=${pinned.sha}`],{encoding:'utf8'}));
+          const decode=p=>Buffer.from(get(p).content,'base64').toString('utf8');
+          const s={pr:41,sha:pinned.sha,branch:pinned.branch,source:decode(SOURCE),tests:decode(TEST)};
+          const workRequired=expectedSource(s.source)!==s.source;
+          appendFileSync(process.env.GITHUB_OUTPUT,`work_required=${workRequired}\n`);
+          if(!workRequired)appendFileSync(process.env.GITHUB_STEP_SUMMARY,'Finder hardening already satisfied; no-op, no new commit.\n');
+          writeFileSync('bundle/snapshot.json',JSON.stringify(s));
+          appendFileSync(process.env.GITHUB_OUTPUT,`sha=${s.sha}\nbranch=${s.branch}\n`);
+          NODE
+          cp tools/huyn-android-worker/worker.mjs bundle/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finder-snapshot-${{ github.run_id }}
+          path: |
+            bundle/snapshot.json
+            bundle/worker.mjs
+          retention-days: 3
+          if-no-files-found: error
+  verified-noop:
+    needs: snapshot
+    if: needs.snapshot.outputs.work_required == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read, actions: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ needs.snapshot.outputs.sha }}', persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-snapshot-${{ github.run_id }}', path: worker-input}
+      - name: Assert completed Finder task is exact and no new code write is needed
+        env: {GH_TOKEN: '${{ github.token }}', PINNED_SHA: '${{ needs.snapshot.outputs.sha }}', PINNED_BRANCH: '${{ needs.snapshot.outputs.branch }}'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_SHA"
+          test "$(gh api repos/Huynx10/Huyn-Laucher/git/ref/heads/$PINNED_BRANCH --jq .object.sha)" = "$PINNED_SHA"
+          node --input-type=module <<'NODE'
+          import {readFileSync} from 'node:fs';
+          import {SOURCE,TEST,expectedSource} from './worker-input/worker.mjs';
+          const s=JSON.parse(readFileSync('worker-input/snapshot.json','utf8'));
+          const now=readFileSync(SOURCE,'utf8');
+          const testSrc=readFileSync(TEST,'utf8');
+          if(now!==s.source || testSrc!==s.tests || now!==expectedSource(now)) throw Error('Finder NO-OP source mismatch');
+          if(!testSrc.includes('started.component') || !testSrc.includes('Intent.FLAG_ACTIVITY_NEW_TASK')) throw Error('Finder regression coverage absent');
+          console.log('NOOP_VERIFIED_AT_CANONICAL_REF',s.sha);
+          NODE
+          echo 'Completed source unchanged; canonical branch SHA and regression checks verified; no writer invoked.' >> "$GITHUB_STEP_SUMMARY"
+  author:
+    needs: snapshot
+    if: needs.snapshot.outputs.work_required == 'true'
+    runs-on: [self-hosted, macOS, ARM64, huyn-codex]
+    timeout-minutes: 12
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-snapshot-${{ github.run_id }}', path: '${{ runner.temp }}/finder-author-${{ github.run_id }}'}
+      - name: Claim fixed task and generate constrained Android candidate
+        env: {BASE_SHA: '${{ needs.snapshot.outputs.sha }}'}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$BASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          : "${RUNNER_TOOL_CACHE:?}"
+          ledger="$RUNNER_TOOL_CACHE/huyn-finder-worker-v1"
+          [[ ! -L "$ledger" ]]
+          mkdir -p "$ledger"
+          chmod 700 "$ledger"
+          mkdir "$ledger/$BASE_SHA" || { echo 'Duplicate/interrupted task; explicit recovery required'; exit 1; }
+          cd "$RUNNER_TEMP/finder-author-$GITHUB_RUN_ID"
+          export PATH="/opt/homebrew/bin:$PATH"
+          node worker.mjs author
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finder-candidate-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/finder-author-${{ github.run_id }}/candidate.kt
+            ${{ runner.temp }}/finder-author-${{ github.run_id }}/candidate.json
+          if-no-files-found: error
+          retention-days: 3
+      - if: always()
+        run: rm -rf "$RUNNER_TEMP/finder-author-$GITHUB_RUN_ID"
+  review:
+    needs: [snapshot, author]
+    runs-on: [self-hosted, macOS, ARM64, huyn-codex]
+    timeout-minutes: 8
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-snapshot-${{ github.run_id }}', path: '${{ runner.temp }}/finder-review-${{ github.run_id }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-candidate-${{ github.run_id }}', path: '${{ runner.temp }}/finder-review-${{ github.run_id }}'}
+      - run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/finder-review-$GITHUB_RUN_ID"
+          export PATH="/opt/homebrew/bin:$PATH"
+          node worker.mjs review
+      - uses: actions/upload-artifact@v4
+        with: {name: 'finder-review-${{ github.run_id }}', path: '${{ runner.temp }}/finder-review-${{ github.run_id }}/review-verdict.json', if-no-files-found: error, retention-days: 3}
+      - if: always()
+        run: rm -rf "$RUNNER_TEMP/finder-review-$GITHUB_RUN_ID"
+  android-qa:
+    needs: [snapshot, author]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ needs.snapshot.outputs.sha }}', persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-snapshot-${{ github.run_id }}', path: worker-input}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-candidate-${{ github.run_id }}', path: worker-input}
+      - uses: actions/setup-java@v4
+        with: {java-version: '17', distribution: temurin}
+      - uses: gradle/actions/setup-gradle@v3
+        with: {gradle-version: '9.3.1'}
+      - name: Install independently specified regression
+        run: |
+          node --input-type=module <<'NODE'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          import {SOURCE,TEST,verifyCandidate,augmentTests} from './worker-input/worker.mjs';
+          const s=JSON.parse(readFileSync('worker-input/snapshot.json'));
+          if(readFileSync(SOURCE,'utf8')!==s.source||readFileSync(TEST,'utf8')!==s.tests)throw Error('Base content mismatch');
+          verifyCandidate(s.source,readFileSync('worker-input/candidate.kt','utf8'));
+          writeFileSync(TEST,augmentTests(s.tests));
+          NODE
+      - name: Prove baseline fails the exact explicit-component regression
+        run: |
+          set +e
+          gradle :app:testDebugUnitTest --tests com.example.ui.components.SystemSearchTest.exportedFinderGlobalSearchOpensExactlyOnceWithQuery > baseline-test.log 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          python3 - <<'PY'
+          import glob,xml.etree.ElementTree as E
+          cases=[c for p in glob.glob('app/build/test-results/testDebugUnitTest/*.xml') for c in E.parse(p).getroot().iter('testcase') if c.attrib.get('name')=='exportedFinderGlobalSearchOpensExactlyOnceWithQuery']
+          assert len(cases)==1 and cases[0].find('failure') is not None, 'Expected regression did not fail; compiler/setup errors are not red proof'
+          failure=cases[0].find('failure')
+          assert 'AssertionError' in failure.attrib.get('type','') and 'ComponentInfo' in failure.attrib.get('message','') and 'null' in failure.attrib.get('message',''), 'Baseline failure was not the explicit-component assertion'
+          PY
+      - name: Create temporary debug signing keystore (QA only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          chmod 700 "$HOME/.android"
+          if [[ -e "$HOME/.android/debug.keystore" ]]; then
+            echo "::error::Unexpected preexisting debug keystore; refuse to overwrite"
+            exit 1
+          fi
+          keytool -genkeypair -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          chmod 600 "$HOME/.android/debug.keystore"
+      - name: Apply constrained candidate and run Android verification
+        run: |
+          cp worker-input/candidate.kt app/src/main/java/com/example/ui/components/SystemSearch.kt
+          gradle :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+          node --input-type=module <<'NODE'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          import {sha256,verifyCandidate} from './worker-input/worker.mjs';
+          const s=JSON.parse(readFileSync('worker-input/snapshot.json'));
+          const c=readFileSync('worker-input/candidate.kt','utf8');verifyCandidate(s.source,c);
+          writeFileSync('qa-verdict.json',JSON.stringify({verdict:'PASS',sha:s.sha,digest:sha256(c),baselineRegression:'FAIL',candidateAndroid:'PASS'}));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finder-android-qa-${{ github.run_id }}
+          path: |
+            qa-verdict.json
+            app/build/outputs/apk/debug/*.apk
+            app/build/test-results/testDebugUnitTest/*.xml
+            baseline-test.log
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    outputs:
+      published_sha: ${{ steps.publish.outputs.published_sha }}
+    needs: [snapshot, review, android-qa]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: write, pull-requests: read}
+    env: {GH_TOKEN: '${{ github.token }}'}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ needs.snapshot.outputs.sha }}', persist-credentials: true}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-snapshot-${{ github.run_id }}', path: worker-input}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-candidate-${{ github.run_id }}', path: worker-input}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-review-${{ github.run_id }}', path: worker-input}
+      - uses: actions/download-artifact@v4
+        with: {name: 'finder-android-qa-${{ github.run_id }}', path: worker-input/qa}
+      - name: Verify independent gates and exact two-file scope
+        run: |
+          node --input-type=module <<'NODE'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          import {SOURCE,TEST,verifyCandidate,augmentTests,sha256} from './worker-input/worker.mjs';
+          const s=JSON.parse(readFileSync('worker-input/snapshot.json'));const c=readFileSync('worker-input/candidate.kt','utf8');verifyCandidate(s.source,c);
+          for(const file of ['worker-input/review-verdict.json','worker-input/qa/qa-verdict.json']){
+            const v=JSON.parse(readFileSync(file));if(v.verdict!=='PASS'||v.sha!==s.sha||v.digest!==sha256(c))throw Error('QA identity mismatch');
+          }
+          if(readFileSync(SOURCE,'utf8')!==s.source||readFileSync(TEST,'utf8')!==s.tests)throw Error('Checkout mismatch');
+          writeFileSync(SOURCE,c);writeFileSync(TEST,augmentTests(s.tests));
+          NODE
+          git add -- app/src/main/java/com/example/ui/components/SystemSearch.kt app/src/test/java/com/example/ui/components/SystemSearchTest.kt
+          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = 2
+          git diff --cached --check
+      - name: Recheck live lease and fast-forward only
+        id: publish
+        env: {BASE_SHA: '${{ needs.snapshot.outputs.sha }}', TARGET_BRANCH: '${{ needs.snapshot.outputs.branch }}'}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/Huynx10/Huyn-Laucher/git/ref/heads/$TARGET_BRANCH --jq .object.sha)" = "$BASE_SHA"
+          test "$(gh api repos/Huynx10/Huyn-Laucher/pulls/41 --jq .state)" = open
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(finder): pin exported search target and preserve intent data'
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo "published_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo 'Real Android candidate updated PR41 after independent review and red/green Android QA. No merge or release.' >> "$GITHUB_STEP_SUMMARY"
+
+  final-head-qa:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions: {contents: read, pull-requests: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ needs.publish.outputs.published_sha }}', persist-credentials: false}
+      - uses: actions/setup-java@v4
+        with: {java-version: '17', distribution: temurin}
+      - uses: gradle/actions/setup-gradle@v3
+        with: {gradle-version: '9.3.1'}
+      - name: Provision ephemeral debug keystore for exact HEAD QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          chmod 700 "$HOME/.android"
+          test ! -e "$HOME/.android/debug.keystore"
+          keytool -genkeypair -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          chmod 600 "$HOME/.android/debug.keystore"
+      - name: Verify published PR head and run exact-commit Android QA
+        env: {GH_TOKEN: '${{ github.token }}', EXPECTED_SHA: '${{ needs.publish.outputs.published_sha }}'}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(gh api repos/Huynx10/Huyn-Laucher/git/ref/heads/fix/finder-public-intent-20261030 --jq .object.sha)" = "$EXPECTED_SHA"
+          gradle :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+          printf '%s\n' "$EXPECTED_SHA" > final-source-sha.txt
+          sha256sum app/build/outputs/apk/debug/*.apk > final-apk-sha256.txt
+          echo "EXACT_HEAD_ANDROID_QA_PASS $EXPECTED_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finder-final-head-apk-${{ github.run_id }}
+          path: |
+            final-source-sha.txt
+            final-apk-sha256.txt
+            app/build/outputs/apk/debug/*.apk
+            app/build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: error
+          retention-days: 7

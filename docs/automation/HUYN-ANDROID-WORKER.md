@@ -1,0 +1,17 @@
+# Bounded event-driven Android worker
+
+This workflow performs one authorized Finder hardening task on existing PR #41. It is not a general backlog-solving agent and does not merge or release. Staging push or an owner `/huyn finder-harden` comment on issue #29 starts the fixed contract; production issue triggers require trusted workflow promotion to main. No timer exists.
+
+1. Hosted gate snapshots current same-repository PR #41, exact source/test content and base SHA.
+2. Self-hosted model receives explicit source input in an empty temporary directory, no repository checkout or GitHub write credentials. User config/rules and interactive tools are disabled. JSON events reject tool calls. Source output must equal the exact permitted copy-Intent/explicit-component transformation. At most two generation attempts are permitted.
+3. Hosted QA adds an independently specified explicit-component assertion and proves that assertion fails the original code. Setup/compiler failures are not accepted as red proof. Candidate then must pass Android Lint, full Unit/Robolectric and debug assembly.
+4. A separate tool-free model session independently reviews the source/candidate and must PASS. Its verdict and hosted QA bind base SHA + candidate SHA-256.
+5. Hosted-only publisher validates both gates, exact source/test content, limited staged paths and latest live PR head. Normal fast-forward push updates PR #41; no force push. A concurrent external write rejects the push. Workflow concurrency reserves this lane between automatic runs.
+
+The task/PR41 writer lease must be explicitly assigned to this worker by coordinator before execution. Existing manual authors must not write this lane during execution. Atomic persistent local claim under runner tool cache blocks repeating the same task/base SHA, including interrupted attempts. Interrupted claims require diagnosis and explicit recovery; no automatic expiry/takeover. This is single-storage at-most-once attempt, not distributed exactly-once delivery.
+
+Artifacts contain source snapshot, constrained candidate, independent review, red baseline log, green Android results and debug APK. Debug APK is not persistent signed release and does not establish S24 UAT, Finder availability, frame-time or battery improvement. Publisher does not execute generated code or receive runner credentials. Self-hosted runner remains the owner's account: all model tools are disabled and code equality limits the output. Never broaden this contract to arbitrary PR code without separate runner isolation and review.
+
+After publication, a separate read-only hosted `final-head-qa` job checks out the exact new commit, verifies it is still live PR #41 HEAD, and reruns Lint/full tests/debug assembly. Its artifact binds APK SHA-256 to that commit. This in-workflow dependency avoids relying on recursive PR CI, since pushes made with GITHUB_TOKEN may not trigger another workflow. A failure after publishing leaves the PR unmerged and the overall workflow red; no release gate is bypassed.
+
+If the exact hardening is already present, snapshot emits `work_required=false`; downstream authors/publishers skip successfully, with no empty commit. Production comment triggers require the owner account, exact command, issue (not PR) #29 and default branch. Baseline red proof additionally requires the exact testcase AssertionError to compare ComponentInfo against null, so unrelated failures cannot satisfy it.
