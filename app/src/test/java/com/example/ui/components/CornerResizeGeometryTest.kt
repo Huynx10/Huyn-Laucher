@@ -55,4 +55,22 @@ class CornerResizeGeometryTest {
     fun rejectsMinimumWidthGreaterThanExistingRightAnchor() {
         resolveCornerResize(GridResizeRect(0, 1, 1, 2), ResizeCorner.TOP_START, 0, 0, columns = 6, minWidth = 2)
     }
+    @Test fun extremePositiveDeltaClampsWithoutIntegerOverflow() {
+        assertEquals(GridResizeRect(3, 3, 1, 3),
+            resolveCornerResize(initial, ResizeCorner.BOTTOM_START,
+                deltaColumns = Int.MAX_VALUE, deltaRows = 0, columns = 6))
+        assertEquals(GridResizeRect(2, 3, 4, 3),
+            resolveCornerResize(initial, ResizeCorner.BOTTOM_END,
+                deltaColumns = Int.MAX_VALUE, deltaRows = 0, columns = 6))
+    }
+
+    @Test fun extremeNegativeDeltaClampsWithoutIntegerOverflow() {
+        assertEquals(GridResizeRect(0, 3, 4, 3),
+            resolveCornerResize(initial, ResizeCorner.BOTTOM_START,
+                deltaColumns = Int.MIN_VALUE, deltaRows = 0, columns = 6))
+        assertEquals(GridResizeRect(2, 3, 1, 3),
+            resolveCornerResize(initial, ResizeCorner.BOTTOM_END,
+                deltaColumns = Int.MIN_VALUE, deltaRows = 0, columns = 6, minWidth = 1))
+    }
+
 }
