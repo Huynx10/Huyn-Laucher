@@ -23,16 +23,16 @@ internal fun resolveCornerResize(
     require(rect.x.toLong() + rect.width <= columns.toLong())
     require(rect.width >= minWidth && rect.height >= minHeight)
     // A top/left drag must be able to preserve the opposite (right/bottom) anchor.
-    require(rect.x + rect.width >= minWidth && rect.y + rect.height >= minHeight)
+    require(rect.x.toLong() + rect.width >= minWidth && rect.y.toLong() + rect.height >= minHeight)
     val left = rect.x
     val right = rect.x + rect.width
     val top = rect.y
-    val bottom = rect.y + rect.height
+    val bottom = rect.y.toLong() + rect.height
     val movingLeft = corner == ResizeCorner.TOP_START || corner == ResizeCorner.BOTTOM_START
     val movingTop = corner == ResizeCorner.TOP_START || corner == ResizeCorner.TOP_END
-    val newLeft = if (movingLeft) (left + deltaColumns).coerceIn(0, right - minWidth) else left
-    val newRight = if (movingLeft) right else (right + deltaColumns).coerceIn(left + minWidth, columns)
-    val newTop = if (movingTop) (top + deltaRows).coerceIn(0, bottom - minHeight) else top
-    val newBottom = if (movingTop) bottom else (bottom + deltaRows).coerceAtLeast(top + minHeight)
-    return GridResizeRect(newLeft, newTop, newRight - newLeft, newBottom - newTop)
+    val newLeft = if (movingLeft) (left.toLong() + deltaColumns).coerceIn(0L, (right - minWidth).toLong()).toInt() else left
+    val newRight = if (movingLeft) right else (right.toLong() + deltaColumns).coerceIn((left + minWidth).toLong(), columns.toLong()).toInt()
+    val newTop = if (movingTop) (top.toLong() + deltaRows).coerceIn(0L, bottom - minHeight).toInt() else top
+    val newBottom = if (movingTop) bottom else (bottom + deltaRows).coerceAtLeast(top.toLong() + minHeight)
+    require(newBottom - newTop <= Int.MAX_VALUE)\n    return GridResizeRect(newLeft, newTop, newRight - newLeft, (newBottom - newTop).toInt())
 }
