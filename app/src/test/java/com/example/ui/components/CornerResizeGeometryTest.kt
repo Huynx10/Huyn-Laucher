@@ -181,4 +181,28 @@ class CornerResizeGeometryTest {
             ResizeCorner.BOTTOM_END, 0, 0, columns = 8, rows = 8, maxWidth = 3)
     }
 
+    @Test fun providerMinimumClampsTopStartWhileKeepingOppositeCornerFixed() {
+        val rect = GridResizeRect(x = 2, y = 3, width = 3, height = 4)
+        assertEquals(
+            GridResizeRect(3, 5, 2, 2),
+            resolveCornerResize(rect, ResizeCorner.TOP_START,
+                deltaColumns = Int.MAX_VALUE, deltaRows = Int.MAX_VALUE,
+                columns = 8, rows = 12, minWidth = 2, minHeight = 2)
+        )
+    }
+
+    @Test fun providerFixedDimensionsRejectExpansionForAllCorners() {
+        val rect = GridResizeRect(x = 2, y = 3, width = 2, height = 3)
+        ResizeCorner.values().forEach { corner ->
+            assertEquals(
+                rect,
+                resolveCornerResize(rect, corner,
+                    deltaColumns = -100, deltaRows = 100,
+                    columns = 8, rows = 12,
+                    minWidth = 2, minHeight = 3,
+                    maxWidth = 2, maxHeight = 3)
+            )
+        }
+    }
+
 }
