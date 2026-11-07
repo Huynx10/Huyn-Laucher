@@ -142,4 +142,21 @@ class CornerResizeGeometryTest {
                 deltaColumns = 0, deltaRows = -100, columns = 4, rows = 5))
     }
 
+    @Test fun placementRejectsOverlapButAllowsEdgeTouchAndOtherPages() {
+        val candidate = GridResizeRect(1, 1, 2, 2)
+        assertEquals(false, isCornerResizePlacementClear(candidate,
+            listOf(GridResizeRect(2, 2, 2, 2))))
+        assertEquals(true, isCornerResizePlacementClear(candidate,
+            listOf(GridResizeRect(3, 1, 2, 2), GridResizeRect(0, 3, 2, 2))))
+    }
+
+    @Test fun placementRejectsInvalidOrOverflowingRects() {
+        assertEquals(false, isCornerResizePlacementClear(
+            GridResizeRect(-1, 0, 2, 2), emptyList()))
+        assertEquals(false, isCornerResizePlacementClear(
+            GridResizeRect(0, 0, 0, 2), emptyList()))
+        assertEquals(false, isCornerResizePlacementClear(
+            GridResizeRect(Int.MAX_VALUE, 0, 2, 2), emptyList()))
+    }
+
 }
