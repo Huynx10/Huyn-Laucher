@@ -128,4 +128,18 @@ class CornerResizeGeometryTest {
             columns = 6, rows = 16, maxHeight = 8)
     }
 
+    @Test fun finiteShortPageClampsMaximumHeightToAvailableRows() {
+        val rect = GridResizeRect(1, 0, 2, 2)
+        assertEquals(GridResizeRect(1, 0, 2, 5),
+            resolveCornerResize(rect, ResizeCorner.BOTTOM_END,
+                deltaColumns = 0, deltaRows = 100, columns = 4, rows = 5))
+    }
+
+    @Test fun shortPageTopCornerPreservesBottomAnchor() {
+        val rect = GridResizeRect(1, 2, 2, 3)
+        assertEquals(GridResizeRect(1, 0, 2, 5),
+            resolveCornerResize(rect, ResizeCorner.TOP_START,
+                deltaColumns = 0, deltaRows = -100, columns = 4, rows = 5))
+    }
+
 }
