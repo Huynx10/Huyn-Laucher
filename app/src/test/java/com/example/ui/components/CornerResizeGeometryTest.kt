@@ -104,4 +104,28 @@ class CornerResizeGeometryTest {
                 columns = 6, rows = 8))
     }
 
+    @Test fun bottomCornersRespectPersistedMaximumHeightOnTallPages() {
+        listOf(ResizeCorner.BOTTOM_START, ResizeCorner.BOTTOM_END).forEach { corner ->
+            val resized = resolveCornerResize(initial, corner, 0, 100,
+                columns = 6, rows = 16, maxHeight = 8)
+            assertEquals(GridResizeRect(2, 3, 2, 8), resized)
+        }
+    }
+
+    @Test fun topCornersRespectPersistedMaximumHeightAndKeepBottomAnchor() {
+        listOf(ResizeCorner.TOP_START, ResizeCorner.TOP_END).forEach { corner ->
+            val resized = resolveCornerResize(
+                GridResizeRect(2, 8, 2, 3), corner, 0, -100,
+                columns = 6, rows = 16, maxHeight = 8)
+            assertEquals(GridResizeRect(2, 3, 2, 8), resized)
+        }
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInitialHeightBeyondPersistedMaximum() {
+        resolveCornerResize(GridResizeRect(0, 0, 2, 9),
+            ResizeCorner.BOTTOM_END, 0, 0,
+            columns = 6, rows = 16, maxHeight = 8)
+    }
+
 }
