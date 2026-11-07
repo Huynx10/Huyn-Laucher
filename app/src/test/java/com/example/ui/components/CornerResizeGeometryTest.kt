@@ -159,4 +159,26 @@ class CornerResizeGeometryTest {
             GridResizeRect(Int.MAX_VALUE, 0, 2, 2), emptyList()))
     }
 
+    @Test fun providerMaximumWidthClampsRightCorners() {
+        val rect = GridResizeRect(1, 1, 2, 2)
+        listOf(ResizeCorner.TOP_END, ResizeCorner.BOTTOM_END).forEach { corner ->
+            assertEquals(GridResizeRect(1, 1, 3, 2),
+                resolveCornerResize(rect, corner, 100, 0, columns = 8, rows = 8, maxWidth = 3))
+        }
+    }
+
+    @Test fun providerMaximumWidthClampsLeftCornersWithoutMovingRightAnchor() {
+        val rect = GridResizeRect(4, 1, 2, 2)
+        listOf(ResizeCorner.TOP_START, ResizeCorner.BOTTOM_START).forEach { corner ->
+            assertEquals(GridResizeRect(3, 1, 3, 2),
+                resolveCornerResize(rect, corner, -100, 0, columns = 8, rows = 8, maxWidth = 3))
+        }
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInitialWidthBeyondProviderMaximum() {
+        resolveCornerResize(GridResizeRect(0, 0, 4, 2),
+            ResizeCorner.BOTTOM_END, 0, 0, columns = 8, rows = 8, maxWidth = 3)
+    }
+
 }
