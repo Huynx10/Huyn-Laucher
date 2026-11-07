@@ -42,3 +42,27 @@ internal fun resolveCornerResize(
     require(newBottom - newTop <= Int.MAX_VALUE)
     return GridResizeRect(newLeft, newTop, newRight - newLeft, (newBottom - newTop).toInt())
 }
+
+/**
+ * Fail-closed collision predicate for a proposed resize on one Home page.
+ * Callers must exclude the selected tile and tiles on other pages.
+ * Long arithmetic prevents overflow when checking untrusted persisted coordinates.
+ */
+internal fun isCornerResizePlacementClear(
+    candidate: GridResizeRect,
+    otherPageRects: List<GridResizeRect>
+): Boolean {
+    fun valid(rect: GridResizeRect): Boolean =
+        rect.x >= 0 && rect.y >= 0 && rect.width > 0 && rect.height > 0 &&
+            rect.x.toLong() + rect.width <= Int.MAX_VALUE.toLong() &&
+            rect.y.toLong() + rect.height <= Int.MAX_VALUE.toLong()
+    if (!valid(candidate) || otherPageRects.any { !valid(it) }) return false
+    val right = candidate.x.toLong() + candidate.width
+    val bottom = candidate.y.toLong() + candidate.height
+    return otherPageRects.none { other ->
+        val otherRight = other.x.toLong() + other.width
+        val otherBottom = other.y.toLong() + other.height
+        candidate.x.toLong() < otherRight && right > other.x.toLong() &&
+            candidate.y.toLong() < otherBottom && bottom > other.y.toLong()
+    }
+}
