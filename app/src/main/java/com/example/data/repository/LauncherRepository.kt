@@ -530,6 +530,41 @@ class LauncherRepository(
         }
     }
 
+    /**
+     * F3 persistence boundary: caller resolves corner geometry, then this transaction
+     * validates the exact rectangle and writes only the selected tile.
+     * False means no write (invalid, occupied, unchanged or missing target).
+     */
+    suspend fun resizeTileToRect(
+        tileId: String, x: Int, y: Int, spanX: Int, spanY: Int
+    ): Boolean = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            val tiles = tileDao.getAllTiles()
+            val target = tiles.firstOrNull { it.id == tileId } ?: return@withTransaction false
+            val columns = if (loadSettings().showMoreTiles) 6 else 4
+            if (x < 0 || y < 0 || spanX < 1 || spanY < 1 ||
+                x.toLong() + spanX > columns || y.toLong() + spanY > 60L
+            ) return@withTransaction false
+            val allowed = target.constrainedResizeSpans(spanX, spanY, columns)
+            if (allowed.first != spanX || allowed.second != spanY) return@withTransaction false
+            if (x == target.gridX && y == target.gridY &&
+                spanX == target.effectiveSpanX(columns) &&
+                spanY == target.effectiveSpanY()
+            ) return@withTransaction false
+            val overlaps = tiles.any { other ->
+                other.id != tileId && other.pageId == target.pageId &&
+                    other.gridX.toLong() < x.toLong() + spanX &&
+                    other.gridX.toLong() + other.effectiveSpanX(columns) > x.toLong() &&
+                    other.gridY.toLong() < y.toLong() + spanY &&
+                    other.gridY.toLong() + other.effectiveSpanY() > y.toLong()
+            }
+            if (overlaps) return@withTransaction false
+            tileDao.update(target.copy(gridX = x, gridY = y,
+                customSpanX = spanX, customSpanY = spanY))
+            true
+        }
+    }
+
     suspend fun setTileSpans(tileId: String, requestedX: Int, requestedY: Int) = withContext(Dispatchers.IO) {
         val tiles = tileDao.getAllTiles()
         val target = tiles.find { it.id == tileId } ?: return@withContext
