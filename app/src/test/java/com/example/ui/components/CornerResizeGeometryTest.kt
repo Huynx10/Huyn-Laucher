@@ -205,4 +205,31 @@ class CornerResizeGeometryTest {
         }
     }
 
+
+    @Test fun allCornersKeepOppositeAnchorAcrossExtremeDeltas() {
+        val start = GridResizeRect(x = 3, y = 4, width = 2, height = 3)
+        val deltas = listOf(Int.MIN_VALUE, -100, -1, 0, 1, 100, Int.MAX_VALUE)
+        for (corner in ResizeCorner.values()) {
+            for (dx in deltas) for (dy in deltas) {
+                val result = resolveCornerResize(
+                    start, corner, dx, dy, columns = 8, rows = 16,
+                    minWidth = 1, minHeight = 1, maxWidth = 6, maxHeight = 8
+                )
+                assertEquals(true, result.x >= 0 && result.y >= 0)
+                assertEquals(true, result.width in 1..6 && result.height in 1..8)
+                assertEquals(true, result.x + result.width <= 8)
+                assertEquals(true, result.y + result.height <= 16)
+                if (corner == ResizeCorner.TOP_START || corner == ResizeCorner.BOTTOM_START) {
+                    assertEquals(start.x + start.width, result.x + result.width)
+                } else {
+                    assertEquals(start.x, result.x)
+                }
+                if (corner == ResizeCorner.TOP_START || corner == ResizeCorner.TOP_END) {
+                    assertEquals(start.y + start.height, result.y + result.height)
+                } else {
+                    assertEquals(start.y, result.y)
+                }
+            }
+        }
+    }
 }
