@@ -1260,4 +1260,30 @@ class DataSafetyRegressionTest {
         assertEquals("legacy", prefs.getString("home_initialized", null))
         assertTrue(prefs.getBoolean("pending_restore_json", false))
     }
+
+    // F3 test-first contract: one target row changes; widget identity and neighbors survive.
+    @Test fun cornerResizePersistsOriginAndSpanWithoutDisplacingWidgetNeighbors() = runBlocking {
+        val target = TileEntity("f3_target", "Clock", tileType = TileType.WIDGET,
+            appWidgetId = 831, widgetProvider = "example/.Clock",
+            pageId = "page_home_1", gridX = 1, gridY = 2,
+            customSpanX = 2, customSpanY = 2)
+        val neighbor = TileEntity("f3_neighbor", "Neighbor", tileType = TileType.WIDGET,
+            appWidgetId = 832, widgetProvider = "example/.Other",
+            pageId = "page_home_1", gridX = 3, gridY = 2)
+        db.tileDao().insertAll(listOf(target, neighbor))
+
+        // TOP_START drag moves the origin while keeping right/bottom at (3,4).
+        assertTrue(repo.resizeTileToRect("f3_target", 0, 1, 3, 3))
+        val after = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(target.copy(gridX = 0, gridY = 1,
+            customSpanX = 3, customSpanY = 3), after["f3_target"])
+        assertEquals(neighbor, after["f3_neighbor"])
+        assertEquals(2, after.size)
+
+        // Expanding into the neighbor must fail closed, without moving either row.
+        val snapshot = db.tileDao().getAllTiles()
+        assertFalse(repo.resizeTileToRect("f3_target", 0, 1, 4, 3))
+        assertEquals(snapshot, db.tileDao().getAllTiles())
+    }
+
 }
