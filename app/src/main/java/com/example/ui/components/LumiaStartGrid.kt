@@ -230,6 +230,7 @@ fun LumiaStartGrid(
     onStepTileSize: (String, Boolean) -> Unit = { id, _ -> onResizeTile(id) },
     onSetTileSize: (String, TileSize) -> Unit = { id, _ -> onResizeTile(id) },
     onSetTileSpans: (String, Int, Int) -> Unit = { _, _, _ -> },
+    onResizeTileToRect: (String, Int, Int, Int, Int, Int) -> Unit = { _, _, _, _, _, _ -> },
     onGroupTilesManually: (String, String) -> Unit = { _, _ -> },
     onUnpinTile: (String) -> Unit,
     onMoveTile: (String, Boolean) -> Unit,
@@ -274,6 +275,7 @@ fun LumiaStartGrid(
     var dragStartFingerY by remember { mutableFloatStateOf(0f) }
 
     var resizingTileId by remember { mutableStateOf<String?>(null) }
+    var resizingCorner by remember { mutableStateOf<ResizeCorner?>(null) }
     var resizeOffsetX by remember { mutableFloatStateOf(0f) }
     var resizeOffsetY by remember { mutableFloatStateOf(0f) }
 
@@ -605,22 +607,26 @@ fun LumiaStartGrid(
                         val activeResizingPositioned = positionedTiles.find { it.tile.id == resizingTileId }
                         if (activeResizingPositioned != null) {
                             val stepThresholdPx = (cellStepPx * 0.6f).coerceAtLeast(1f)
-                            val previewSpans by remember(activeResizingPositioned, stepThresholdPx, totalCols) {
-                                derivedStateOf {
-                                    val deltaCols = (resizeOffsetX / stepThresholdPx).roundToInt()
-                                    val deltaRows = (resizeOffsetY / stepThresholdPx).roundToInt()
-                                    activeResizingPositioned.tile.constrainedResizeSpans(
-                                        activeResizingPositioned.spanX + deltaCols,
-                                        activeResizingPositioned.spanY + deltaRows,
-                                        totalCols
-                                    )
-                                }
-                            }
-                            val previewSpanX = previewSpans.first
-                            val previewSpanY = previewSpans.second
-                            val previewGridX = activeResizingPositioned.gridX
-                                .coerceIn(0, (totalCols - previewSpanX).coerceAtLeast(0))
-                            val previewGridY = activeResizingPositioned.gridY.coerceAtLeast(0)
+                            val baseRect = GridResizeRect(
+                                activeResizingPositioned.gridX, activeResizingPositioned.gridY,
+                                activeResizingPositioned.spanX, activeResizingPositioned.spanY
+                            )
+                            val occupied = positionedTiles.filterNot {
+                                it.tile.id == activeResizingPositioned.tile.id
+                            }.map { GridResizeRect(it.gridX, it.gridY, it.spanX, it.spanY) }
+                            val previewRect = resizingCorner?.let { corner ->
+                                resolveTileCornerResize(
+                                    activeResizingPositioned.tile, baseRect, corner,
+                                    (resizeOffsetX / stepThresholdPx).roundToInt(),
+                                    (resizeOffsetY / stepThresholdPx).roundToInt(),
+                                    totalCols, occupied
+                                )
+                            } ?: baseRect
+                            val previewSpans = previewRect.width to previewRect.height
+                            val previewSpanX = previewRect.width
+                            val previewSpanY = previewRect.height
+                            val previewGridX = previewRect.x
+                            val previewGridY = previewRect.y
 
                             var lastPreviewSize by remember(activeResizingPositioned.tile.id) {
                                 mutableStateOf(activeResizingPositioned.spanX to activeResizingPositioned.spanY)
@@ -916,33 +922,51 @@ fun LumiaStartGrid(
                                         onResize = { onResizeTile(tile.id) },
                                         onIncreaseSize = { onStepTileSize(tile.id, true) },
                                         onDecreaseSize = { onStepTileSize(tile.id, false) },
-                                        onResizeDragStart = {
-                                            resizingTileId = tile.id
-                                            resizeOffsetX = 0f
-                                            resizeOffsetY = 0f
+                                        onResizeDragStart = { corner ->
+                                            if (!settings.lockHomeLayout && selectedTileId == tile.id) {
+                                                resizingTileId = tile.id
+                                                resizingCorner = corner
+                                                resizeOffsetX = 0f
+                                                resizeOffsetY = 0f
+                                            }
                                         },
                                         onResizeDrag = { dx, dy ->
-                                            resizeOffsetX += dx
-                                            resizeOffsetY += dy
+                                            if (resizingTileId == tile.id && dx.isFinite() && dy.isFinite()) {
+                                                resizeOffsetX += dx
+                                                resizeOffsetY += dy
+                                            }
                                         },
                                         onResizeDragEnd = {
-                                            val stepThresholdPx = (cellStepPx * 0.6f).coerceAtLeast(1f)
-                                            val deltaCols = (resizeOffsetX / stepThresholdPx).roundToInt()
-                                            val deltaRows = (resizeOffsetY / stepThresholdPx).roundToInt()
-                                            val (newSpanX, newSpanY) = tile.constrainedResizeSpans(
-                                                positioned.spanX + deltaCols,
-                                                positioned.spanY + deltaRows,
-                                                totalCols
-                                            )
+                                            val corner = resizingCorner
+                                            val candidate = if (resizingTileId == tile.id &&
+                                                selectedTileId == tile.id && !settings.lockHomeLayout &&
+                                                corner != null
+                                            ) {
+                                                val threshold = (cellStepPx * 0.6f).coerceAtLeast(1f)
+                                                resolveTileCornerResize(
+                                                    tile,
+                                                    GridResizeRect(positioned.gridX, positioned.gridY,
+                                                        positioned.spanX, positioned.spanY),
+                                                    corner,
+                                                    (resizeOffsetX / threshold).roundToInt(),
+                                                    (resizeOffsetY / threshold).roundToInt(),
+                                                    totalCols,
+                                                    positionedTiles.filterNot { it.tile.id == tile.id }
+                                                        .map { GridResizeRect(it.gridX, it.gridY, it.spanX, it.spanY) }
+                                                )
+                                            } else null
                                             resizingTileId = null
+                                            resizingCorner = null
                                             resizeOffsetX = 0f
                                             resizeOffsetY = 0f
-                                            if (newSpanX != positioned.spanX || newSpanY != positioned.spanY) {
-                                                onSetTileSpans(tile.id, newSpanX, newSpanY)
+                                            if (candidate != null) {
+                                                onResizeTileToRect(tile.id, candidate.x, candidate.y,
+                                                    candidate.width, candidate.height, totalCols)
                                             }
                                         },
                                         onResizeDragCancel = {
                                             resizingTileId = null
+                                            resizingCorner = null
                                             resizeOffsetX = 0f
                                             resizeOffsetY = 0f
                                         },

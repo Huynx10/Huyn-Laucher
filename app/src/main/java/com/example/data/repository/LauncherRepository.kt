@@ -536,12 +536,16 @@ class LauncherRepository(
      * False means no write (invalid, occupied, unchanged or missing target).
      */
     suspend fun resizeTileToRect(
-        tileId: String, x: Int, y: Int, spanX: Int, spanY: Int
+        tileId: String, x: Int, y: Int, spanX: Int, spanY: Int, requestedColumns: Int = 0
     ): Boolean = withContext(Dispatchers.IO) {
         database.withTransaction {
             val tiles = tileDao.getAllTiles()
             val target = tiles.firstOrNull { it.id == tileId } ?: return@withTransaction false
-            val columns = if (loadSettings().showMoreTiles) 6 else 4
+            val columns = when (requestedColumns) {
+                0 -> if (loadSettings().showMoreTiles) 6 else 4
+                4, 6, 8 -> requestedColumns
+                else -> return@withTransaction false
+            }
             if (x < 0 || y < 0 || spanX < 1 || spanY < 1 ||
                 x.toLong() + spanX > columns || y.toLong() + spanY > 60L
             ) return@withTransaction false

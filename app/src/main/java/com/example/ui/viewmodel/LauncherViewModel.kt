@@ -617,6 +617,14 @@ class LauncherViewModel(
         viewModelScope.launch { repository.setTileSpans(tileId, spanX, spanY) }
     }
 
+    /** One completed gesture invokes exactly one atomic rectangle update. */
+    fun resizeTileToRect(tileId: String, x: Int, y: Int, spanX: Int, spanY: Int, columns: Int) {
+        if (_settings.value.lockHomeLayout) return
+        viewModelScope.launch {
+            repository.resizeTileToRect(tileId, x, y, spanX, spanY, columns)
+        }
+    }
+
     fun groupHomeTilesManually(sourceId: String, targetId: String) {
         if (_settings.value.lockHomeLayout) return
         viewModelScope.launch { repository.groupHomeTilesManually(sourceId, targetId) }
