@@ -3,7 +3,7 @@ package com.example.ui.components
 /** Pure grid geometry for F3; no Room, widget or gesture side effects. */
 internal data class GridResizeRect(val x: Int, val y: Int, val width: Int, val height: Int)
 
-internal enum class ResizeCorner { TOP_START, TOP_END, BOTTOM_START, BOTTOM_END }
+enum class ResizeCorner { TOP_START, TOP_END, BOTTOM_START, BOTTOM_END }
 
 /**
  * Resize by moving only the edges adjacent to [corner]. The opposite corner is anchored.
