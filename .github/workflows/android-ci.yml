@@ -2,7 +2,7 @@ name: Lumia Launcher Android CI
 
 on:
   push:
-    branches: [ "main", "master", "develop", "beta/**", "fix/**" ]
+    branches: [ "main", "master", "develop", "beta/**", "fix/**", "feat/**" ]
   pull_request:
     branches: [ "main", "master", "develop", "beta/**" ]
 
