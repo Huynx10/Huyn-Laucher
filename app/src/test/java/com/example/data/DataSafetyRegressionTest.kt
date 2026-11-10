@@ -1300,6 +1300,35 @@ class DataSafetyRegressionTest {
         assertEquals(listOf(fixed), db.tileDao().getAllTiles())
     }
 
+
+    @Test fun widgetEditPreferencesRoundTripThroughBackupAndOldBackups() = runBlocking {
+        repo.ensureDefaultTiles()
+        repo.saveSettings(repo.loadSettings().copy(
+            showEditGridGuides = true,
+            widgetEditToolbarMode = WidgetEditToolbarMode.FLOATING
+        ))
+        val exported = repo.exportBackupJson()
+        repo.saveSettings(repo.loadSettings().copy(
+            showEditGridGuides = false,
+            widgetEditToolbarMode = WidgetEditToolbarMode.ANCHORED
+        ))
+        assertTrue(repo.restoreFromJson(exported))
+        assertTrue(repo.loadSettings().showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.FLOATING, repo.loadSettings().widgetEditToolbarMode)
+
+        // Older archives omit the new fields; fallback must use safe existing values.
+        val legacy = JSONObject(exported)
+        legacy.getJSONObject("settings").remove("showEditGridGuides")
+        legacy.getJSONObject("settings").remove("widgetEditToolbarMode")
+        repo.saveSettings(repo.loadSettings().copy(
+            showEditGridGuides = false,
+            widgetEditToolbarMode = WidgetEditToolbarMode.ANCHORED
+        ))
+        assertTrue(repo.restoreFromJson(legacy.toString()))
+        assertFalse(repo.loadSettings().showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.ANCHORED, repo.loadSettings().widgetEditToolbarMode)
+    }
+
     // F3 test-first contract: one target row changes; widget identity and neighbors survive.
     @Test fun cornerResizePersistsOriginAndSpanWithoutDisplacingWidgetNeighbors() = runBlocking {
         val target = TileEntity("f3_target", "Clock", tileType = TileType.WIDGET,
