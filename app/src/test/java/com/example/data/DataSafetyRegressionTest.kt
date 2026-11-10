@@ -1329,6 +1329,34 @@ class DataSafetyRegressionTest {
         assertEquals(WidgetEditToolbarMode.ANCHORED, repo.loadSettings().widgetEditToolbarMode)
     }
 
+    @Test fun eightColumnTileAndWidgetMinimumSurviveBackupRestore() = runBlocking {
+        repo.ensureDefaultTiles()
+        db.tileDao().clearAll()
+        val eightColumnApp = TileEntity(
+            id = "f3_full_width", title = "Full width", pageId = "page_home_1",
+            gridX = 0, gridY = 0, customSpanX = 8, customSpanY = 2
+        )
+        val wideProvider = TileEntity(
+            id = "f3_wide_provider", title = "Wide widget",
+            tileType = TileType.WIDGET, appWidgetId = 1928,
+            widgetProvider = "example/.WideWidget", widgetMinSpanX = 5,
+            widgetResizeMode = 3, pageId = "page_home_1",
+            gridX = 0, gridY = 3, customSpanX = 6, customSpanY = 2
+        )
+        db.tileDao().insertAll(listOf(eightColumnApp, wideProvider))
+
+        val backup = repo.exportBackupJson()
+        assertTrue(repo.restoreFromJson(backup))
+        val restored = db.tileDao().getAllTiles().associateBy { it.id }
+        // A narrow-window restore may reflow positions but must not lose the
+        // stored eight-column dimensions when the user returns to a tablet.
+        assertEquals(8, restored.getValue(eightColumnApp.id).customSpanX)
+        assertEquals(6, restored.getValue(wideProvider.id).customSpanX)
+        assertEquals(5, restored.getValue(wideProvider.id).widgetMinSpanX)
+        // Android widget IDs are device-specific and intentionally require rebind.
+        assertEquals(-1, restored.getValue(wideProvider.id).appWidgetId)
+    }
+
     // F3 test-first contract: one target row changes; widget identity and neighbors survive.
     @Test fun cornerResizePersistsOriginAndSpanWithoutDisplacingWidgetNeighbors() = runBlocking {
         val target = TileEntity("f3_target", "Clock", tileType = TileType.WIDGET,

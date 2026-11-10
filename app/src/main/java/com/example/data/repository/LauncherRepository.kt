@@ -2348,7 +2348,7 @@ class LauncherRepository(
                             launcherUserSerial = importedIdentity.second,
                             launcherIdentityState = importedIdentity.third,
                             size = parsedSize,
-                            customSpanX = obj.optInt("customSpanX", 0).coerceIn(0, 6),
+                            customSpanX = obj.optInt("customSpanX", 0).coerceIn(0, 8),
                             customSpanY = obj.optInt("customSpanY", 0).coerceIn(0, 8),
                             orderIndex = obj.optInt("orderIndex", i),
                             pageId = obj.optString("pageId", "page_home_1"),
@@ -2360,7 +2360,7 @@ class LauncherRepository(
                             isLiveEnabled = obj.optBoolean("isLiveEnabled", true),
                             appWidgetId = restoredWidgetId,
                             widgetProvider = parsedProvider,
-                            widgetMinSpanX = obj.optInt("widgetMinSpanX", 1).coerceIn(1, 4),
+                            widgetMinSpanX = obj.optInt("widgetMinSpanX", 1).coerceIn(1, 8),
                             widgetMinSpanY = obj.optInt("widgetMinSpanY", 1).coerceIn(1, 4),
                             widgetResizeMode = obj.optInt("widgetResizeMode", 3)
                         )
