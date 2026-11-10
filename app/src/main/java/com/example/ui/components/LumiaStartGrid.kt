@@ -956,7 +956,7 @@ fun LumiaStartGrid(
                                                     selectedTileId = selectedTileId,
                                                     corner = corner,
                                                     lockHomeLayout = settings.lockHomeLayout
-                                                )
+                                                ) && corner != null
                                             ) {
                                                 val threshold = (cellStepPx * 0.6f).coerceAtLeast(1f)
                                                 resolveTileCornerResize(
