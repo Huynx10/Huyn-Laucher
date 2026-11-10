@@ -87,6 +87,25 @@ class TileCornerResizeGestureTest {
         }
     }
 
+    @Test fun fixedWidgetDoesNotShowInertCornerHandles() {
+        compose.setContent {
+            TileView(
+                tile = tile.copy(
+                    tileType = com.example.data.model.TileType.WIDGET,
+                    widgetResizeMode = 0
+                ),
+                settings = settings, telemetry = SystemTelemetry(),
+                isTileSelected = true, isHomeEditMode = true,
+                onClick = {}, onLongClick = {}, onResize = {}, onUnpin = {},
+                modifier = Modifier.size(220.dp)
+            )
+        }
+        for (corner in ResizeCorner.entries) {
+            compose.onNodeWithTag("tile_resize_corner_" + corner.name.lowercase() + "_gesture")
+                .assertDoesNotExist()
+        }
+    }
+
     @Test fun cancelledDragDoesNotEmitEndOrCommitSignal() {
         var ends = 0
         var cancels = 0

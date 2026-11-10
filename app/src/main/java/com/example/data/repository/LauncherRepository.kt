@@ -542,6 +542,11 @@ class LauncherRepository(
         database.withTransaction {
             val tiles = tileDao.getAllTiles()
             val target = tiles.firstOrNull { it.id == tileId } ?: return@withTransaction false
+            // An immovable provider remains non-resizable even if a UI drag is stale
+            // or a direct caller requests a position-only rectangle update.
+            if (target.hasBoundOrLinkedWidget() && (target.widgetResizeMode and 3) == 0) {
+                return@withTransaction false
+            }
             val columns = when (requestedColumns) {
                 0 -> if (loadSettings().showMoreTiles) 6 else 4
                 4, 6, 8 -> requestedColumns

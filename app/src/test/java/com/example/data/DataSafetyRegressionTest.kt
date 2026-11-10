@@ -1288,6 +1288,18 @@ class DataSafetyRegressionTest {
         assertEquals(WidgetEditToolbarMode.ANCHORED, recovered.widgetEditToolbarMode)
     }
 
+    @Test fun fixedProviderCannotMoveThroughResizeEndpoint() = runBlocking {
+        val fixed = TileEntity(
+            id = "fixed_widget", title = "Fixed", tileType = TileType.WIDGET,
+            appWidgetId = 1937, widgetProvider = "example/.Fixed",
+            widgetResizeMode = 0, pageId = "page_home_1",
+            gridX = 1, gridY = 1, customSpanX = 2, customSpanY = 2
+        )
+        db.tileDao().insertOrUpdate(fixed)
+        assertFalse(repo.resizeTileToRect(fixed.id, 0, 1, 2, 2, 4))
+        assertEquals(listOf(fixed), db.tileDao().getAllTiles())
+    }
+
     // F3 test-first contract: one target row changes; widget identity and neighbors survive.
     @Test fun cornerResizePersistsOriginAndSpanWithoutDisplacingWidgetNeighbors() = runBlocking {
         val target = TileEntity("f3_target", "Clock", tileType = TileType.WIDGET,

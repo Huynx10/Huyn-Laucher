@@ -59,6 +59,14 @@ class TileCornerResizePolicyTest {
                 ResizeCorner.TOP_START, -1, -1, 6, emptyList()))
     }
 
+    @Test fun fixedProvidersHideResizeButOrdinaryTilesStillResize() {
+        assertFalse(tileSupportsCornerResize(widget(mode = 0)))
+        assertTrue(tileSupportsCornerResize(widget(mode = 1)))
+        assertTrue(tileSupportsCornerResize(widget(mode = 2)))
+        assertTrue(tileSupportsCornerResize(widget(mode = 3)))
+        assertTrue(tileSupportsCornerResize(TileEntity(id = "app", title = "App")))
+    }
+
     @Test fun fixedWidgetRejectsAllCorners() {
         ResizeCorner.entries.forEach { corner ->
             assertNull(resolveTileCornerResize(widget(mode = 0), start,

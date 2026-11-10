@@ -2,6 +2,10 @@ package com.example.ui.components
 
 import com.example.data.model.TileEntity
 
+/** Fixed-provider widgets cannot resize; hide nonfunctional handles in the UI. */
+internal fun tileSupportsCornerResize(tile: TileEntity): Boolean =
+    !tile.hasBoundOrLinkedWidget() || (tile.widgetResizeMode and 3) != 0
+
 /** Produce one whole drag rectangle, or null for invalid, blocked or unchanged gestures.
  * No mutation occurs here; Room rechecks this proposal before any persistence.
  */

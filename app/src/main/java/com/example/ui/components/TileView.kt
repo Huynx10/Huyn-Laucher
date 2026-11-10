@@ -373,7 +373,7 @@ fun TileView(
                             modifier = Modifier.size(15.dp)
                         )
                     }
-                } else {
+                } else if (tileSupportsCornerResize(tile)) {
                     // Four independent corner gestures; never convert top/left drags into a
                     // bottom-right resize. Compact SMALL touch regions avoid overlap.
                     ResizeCorner.entries.forEach { corner ->
@@ -425,7 +425,7 @@ fun TileView(
 
                 if (tile.size != TileSize.SMALL) {
                     Text(
-                        text = "${tile.customSpanX.takeIf { it > 0 } ?: tile.size.spanX}×${tile.effectiveSpanY()} • Kéo góc để đổi cỡ",
+                        text = if (tileSupportsCornerResize(tile)) "${tile.customSpanX.takeIf { it > 0 } ?: tile.size.spanX}×${tile.effectiveSpanY()} • Kéo góc để đổi cỡ" else "Tiện ích không hỗ trợ đổi kích thước",
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -462,6 +462,7 @@ internal fun tileEditAccessibilityActions(
         TileEditAccessibilityAction.MOVE_UP,
         TileEditAccessibilityAction.MOVE_DOWN
     )
+    if (!tileSupportsCornerResize(tile)) return result
     val allowed = tile.allowedSizesForTile()
     val index = allowed.indexOf(tile.size)
     if (index > 0) result += TileEditAccessibilityAction.SHRINK
