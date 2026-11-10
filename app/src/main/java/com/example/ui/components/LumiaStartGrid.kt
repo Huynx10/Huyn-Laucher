@@ -146,6 +146,18 @@ private val TileResizeReleaseSpringSpec = spring<Dp>(
     stiffness = 360f
 )
 
+/** Keep the floating edit pill out of the top system status region and off the Tile handles. */
+internal fun canFloatWidgetEditToolbar(
+    mode: WidgetEditToolbarMode,
+    top: Dp,
+    viewportHeight: Dp
+): Boolean = mode == WidgetEditToolbarMode.FLOATING &&
+    top >= 48.dp && top + 68.dp <= viewportHeight - 12.dp
+
+/** Account for Home page dots and, in global Home Edit, the bottom editor controls. */
+internal fun widgetEditToolbarBottomPadding(homeEditMode: Boolean): Dp =
+    if (homeEditMode) 112.dp else 56.dp
+
 @Immutable
 private data class PositionedTile(
     val tile: TileEntity,
@@ -1001,7 +1013,7 @@ fun LumiaStartGrid(
         // Edit controls are a sibling overlay, never a layout row that shifts Home tiles.
         // Floating is placed above the selected tile; near the top/offscreen it safely
         // falls back to an anchored toolbar outside the system navigation bar.
-        if (selectedTileOnThisPage != null && !isEditMode &&
+        if (selectedTileOnThisPage != null &&
             resizingTileId == null && draggingTileId == null) {
             val activeTile = selectedTileOnThisPage
             val selectedPosition = positionedTiles.firstOrNull { it.tile.id == activeTile.id }
@@ -1015,14 +1027,13 @@ fun LumiaStartGrid(
                     scrollState.value
             } else Float.NaN
             val floatingTop = if (floatingTopPx.isFinite()) with(density) { floatingTopPx.toDp() } else (-1).dp
-            val useFloating = settings.widgetEditToolbarMode == WidgetEditToolbarMode.FLOATING &&
-                floatingTop >= 8.dp && floatingTop + 68.dp <= screenHeight - 12.dp
+            val useFloating = canFloatWidgetEditToolbar(settings.widgetEditToolbarMode, floatingTop, screenHeight)
 
             Box(
                 modifier = Modifier
                     .align(if (useFloating) Alignment.TopCenter else Alignment.BottomCenter)
                     .then(if (useFloating) Modifier.offset(y = floatingTop)
-                        else Modifier.navigationBarsPadding().padding(bottom = 12.dp))
+                        else Modifier.navigationBarsPadding().padding(bottom = widgetEditToolbarBottomPadding(isEditMode)))
                     .padding(horizontal = 12.dp)
                     .widthIn(max = 420.dp)
                     .zIndex(30f)
