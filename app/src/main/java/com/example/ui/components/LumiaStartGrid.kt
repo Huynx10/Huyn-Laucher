@@ -16,6 +16,8 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,6 +36,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -106,6 +109,7 @@ import com.example.data.model.AppCategory
 import com.example.data.model.AppItem
 import com.example.data.model.LauncherPage
 import com.example.data.model.LauncherSettings
+import com.example.data.model.WidgetEditToolbarMode
 import com.example.data.model.SmartFolderItem
 import com.example.data.model.SystemTelemetry
 import com.example.data.model.TileEntity
@@ -304,8 +308,10 @@ fun LumiaStartGrid(
         settings.isBatterySaverActive(telemetry)
     }
 
+    var rootScreenOrigin by remember { mutableStateOf(Offset.Unspecified) }
     BoxWithConstraints(
         modifier = modifier.fillMaxSize()
+            .onGloballyPositioned { rootScreenOrigin = it.positionInRoot() }
     ) {
         val screenWidth = maxWidth
         val screenHeight = maxHeight
@@ -430,33 +436,6 @@ fun LumiaStartGrid(
                 }
             }
 
-            // One UI Contextual Floating Action Pill when editing a SINGLE tile (does not cover the screen)
-            AnimatedVisibility(
-                visible = selectedTileOnThisPage?.hasBoundOrLinkedWidget() == true && !isEditMode,
-                enter = slideInVertically(
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
-                    initialOffsetY = { -it }
-                ) + fadeIn(),
-                exit = slideOutVertically(
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
-                    targetOffsetY = { -it }
-                ) + fadeOut()
-            ) {
-                selectedTileOnThisPage?.let { activeTile ->
-                    // Capability may change after provider removal/rebind without a tile ID change.
-                    val canConfigureWidget = remember(activeTile.id, activeTile.appWidgetId,
-                        activeTile.widgetProvider) { widgetHostManager.canReconfigureTile(activeTile) }
-                    if (canConfigureWidget && !settings.lockHomeLayout) {
-                        SingleTileContextualBar(
-                            tile = activeTile,
-                            displayName = tileDisplayName(activeTile, installedApps, installedWidgets),
-                            accentColor = accent.color,
-                            onWidgetSettings = { onOpenWidgetSettings(activeTile) }
-                        )
-                    }
-                }
-            }
-
             if (tiles.isEmpty() && !isEditMode) {
                 // Completely blank empty Home page in normal mode (100% pure wallpaper, no text/buttons)
                 Box(
@@ -525,7 +504,7 @@ fun LumiaStartGrid(
                                 }
                         )
                         // Subtle 2D Grid Cell Guides shown when a single tile is being edited/dragged/resized or in Home Edit Mode
-                        val showGridGuides = isEditMode || selectedTileOnThisPage != null || draggingTileId != null || resizingTileId != null
+                        val showGridGuides = settings.showEditGridGuides && (isEditMode || selectedTileOnThisPage != null || draggingTileId != null || resizingTileId != null)
                         if (showGridGuides) {
                             for (row in 0 until canvasRows) {
                                 for (col in 0 until totalCols) {
@@ -1019,6 +998,50 @@ fun LumiaStartGrid(
             }
         }
 
+        // Edit controls are a sibling overlay, never a layout row that shifts Home tiles.
+        // Floating is placed above the selected tile; near the top/offscreen it safely
+        // falls back to an anchored toolbar outside the system navigation bar.
+        if (selectedTileOnThisPage != null && !isEditMode &&
+            resizingTileId == null && draggingTileId == null) {
+            val activeTile = selectedTileOnThisPage
+            val selectedPosition = positionedTiles.firstOrNull { it.tile.id == activeTile.id }
+            val canConfigureWidget = remember(activeTile.id, activeTile.appWidgetId, activeTile.widgetProvider) {
+                activeTile.hasBoundOrLinkedWidget() && widgetHostManager.canReconfigureTile(activeTile)
+            } && !settings.lockHomeLayout
+            val floatingTopPx = if (rootScreenOrigin != Offset.Unspecified &&
+                gridViewportRoot != Offset.Unspecified && selectedPosition != null) {
+                gridViewportRoot.y - rootScreenOrigin.y +
+                    with(density) { (topPadding + cellStepDp * selectedPosition.gridY - 72.dp).toPx() } -
+                    scrollState.value
+            } else Float.NaN
+            val floatingTop = if (floatingTopPx.isFinite()) with(density) { floatingTopPx.toDp() } else (-1).dp
+            val useFloating = settings.widgetEditToolbarMode == WidgetEditToolbarMode.FLOATING &&
+                floatingTop >= 8.dp && floatingTop + 68.dp <= screenHeight - 12.dp
+
+            Box(
+                modifier = Modifier
+                    .align(if (useFloating) Alignment.TopCenter else Alignment.BottomCenter)
+                    .then(if (useFloating) Modifier.offset(y = floatingTop)
+                        else Modifier.navigationBarsPadding().padding(bottom = 12.dp))
+                    .padding(horizontal = 12.dp)
+                    .widthIn(max = 420.dp)
+                    .zIndex(30f)
+            ) {
+                SingleTileContextualBar(
+                    displayName = tileDisplayName(activeTile, installedApps, installedWidgets),
+                    accentColor = accent.color,
+                    canConfigure = canConfigureWidget,
+                    canRemove = !settings.lockHomeLayout,
+                    onWidgetSettings = { onOpenWidgetSettings(activeTile) },
+                    onRemove = {
+                        onSelectTileForEdit(null)
+                        onUnpinTile(activeTile.id)
+                    },
+                    onDone = { onSelectTileForEdit(null) }
+                )
+            }
+        }
+
         // Modal Sheet: Move Tile to another Home Page
         tileToMoveAcrossPages?.let { tile ->
             val sheetState = rememberModalBottomSheetState()
@@ -1492,53 +1515,53 @@ fun LumiaStartGrid(
 
 @Composable
 private fun SingleTileContextualBar(
-    tile: TileEntity,
     displayName: String,
     accentColor: Color,
-    onWidgetSettings: () -> Unit
+    canConfigure: Boolean,
+    canRemove: Boolean,
+    onWidgetSettings: () -> Unit,
+    onRemove: () -> Unit,
+    onDone: () -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(22.dp))
-            .background(Color(0xFF1C1C22).copy(alpha = 0.94f))
-            .border(1.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF1C1C22).copy(alpha = 0.96f))
+            .border(1.dp, accentColor.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 8.dp, vertical = 5.dp)
             .testTag("single_tile_contextual_bar"),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = displayName,
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "Kéo viền để đổi cỡ",
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+        Text(
+            text = displayName,
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        if (canConfigure) {
+            SingleTilePillAction(
+                icon = Icons.Default.Settings, label = "Cài đặt",
+                bgColor = Color.White.copy(alpha = 0.10f),
+                onClick = onWidgetSettings, testTag = "contextual_bar_widget_settings"
             )
         }
-
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                    SingleTilePillAction(
-                        icon = Icons.Default.Settings,
-                        label = "Cài đặt widget",
-                        bgColor = Color.White.copy(alpha = 0.12f),
-                        onClick = onWidgetSettings,
-                        testTag = "contextual_bar_widget_settings"
-                    )
-            }
+        if (canRemove) {
+            SingleTilePillAction(
+                icon = Icons.Default.Delete, label = "Bỏ ghim",
+                bgColor = Color.White.copy(alpha = 0.10f),
+                onClick = onRemove, testTag = "contextual_bar_unpin"
+            )
+        }
+        SingleTilePillAction(
+            icon = Icons.Default.Check, label = "Xong",
+            bgColor = accentColor.copy(alpha = 0.65f),
+            onClick = onDone, testTag = "contextual_bar_done"
+        )
     }
 }
 
@@ -1548,33 +1571,31 @@ private fun SingleTilePillAction(
     label: String,
     bgColor: Color,
     onClick: () -> Unit,
-    testTag: String? = null
+    testTag: String
 ) {
-    Row(
+    Column(
         modifier = Modifier
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .size(width = 58.dp, height = 52.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(bgColor)
-            .clickable { onClick() }
-            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+            .clickable(role = Role.Button) { onClick() }
+            .semantics(mergeDescendants = true) { contentDescription = label }
+            .testTag(testTag),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = label,
+            contentDescription = null,
             tint = Color.White,
             modifier = Modifier.size(18.dp)
         )
         Text(
             text = label,
             color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
-
-

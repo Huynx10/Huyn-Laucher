@@ -374,27 +374,6 @@ fun TileView(
                         )
                     }
                 } else {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .size(48.dp)
-                            .clickable { onUnpin() }
-                            .testTag("tile_remove_${tile.id}"),
-                        contentAlignment = Alignment.TopEnd
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(5.dp)
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.82f))
-                                .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Bỏ ô khỏi trang",
-                                tint = Color.White, modifier = Modifier.size(16.dp))
-                        }
-                    }
                     // Four independent corner gestures; never convert top/left drags into a
                     // bottom-right resize. Compact SMALL touch regions avoid overlap.
                     ResizeCorner.entries.forEach { corner ->
@@ -414,7 +393,7 @@ fun TileView(
                             modifier = Modifier
                                 .align(alignment)
                                 .padding(2.dp)
-                                .size(if (tile.size == TileSize.SMALL) 32.dp else 44.dp)
+                                .size(if (tile.size == TileSize.SMALL) 32.dp else 48.dp)
                                 .semantics { contentDescription = "Kéo góc $label để đổi kích thước ô" }
                                 .pointerInput(tile.id, tile.size, corner) {
                                     detectDragGestures(

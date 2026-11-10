@@ -6,6 +6,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BatterySaverMode
@@ -68,6 +70,22 @@ class TileCornerResizeGestureTest {
             assertEquals(0, cancels)
             assertEquals(0, unpins)
             assertTrue(moves >= 4)
+        }
+    }
+
+    @Test fun smallTileCornerControlsDoNotOverlapDestructiveUnpinTarget() {
+        compose.setContent {
+            TileView(
+                tile = tile.copy(size = TileSize.SMALL),
+                settings = settings, telemetry = SystemTelemetry(),
+                isTileSelected = true, isHomeEditMode = true,
+                onClick = {}, onLongClick = {}, onResize = {}, onUnpin = {},
+                modifier = Modifier.size(96.dp)
+            )
+        }
+        compose.onNodeWithTag("tile_remove_gesture").assertDoesNotExist()
+        for (corner in ResizeCorner.entries) {
+            compose.onNodeWithTag("tile_resize_corner_" + corner.name.lowercase() + "_gesture").assertExists()
         }
     }
 

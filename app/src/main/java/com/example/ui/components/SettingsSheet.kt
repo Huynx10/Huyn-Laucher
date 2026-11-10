@@ -111,6 +111,7 @@ import com.example.data.model.AllAppsViewMode
 import com.example.data.model.BatterySaverMode
 import com.example.data.model.DynamicAccentMode
 import com.example.data.model.LauncherSettings
+import com.example.data.model.WidgetEditToolbarMode
 import com.example.data.model.WallpaperSource
 import com.example.data.model.PageTransitionEffect
 import com.example.data.model.SystemTelemetry
@@ -202,6 +203,8 @@ fun SettingsSheet(
     var pageTransition by remember(settings.pageTransitionEffect) { mutableStateOf(settings.pageTransitionEffect) }
     var doubleTapToGlance by remember(settings.doubleTapToGlance) { mutableStateOf(settings.doubleTapToGlance) }
     var lockHomeLayout by remember(settings.lockHomeLayout) { mutableStateOf(settings.lockHomeLayout) }
+    var showEditGridGuides by remember(settings.showEditGridGuides) { mutableStateOf(settings.showEditGridGuides) }
+    var widgetEditToolbarMode by remember(settings.widgetEditToolbarMode) { mutableStateOf(settings.widgetEditToolbarMode) }
     var autoArrangeTiles by remember(settings.autoArrangeTiles) { mutableStateOf(settings.autoArrangeTiles) }
     var wallpaperSource by remember(settings.wallpaperSource) { mutableStateOf(settings.wallpaperSource) }
     var wallpaperIndex by remember(settings.wallpaperGradientIndex) { mutableIntStateOf(settings.wallpaperGradientIndex) }
@@ -315,6 +318,8 @@ fun SettingsSheet(
                 pageTransitionEffect = pageTransition,
                 doubleTapToGlance = doubleTapToGlance,
                 lockHomeLayout = lockHomeLayout,
+                showEditGridGuides = showEditGridGuides,
+                widgetEditToolbarMode = widgetEditToolbarMode,
                 autoArrangeTiles = autoArrangeTiles,
                 wallpaperSource = wallpaperSource,
                 wallpaperGradientIndex = wallpaperIndex,
@@ -891,6 +896,53 @@ fun SettingsSheet(
                                         applyChanges()
                                     }
                                 )
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(vertical = 6.dp))
+                                MinimalSwitchRow(
+                                    title = "Hiển thị khung ô khi chỉnh sửa",
+                                    subtitle = "Hiện lưới gợi ý; ô đang chọn vẫn có viền riêng",
+                                    checked = showEditGridGuides,
+                                    accentColor = accent.color,
+                                    onCheckedChange = {
+                                        showEditGridGuides = it
+                                        applyChanges()
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Thanh công cụ khi chỉnh sửa",
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    fontSize = 12.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    WidgetEditToolbarMode.entries.forEach { mode ->
+                                        val isSelected = widgetEditToolbarMode == mode
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 48.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSelected) accent.color else Color.White.copy(alpha = 0.08f))
+                                                .clickable(role = androidx.compose.ui.semantics.Role.RadioButton) {
+                                                    widgetEditToolbarMode = mode
+                                                    applyChanges()
+                                                }
+                                                .semantics { selected = isSelected }
+                                                .testTag("widget_edit_toolbar_mode_" + mode.name.lowercase()),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = if (mode == WidgetEditToolbarMode.ANCHORED) "Neo dưới" else "Nổi",
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
 
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(

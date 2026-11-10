@@ -48,6 +48,7 @@ import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import com.example.data.model.Wp10TileStyle
 import com.example.data.model.WallpaperSource
+import com.example.data.model.WidgetEditToolbarMode
 import com.example.ui.components.AppIconMemoryCache
 import com.example.ui.theme.DynamicAccentEngine
 import com.example.ui.widget.LumiaWidgetHostManager
@@ -1975,6 +1976,10 @@ class LauncherRepository(
             pageTransitionEffect = try { PageTransitionEffect.valueOf(transitionStr) } catch (_: Exception) { PageTransitionEffect.TURNSTILE_3D },
             doubleTapToGlance = readHomeBoolean("double_tap_to_glance", true),
             lockHomeLayout = readHomeBoolean("lock_home_layout", false),
+            showEditGridGuides = readHomeBoolean("show_edit_grid_guides", false),
+            widgetEditToolbarMode = runCatching {
+                WidgetEditToolbarMode.valueOf(readHomeString("widget_edit_toolbar_mode", "ANCHORED"))
+            }.getOrDefault(WidgetEditToolbarMode.ANCHORED),
             autoArrangeTiles = readHomeBoolean("auto_arrange_tiles", false),
             fullWallpaperEnabled = readHomeBoolean("full_wallpaper_enabled", true),
             wallpaperSource = runCatching { WallpaperSource.valueOf(readHomeString("wallpaper_source", "")) }
@@ -2032,6 +2037,8 @@ class LauncherRepository(
             .putString("page_transition_effect", settings.pageTransitionEffect.name)
             .putBoolean("double_tap_to_glance", settings.doubleTapToGlance)
             .putBoolean("lock_home_layout", settings.lockHomeLayout)
+            .putBoolean("show_edit_grid_guides", settings.showEditGridGuides)
+            .putString("widget_edit_toolbar_mode", settings.widgetEditToolbarMode.name)
             .putBoolean("auto_arrange_tiles", settings.autoArrangeTiles)
             .putBoolean("full_wallpaper_enabled", settings.fullWallpaperEnabled)
             .putString("wallpaper_source", settings.wallpaperSource.name)
@@ -2092,6 +2099,8 @@ class LauncherRepository(
             put("pageTransitionEffect", settings.pageTransitionEffect.name)
             put("doubleTapToGlance", settings.doubleTapToGlance)
             put("lockHomeLayout", settings.lockHomeLayout)
+            put("showEditGridGuides", settings.showEditGridGuides)
+            put("widgetEditToolbarMode", settings.widgetEditToolbarMode.name)
             put("autoArrangeTiles", settings.autoArrangeTiles)
             put("fullWallpaperEnabled", settings.fullWallpaperEnabled)
             put("turnstileAnimationEnabled", settings.turnstileAnimationEnabled)
@@ -2253,6 +2262,10 @@ class LauncherRepository(
                     pageTransitionEffect = try { PageTransitionEffect.valueOf(s.optString("pageTransitionEffect", cur.pageTransitionEffect.name)) } catch (_: Exception) { cur.pageTransitionEffect },
                     doubleTapToGlance = s.optBoolean("doubleTapToGlance", cur.doubleTapToGlance),
                     lockHomeLayout = s.optBoolean("lockHomeLayout", s.optBoolean("lock_home_layout", cur.lockHomeLayout)),
+                    showEditGridGuides = s.optBoolean("showEditGridGuides", cur.showEditGridGuides),
+                    widgetEditToolbarMode = runCatching {
+                        WidgetEditToolbarMode.valueOf(s.optString("widgetEditToolbarMode", cur.widgetEditToolbarMode.name))
+                    }.getOrDefault(cur.widgetEditToolbarMode),
                     autoArrangeTiles = s.optBoolean("autoArrangeTiles", cur.autoArrangeTiles),
                     fullWallpaperEnabled = s.optBoolean("fullWallpaperEnabled", cur.fullWallpaperEnabled),
                     turnstileAnimationEnabled = s.optBoolean("turnstileAnimationEnabled", cur.turnstileAnimationEnabled),

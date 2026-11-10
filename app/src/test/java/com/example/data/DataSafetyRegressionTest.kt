@@ -1261,6 +1261,33 @@ class DataSafetyRegressionTest {
         assertTrue(prefs.getBoolean("pending_restore_json", false))
     }
 
+    @Test fun widgetEditUiSettingsPersistAndExportWithSafeLegacyDefaults() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val initial = repo.loadSettings()
+        assertFalse(initial.showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.ANCHORED, initial.widgetEditToolbarMode)
+
+        repo.saveSettings(initial.copy(
+            showEditGridGuides = true,
+            widgetEditToolbarMode = WidgetEditToolbarMode.FLOATING
+        ))
+        val saved = repo.loadSettings()
+        assertTrue(saved.showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.FLOATING, saved.widgetEditToolbarMode)
+        val exported = JSONObject(repo.exportBackupJson()).getJSONObject("settings")
+        assertTrue(exported.getBoolean("showEditGridGuides"))
+        assertEquals("FLOATING", exported.getString("widgetEditToolbarMode"))
+
+        // Invalid legacy types and unknown enum never break Home or delete widget rows.
+        assertTrue(prefs.edit()
+            .putInt("show_edit_grid_guides", 1)
+            .putString("widget_edit_toolbar_mode", "UNKNOWN").commit())
+        val recovered = repo.loadSettings()
+        assertFalse(recovered.showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.ANCHORED, recovered.widgetEditToolbarMode)
+    }
+
     // F3 test-first contract: one target row changes; widget identity and neighbors survive.
     @Test fun cornerResizePersistsOriginAndSpanWithoutDisplacingWidgetNeighbors() = runBlocking {
         val target = TileEntity("f3_target", "Clock", tileType = TileType.WIDGET,

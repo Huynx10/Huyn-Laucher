@@ -788,6 +788,9 @@ data class AppFolder(
 
 enum class WallpaperSource { SYSTEM, CUSTOM, LUMIA }
 
+/** Position of the single-tile edit toolbar. */
+enum class WidgetEditToolbarMode { ANCHORED, FLOATING }
+
 @Immutable
 data class LauncherSettings(
     val accentColorHex: String = "#0078D7", // Lumia Cyan
@@ -806,6 +809,8 @@ data class LauncherSettings(
     val pageTransitionEffect: PageTransitionEffect = PageTransitionEffect.TURNSTILE_3D,
     val doubleTapToGlance: Boolean = true,
     val lockHomeLayout: Boolean = false,
+    val showEditGridGuides: Boolean = false,
+    val widgetEditToolbarMode: WidgetEditToolbarMode = WidgetEditToolbarMode.ANCHORED,
     val autoArrangeTiles: Boolean = false,
     val fullWallpaperEnabled: Boolean = true,
     val wallpaperSource: WallpaperSource = WallpaperSource.SYSTEM,
