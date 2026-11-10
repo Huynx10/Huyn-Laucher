@@ -279,6 +279,18 @@ fun LumiaStartGrid(
     var resizeOffsetX by remember { mutableFloatStateOf(0f) }
     var resizeOffsetY by remember { mutableFloatStateOf(0f) }
 
+    // Back/deselect or layout locking invalidates an in-flight resize preview.
+    // Never leave a staged rectangle alive after its edit session has ended.
+    LaunchedEffect(selectedTileId, settings.lockHomeLayout) {
+        if (resizingTileId != null &&
+            (resizingTileId != selectedTileId || settings.lockHomeLayout)) {
+            resizingTileId = null
+            resizingCorner = null
+            resizeOffsetX = 0f
+            resizeOffsetY = 0f
+        }
+    }
+
     val selectedTileOnThisPage = remember(tiles, selectedTileId) {
         tiles.find { it.id == selectedTileId }
     }
@@ -938,9 +950,13 @@ fun LumiaStartGrid(
                                         },
                                         onResizeDragEnd = {
                                             val corner = resizingCorner
-                                            val candidate = if (resizingTileId == tile.id &&
-                                                selectedTileId == tile.id && !settings.lockHomeLayout &&
-                                                corner != null
+                                            val candidate = if (isCornerResizeCommitAllowed(
+                                                    tileId = tile.id,
+                                                    resizingTileId = resizingTileId,
+                                                    selectedTileId = selectedTileId,
+                                                    corner = corner,
+                                                    lockHomeLayout = settings.lockHomeLayout
+                                                )
                                             ) {
                                                 val threshold = (cellStepPx * 0.6f).coerceAtLeast(1f)
                                                 resolveTileCornerResize(

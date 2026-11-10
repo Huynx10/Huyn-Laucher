@@ -46,3 +46,19 @@ internal fun resolveTileCornerResize(
     if (!isCornerResizePlacementClear(result, occupied)) return null
     return result
 }
+
+/**
+ * Ignore a late UP after Back, deselection, a different drag owner, or a lock.
+ * Only the active selected tile may persist a completed corner gesture.
+ */
+internal fun isCornerResizeCommitAllowed(
+    tileId: String,
+    resizingTileId: String?,
+    selectedTileId: String?,
+    corner: ResizeCorner?,
+    lockHomeLayout: Boolean
+): Boolean =
+    !lockHomeLayout &&
+        resizingTileId == tileId &&
+        selectedTileId == tileId &&
+        corner != null

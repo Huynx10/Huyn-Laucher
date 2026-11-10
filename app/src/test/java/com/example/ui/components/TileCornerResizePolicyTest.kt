@@ -4,6 +4,8 @@ import com.example.data.model.TileEntity
 import com.example.data.model.TileSize
 import com.example.data.model.TileType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -15,6 +17,20 @@ class TileCornerResizePolicyTest {
             size = TileSize.MEDIUM, gridX = start.x, gridY = start.y,
             customSpanX = start.width, customSpanY = start.height,
             widgetResizeMode = mode, widgetMinSpanX = minX, widgetMinSpanY = minY)
+
+    @Test fun backDeselectAndLayoutLockBlockLateCornerCommit() {
+        val tileId = "widget"
+        for (corner in ResizeCorner.entries) {
+            assertTrue(isCornerResizeCommitAllowed(tileId, tileId, tileId, corner, false))
+            // Back clears selection; the late pointer UP must never write.
+            assertFalse(isCornerResizeCommitAllowed(tileId, tileId, null, corner, false))
+            assertFalse(isCornerResizeCommitAllowed(tileId, tileId, "other", corner, false))
+            assertFalse(isCornerResizeCommitAllowed(tileId, "other", tileId, corner, false))
+            assertFalse(isCornerResizeCommitAllowed(tileId, null, tileId, corner, false))
+            assertFalse(isCornerResizeCommitAllowed(tileId, tileId, tileId, corner, true))
+        }
+        assertFalse(isCornerResizeCommitAllowed(tileId, tileId, tileId, null, false))
+    }
 
     @Test fun allFourCornersKeepOppositeCornerFixed() {
         val expectations = mapOf(
