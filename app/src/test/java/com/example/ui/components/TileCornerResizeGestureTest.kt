@@ -87,6 +87,30 @@ class TileCornerResizeGestureTest {
         }
     }
 
+    @Test fun narrowSixColumnTileDoesNotOverlapCornerPointerTargets() {
+        // A 1x1 tile around 52dp is common with six Home columns on a narrow device.
+        compose.setContent {
+            TileView(
+                tile = tile.copy(size = TileSize.SMALL),
+                settings = settings, telemetry = SystemTelemetry(),
+                isTileSelected = true, isHomeEditMode = true,
+                onClick = {}, onLongClick = {}, onResize = {}, onUnpin = {},
+                modifier = Modifier.size(52.dp)
+            )
+        }
+        fun bounds(corner: ResizeCorner) =
+            compose.onNodeWithTag("tile_resize_corner_" + corner.name.lowercase() + "_gesture")
+                .fetchSemanticsNode().boundsInRoot
+        val topStart = bounds(ResizeCorner.TOP_START)
+        val topEnd = bounds(ResizeCorner.TOP_END)
+        val bottomStart = bounds(ResizeCorner.BOTTOM_START)
+        val bottomEnd = bounds(ResizeCorner.BOTTOM_END)
+        assertTrue("Top handles overlap horizontally", topStart.right <= topEnd.left)
+        assertTrue("Bottom handles overlap horizontally", bottomStart.right <= bottomEnd.left)
+        assertTrue("Left handles overlap vertically", topStart.bottom <= bottomStart.top)
+        assertTrue("Right handles overlap vertically", topEnd.bottom <= bottomEnd.top)
+    }
+
     @Test fun fixedWidgetDoesNotShowInertCornerHandles() {
         compose.setContent {
             TileView(

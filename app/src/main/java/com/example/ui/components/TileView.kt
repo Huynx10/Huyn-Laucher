@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -336,7 +337,7 @@ fun TileView(
 
         // Single-Tile Edit Overlay: ONLY shown on the 1 tile that was long-pressed!
         if (isTileSelected) {
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.34f))
@@ -374,8 +375,13 @@ fun TileView(
                         )
                     }
                 } else if (tileSupportsCornerResize(tile)) {
-                    // Four independent corner gestures; never convert top/left drags into a
-                    // bottom-right resize. Compact SMALL touch regions avoid overlap.
+                    // A SMALL 1x1 tile can be narrower than 64dp in the six-column mode.
+                    // Cap each hit target at half the measured tile to prevent opposite
+                    // corners from competing for the same pointer-down gesture.
+                    val preferredCornerSize = if (tile.size == TileSize.SMALL) 32.dp else 48.dp
+                    val nonOverlappingSize = ((minOf(maxWidth, maxHeight) - 4.dp) / 2)
+                        .coerceAtLeast(0.dp)
+                    val cornerHitSize = minOf(preferredCornerSize, nonOverlappingSize)
                     ResizeCorner.entries.forEach { corner ->
                         val alignment = when (corner) {
                             ResizeCorner.TOP_START -> Alignment.TopStart
@@ -393,7 +399,7 @@ fun TileView(
                             modifier = Modifier
                                 .align(alignment)
                                 .padding(2.dp)
-                                .size(if (tile.size == TileSize.SMALL) 32.dp else 48.dp)
+                                .size(cornerHitSize)
                                 .semantics { contentDescription = "Kéo góc $label để đổi kích thước ô" }
                                 .pointerInput(tile.id, tile.size, corner) {
                                     detectDragGestures(
