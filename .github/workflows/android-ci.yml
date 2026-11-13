@@ -2,9 +2,13 @@ name: Lumia Launcher Android CI
 
 on:
   push:
-    branches: [ "main", "master", "develop", "beta/**", "fix/**" ]
+    branches: [ "main", "master", "develop", "beta/**", "fix/**", "feat/**" ]
   pull_request:
     branches: [ "main", "master", "develop", "beta/**" ]
+
+# Lint/test code from pull requests with a read-only GitHub token.
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
@@ -25,7 +29,12 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Verify CI automation safety policy
+        id: ci_policy
+        run: bash scripts/test-ci-gradle-network-retry.sh
+
       - name: Release signing regression checks
+        id: signing
         run: |
           bash scripts/test-verify-beta-signature.sh
           bash scripts/test-verify-beta-keystore.sh
@@ -35,9 +44,13 @@ jobs:
           bash scripts/test-tile-style-atomic-save.sh
 
       - name: Android Lint (API compatibility)
-        run: gradle :app:lintDebug
+        id: lint
+        # Network-only bounded retry (e.g. 504 while downloading dependencies).
+        # Source/lint errors always fail on the first attempt.
+        run: bash scripts/ci-gradle-network-retry.sh gradle :app:lintDebug
 
       - name: Run Unit & Robolectric Tests
+        id: unit
         run: gradle :app:testDebugUnitTest
 
       - name: Create temporary debug signing key
@@ -46,9 +59,11 @@ jobs:
           keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Assemble Debug APK
+        id: apk
         run: gradle :app:assembleDebug
 
       - name: Verify isolated internal P1-B1 build (no release or upload)
+        id: package
         run: |
           APK="$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f -print -quit)"
           test -n "$APK" && test -f "$APK"
@@ -60,3 +75,37 @@ jobs:
           grep -Fq "application-label:'Lumia P1-B1 (internal)'" /tmp/lumia-p1b1-badging.txt
           # Provenance only; no P1-B1 binary is delivered or saved as a GitHub artifact.
           sha256sum "$APK"
+
+      - name: Record CI gate evidence (no writes or release)
+        if: ${{ always() }}
+        env:
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CHECKOUT_SHA: ${{ github.sha }}
+          EVENT_KIND: ${{ github.event_name }}
+          STEP_POLICY: ${{ steps.ci_policy.outcome }}
+          STEP_SIGNING: ${{ steps.signing.outcome }}
+          STEP_LINT: ${{ steps.lint.outcome }}
+          STEP_UNIT: ${{ steps.unit.outcome }}
+          STEP_APK: ${{ steps.apk.outcome }}
+          STEP_PACKAGE: ${{ steps.package.outcome }}
+        shell: bash
+        run: |
+          {
+            echo '### Huyn Cloud CI · verified step outcomes'
+            echo ''
+            echo '| Evidence | Value |'
+            echo '| --- | --- |'
+            printf '| Event | `%s` |\n' "$EVENT_KIND"
+            printf '| Source HEAD | `%s` |\n' "$SOURCE_HEAD_SHA"
+            printf '| Actual checkout | `%s` |\n' "$CHECKOUT_SHA"
+            printf '| Run / attempt | `%s / %s` |\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            printf '| CI policy tests | %s |\n' "${STEP_POLICY:-unknown}"
+            printf '| Signing regression | %s |\n' "${STEP_SIGNING:-unknown}"
+            printf '| Android Lint (bounded network retry) | %s |\n' "${STEP_LINT:-unknown}"
+            printf '| Unit & Robolectric (no automatic test retry) | %s |\n' "${STEP_UNIT:-unknown}"
+            printf '| Assemble debug | %s |\n' "${STEP_APK:-unknown}"
+            printf '| Debug identity check | %s |\n' "${STEP_PACKAGE:-unknown}"
+            echo ''
+            echo 'This read-only summary cannot override failure, approve a PR, merge, sign, upload, or release.'
+            echo 'Device testing is outside this automated workflow and is never a CI gate.'
+          } >> "$GITHUB_STEP_SUMMARY"

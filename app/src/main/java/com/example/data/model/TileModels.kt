@@ -497,8 +497,8 @@ data class TileEntity(
         if (!hasBoundOrLinkedWidget()) {
             return TileSize.entries
         }
-        val minX = widgetMinSpanX.coerceIn(1, 4)
-        val minY = widgetMinSpanY.coerceIn(1, 4)
+        val minX = widgetMinSpanX.coerceAtLeast(1)
+        val minY = widgetMinSpanY.coerceAtLeast(1)
         val canResizeH = (widgetResizeMode and 1) != 0
         val canResizeV = (widgetResizeMode and 2) != 0
 
@@ -515,7 +515,9 @@ data class TileEntity(
         return if (matching.isNotEmpty()) {
             (matching + size).distinct().sortedBy { it.ordinal }
         } else {
-            listOf(TileSize.MEDIUM, TileSize.WIDE, TileSize.LARGE)
+            // No legacy preset can fit a provider exceeding 4x4; keep the existing
+            // size as a stable sentinel rather than exposing undersized choices.
+            listOf(size)
         }
     }
 }
@@ -788,6 +790,9 @@ data class AppFolder(
 
 enum class WallpaperSource { SYSTEM, CUSTOM, LUMIA }
 
+/** Position of the single-tile edit toolbar. */
+enum class WidgetEditToolbarMode { ANCHORED, FLOATING }
+
 @Immutable
 data class LauncherSettings(
     val accentColorHex: String = "#0078D7", // Lumia Cyan
@@ -806,6 +811,8 @@ data class LauncherSettings(
     val pageTransitionEffect: PageTransitionEffect = PageTransitionEffect.TURNSTILE_3D,
     val doubleTapToGlance: Boolean = true,
     val lockHomeLayout: Boolean = false,
+    val showEditGridGuides: Boolean = false,
+    val widgetEditToolbarMode: WidgetEditToolbarMode = WidgetEditToolbarMode.ANCHORED,
     val autoArrangeTiles: Boolean = false,
     val fullWallpaperEnabled: Boolean = true,
     val wallpaperSource: WallpaperSource = WallpaperSource.SYSTEM,

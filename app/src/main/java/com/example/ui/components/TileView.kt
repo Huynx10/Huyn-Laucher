@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -96,7 +97,7 @@ fun TileView(
     onResize: () -> Unit,
     onIncreaseSize: () -> Unit = onResize,
     onDecreaseSize: () -> Unit = onResize,
-    onResizeDragStart: () -> Unit = {},
+    onResizeDragStart: (ResizeCorner) -> Unit = { _ -> },
     onResizeDrag: (Float, Float) -> Unit = { _, _ -> },
     onResizeDragEnd: () -> Unit = {},
     onResizeDragCancel: () -> Unit = {},
@@ -336,7 +337,7 @@ fun TileView(
 
         // Single-Tile Edit Overlay: ONLY shown on the 1 tile that was long-pressed!
         if (isTileSelected) {
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.34f))
@@ -373,189 +374,64 @@ fun TileView(
                             modifier = Modifier.size(15.dp)
                         )
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .size(48.dp)
-                            .clickable { onUnpin() }
-                            .testTag("tile_remove_${tile.id}"),
-                        contentAlignment = Alignment.TopEnd
-                    ) {
+                } else if (tileSupportsCornerResize(tile)) {
+                    // A SMALL 1x1 tile can be narrower than 64dp in the six-column mode.
+                    // Cap each hit target at half the measured tile to prevent opposite
+                    // corners from competing for the same pointer-down gesture.
+                    val preferredCornerSize = if (tile.size == TileSize.SMALL) 32.dp else 48.dp
+                    val nonOverlappingSize = ((minOf(maxWidth, maxHeight) - 4.dp) / 2)
+                        .coerceAtLeast(0.dp)
+                    val cornerHitSize = minOf(preferredCornerSize, nonOverlappingSize)
+                    ResizeCorner.entries.forEach { corner ->
+                        val alignment = when (corner) {
+                            ResizeCorner.TOP_START -> Alignment.TopStart
+                            ResizeCorner.TOP_END -> Alignment.TopEnd
+                            ResizeCorner.BOTTOM_START -> Alignment.BottomStart
+                            ResizeCorner.BOTTOM_END -> Alignment.BottomEnd
+                        }
+                        val label = when (corner) {
+                            ResizeCorner.TOP_START -> "trên trái"
+                            ResizeCorner.TOP_END -> "trên phải"
+                            ResizeCorner.BOTTOM_START -> "dưới trái"
+                            ResizeCorner.BOTTOM_END -> "dưới phải"
+                        }
                         Box(
                             modifier = Modifier
-                                .padding(5.dp)
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.82f))
-                                .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                                .align(alignment)
+                                .padding(2.dp)
+                                .size(cornerHitSize)
+                                .semantics { contentDescription = "Kéo góc $label để đổi kích thước ô" }
+                                .pointerInput(tile.id, tile.size, corner) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onResizeDragStart(corner)
+                                        },
+                                        onDragEnd = { onResizeDragEnd() },
+                                        onDragCancel = { onResizeDragCancel() },
+                                        onDrag = { change, amount ->
+                                            change.consume()
+                                            onResizeDrag(amount.x, amount.y)
+                                        }
+                                    )
+                                }
+                                .testTag("tile_resize_corner_${corner.name.lowercase()}_${tile.id}"),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Bỏ ô khỏi trang",
-                                tint = Color.White, modifier = Modifier.size(16.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(11.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(Color.Black.copy(alpha = 0.78f))
+                                    .border(1.5.dp, Color.White, RoundedCornerShape(3.dp))
+                            )
                         }
-                    }
-                    // Interactive Border/Edge Drag Handles (One UI style resize handles along borders)
-                    val handlePillLength by animateDpAsState(
-                        targetValue = when {
-                            isResizingActive -> if (tile.size == TileSize.SMALL) 22.dp else 38.dp
-                            else -> if (tile.size == TileSize.SMALL) 16.dp else 28.dp
-                        },
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        ),
-                        label = "resizeHandlePillLength"
-                    )
-
-                    val handlePillThickness by animateDpAsState(
-                        targetValue = if (isResizingActive) 7.dp else 5.dp,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        ),
-                        label = "resizeHandlePillThickness"
-                    )
-
-                    // 1. Right Border Drag Handle
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(18.dp)
-                            .fillMaxHeight(0.55f)
-                            .pointerInput(tile.id, tile.size) {
-                                detectDragGestures(
-                                    onDragStart = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onResizeDragStart()
-                                    },
-                                    onDragEnd = { onResizeDragEnd() },
-                                    onDragCancel = { onResizeDragCancel() },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        onResizeDrag(dragAmount.x, 0f)
-                                    }
-                                )
-                            }
-                            .testTag("tile_resize_edge_right_${tile.id}"),
-                        contentAlignment = Alignment.CenterEnd
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(end = 1.dp)
-                                .width(handlePillThickness)
-                                .height(handlePillLength)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(Color.White)
-                                .border(1.dp, Color(0xFF0078D7), RoundedCornerShape(3.dp))
-                        )
-                    }
-
-                    // 2. Bottom Border Drag Handle
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth(0.5f)
-                            .height(18.dp)
-                            .pointerInput(tile.id, tile.size) {
-                                detectDragGestures(
-                                    onDragStart = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onResizeDragStart()
-                                    },
-                                    onDragEnd = { onResizeDragEnd() },
-                                    onDragCancel = { onResizeDragCancel() },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        onResizeDrag(0f, dragAmount.y)
-                                    }
-                                )
-                            }
-                            .testTag("tile_resize_edge_bottom_${tile.id}"),
-                        contentAlignment = Alignment.BottomCenter
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(bottom = 1.dp)
-                                .width(handlePillLength)
-                                .height(handlePillThickness)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(Color.White)
-                                .border(1.dp, Color(0xFF0078D7), RoundedCornerShape(3.dp))
-                        )
-                    }
-
-                    // 3. Left Border Drag Handle (drag left to expand, drag right to shrink)
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .width(16.dp)
-                            .fillMaxHeight(0.5f)
-                            .pointerInput(tile.id, tile.size) {
-                                detectDragGestures(
-                                    onDragStart = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onResizeDragStart()
-                                    },
-                                    onDragEnd = { onResizeDragEnd() },
-                                    onDragCancel = { onResizeDragCancel() },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        onResizeDrag(-dragAmount.x, 0f)
-                                    }
-                                )
-                            },
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(start = 1.dp)
-                                .width(handlePillThickness)
-                                .height(handlePillLength)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(Color.White.copy(alpha = 0.85f))
-                                .border(0.8.dp, Color(0xFF0078D7), RoundedCornerShape(2.dp))
-                        )
-                    }
-
-                    // One unobtrusive corner drag target; edge handles remain available.
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(3.dp)
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF0078D7))
-                            .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
-                            .semantics { contentDescription = "Kéo góc để đổi kích thước ô" }
-                            .pointerInput(tile.id, tile.size) {
-                                detectDragGestures(
-                                    onDragStart = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onResizeDragStart()
-                                    },
-                                    onDragEnd = { onResizeDragEnd() },
-                                    onDragCancel = { onResizeDragCancel() },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        onResizeDrag(dragAmount.x, dragAmount.y)
-                                    }
-                                )
-                            }
-                            .testTag("tile_resize_corner_${tile.id}"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(12.dp)
-                                .border(2.dp, Color.White, RoundedCornerShape(2.dp))
-                        )
                     }
                 }
 
                 if (tile.size != TileSize.SMALL) {
                     Text(
-                        text = "${tile.customSpanX.takeIf { it > 0 } ?: tile.size.spanX}×${tile.effectiveSpanY()} • Kéo viền để đổi cỡ",
+                        text = if (tileSupportsCornerResize(tile)) "${tile.customSpanX.takeIf { it > 0 } ?: tile.size.spanX}×${tile.effectiveSpanY()} • Kéo góc để đổi cỡ" else "Tiện ích không hỗ trợ đổi kích thước",
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -592,6 +468,7 @@ internal fun tileEditAccessibilityActions(
         TileEditAccessibilityAction.MOVE_UP,
         TileEditAccessibilityAction.MOVE_DOWN
     )
+    if (!tileSupportsCornerResize(tile)) return result
     val allowed = tile.allowedSizesForTile()
     val index = allowed.indexOf(tile.size)
     if (index > 0) result += TileEditAccessibilityAction.SHRINK
