@@ -599,6 +599,15 @@ class LauncherRepository(
     ) {
         val totalCols = if (loadSettings().showMoreTiles) 6 else 4
         val newSpanX = newSize.effectiveSpanX(totalCols)
+        val newSpanY = newSize.effectiveSpanY()
+        // Legacy size presets cannot override provider minimums or fixed axes.
+        // A widget with a custom 6x8 span must never silently shrink to 4x4.
+        if (target.hasBoundOrLinkedWidget()) {
+            if ((target.widgetResizeMode and 3) == 0 ||
+                target.constrainedResizeSpans(newSpanX, newSpanY, totalCols) !=
+                    (newSpanX to newSpanY)
+            ) return
+        }
         val clampedX = target.gridX.coerceAtLeast(0).coerceAtMost((totalCols - newSpanX).coerceAtLeast(0))
         val clampedY = target.gridY.coerceAtLeast(0)
         val resizedTarget = target.copy(size = newSize, customSpanX = 0, customSpanY = 0,
