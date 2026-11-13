@@ -1384,4 +1384,22 @@ class DataSafetyRegressionTest {
         assertEquals(snapshot, db.tileDao().getAllTiles())
     }
 
+
+    @Test fun oversizedWidgetProviderRejectsLegacyPresetResizeWithoutDataLoss() = runBlocking {
+        val tall = TileEntity(
+            id = "f3_tall_provider", title = "Tall widget", tileType = TileType.WIDGET,
+            appWidgetId = 1938, widgetProvider = "example/.Tall",
+            widgetMinSpanX = 5, widgetMinSpanY = 8, widgetResizeMode = 3,
+            size = TileSize.LARGE, pageId = "page_home_1",
+            gridX = 0, gridY = 1, customSpanX = 6, customSpanY = 8
+        )
+        db.tileDao().insertOrUpdate(tall)
+        // Legacy presets top out at 4x4; none may shrink this provider.
+        assertEquals(listOf(TileSize.LARGE), tall.allowedSizesForTile())
+        repo.stepTileSize(tall.id, true)
+        repo.stepTileSize(tall.id, false)
+        repo.setTileSize(tall.id, TileSize.SMALL)
+        repo.setTileSize(tall.id, TileSize.LARGE)
+        assertEquals(tall, db.tileDao().getAllTiles().single())
+    }
 }
