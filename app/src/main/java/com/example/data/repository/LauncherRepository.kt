@@ -2361,7 +2361,7 @@ class LauncherRepository(
                             appWidgetId = restoredWidgetId,
                             widgetProvider = parsedProvider,
                             widgetMinSpanX = obj.optInt("widgetMinSpanX", 1).coerceIn(1, 8),
-                            widgetMinSpanY = obj.optInt("widgetMinSpanY", 1).coerceIn(1, 4),
+                            widgetMinSpanY = obj.optInt("widgetMinSpanY", 1).coerceIn(1, 8),
                             widgetResizeMode = obj.optInt("widgetResizeMode", 3)
                         )
                     )
