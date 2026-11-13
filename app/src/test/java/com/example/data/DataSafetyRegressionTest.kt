@@ -1329,7 +1329,7 @@ class DataSafetyRegressionTest {
         assertEquals(WidgetEditToolbarMode.ANCHORED, repo.loadSettings().widgetEditToolbarMode)
     }
 
-    @Test fun eightColumnTileAndWidgetMinimumSurviveBackupRestore() = runBlocking {
+    @Test fun eightColumnTileAndBothWidgetMinimumSpansSurviveBackupRestore() = runBlocking {
         repo.ensureDefaultTiles()
         db.tileDao().clearAll()
         val eightColumnApp = TileEntity(
@@ -1339,9 +1339,9 @@ class DataSafetyRegressionTest {
         val wideProvider = TileEntity(
             id = "f3_wide_provider", title = "Wide widget",
             tileType = TileType.WIDGET, appWidgetId = 1928,
-            widgetProvider = "example/.WideWidget", widgetMinSpanX = 5,
+            widgetProvider = "example/.WideWidget", widgetMinSpanX = 5, widgetMinSpanY = 8,
             widgetResizeMode = 3, pageId = "page_home_1",
-            gridX = 0, gridY = 3, customSpanX = 6, customSpanY = 2
+            gridX = 0, gridY = 3, customSpanX = 6, customSpanY = 8
         )
         db.tileDao().insertAll(listOf(eightColumnApp, wideProvider))
 
@@ -1353,6 +1353,8 @@ class DataSafetyRegressionTest {
         assertEquals(8, restored.getValue(eightColumnApp.id).customSpanX)
         assertEquals(6, restored.getValue(wideProvider.id).customSpanX)
         assertEquals(5, restored.getValue(wideProvider.id).widgetMinSpanX)
+        assertEquals(8, restored.getValue(wideProvider.id).widgetMinSpanY)
+        assertEquals(8, restored.getValue(wideProvider.id).customSpanY)
         // Android widget IDs are device-specific and intentionally require rebind.
         assertEquals(-1, restored.getValue(wideProvider.id).appWidgetId)
     }
