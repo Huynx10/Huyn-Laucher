@@ -1260,4 +1260,146 @@ class DataSafetyRegressionTest {
         assertEquals("legacy", prefs.getString("home_initialized", null))
         assertTrue(prefs.getBoolean("pending_restore_json", false))
     }
+
+    @Test fun widgetEditUiSettingsPersistAndExportWithSafeLegacyDefaults() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("lumia_launcher_prefs", Context.MODE_PRIVATE)
+        val initial = repo.loadSettings()
+        assertFalse(initial.showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.ANCHORED, initial.widgetEditToolbarMode)
+
+        repo.saveSettings(initial.copy(
+            showEditGridGuides = true,
+            widgetEditToolbarMode = WidgetEditToolbarMode.FLOATING
+        ))
+        val saved = repo.loadSettings()
+        assertTrue(saved.showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.FLOATING, saved.widgetEditToolbarMode)
+        val exported = JSONObject(repo.exportBackupJson()).getJSONObject("settings")
+        assertTrue(exported.getBoolean("showEditGridGuides"))
+        assertEquals("FLOATING", exported.getString("widgetEditToolbarMode"))
+
+        // Invalid legacy types and unknown enum never break Home or delete widget rows.
+        assertTrue(prefs.edit()
+            .putInt("show_edit_grid_guides", 1)
+            .putString("widget_edit_toolbar_mode", "UNKNOWN").commit())
+        val recovered = repo.loadSettings()
+        assertFalse(recovered.showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.ANCHORED, recovered.widgetEditToolbarMode)
+    }
+
+    @Test fun fixedProviderCannotMoveThroughResizeEndpoint() = runBlocking {
+        val fixed = TileEntity(
+            id = "fixed_widget", title = "Fixed", tileType = TileType.WIDGET,
+            appWidgetId = 1937, widgetProvider = "example/.Fixed",
+            widgetResizeMode = 0, pageId = "page_home_1",
+            gridX = 1, gridY = 1, customSpanX = 2, customSpanY = 2
+        )
+        db.tileDao().insertOrUpdate(fixed)
+        assertFalse(repo.resizeTileToRect(fixed.id, 0, 1, 2, 2, 4))
+        assertEquals(listOf(fixed), db.tileDao().getAllTiles())
+    }
+
+
+    @Test fun widgetEditPreferencesRoundTripThroughBackupAndOldBackups() = runBlocking {
+        repo.ensureDefaultTiles()
+        repo.saveSettings(repo.loadSettings().copy(
+            showEditGridGuides = true,
+            widgetEditToolbarMode = WidgetEditToolbarMode.FLOATING
+        ))
+        val exported = repo.exportBackupJson()
+        repo.saveSettings(repo.loadSettings().copy(
+            showEditGridGuides = false,
+            widgetEditToolbarMode = WidgetEditToolbarMode.ANCHORED
+        ))
+        assertTrue(repo.restoreFromJson(exported))
+        assertTrue(repo.loadSettings().showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.FLOATING, repo.loadSettings().widgetEditToolbarMode)
+
+        // Older archives omit the new fields; fallback must use safe existing values.
+        val legacy = JSONObject(exported)
+        legacy.getJSONObject("settings").remove("showEditGridGuides")
+        legacy.getJSONObject("settings").remove("widgetEditToolbarMode")
+        repo.saveSettings(repo.loadSettings().copy(
+            showEditGridGuides = false,
+            widgetEditToolbarMode = WidgetEditToolbarMode.ANCHORED
+        ))
+        assertTrue(repo.restoreFromJson(legacy.toString()))
+        assertFalse(repo.loadSettings().showEditGridGuides)
+        assertEquals(WidgetEditToolbarMode.ANCHORED, repo.loadSettings().widgetEditToolbarMode)
+    }
+
+    @Test fun eightColumnTileAndBothWidgetMinimumSpansSurviveBackupRestore() = runBlocking {
+        repo.ensureDefaultTiles()
+        db.tileDao().clearAll()
+        val eightColumnApp = TileEntity(
+            id = "f3_full_width", title = "Full width", pageId = "page_home_1",
+            gridX = 0, gridY = 0, customSpanX = 8, customSpanY = 2
+        )
+        val wideProvider = TileEntity(
+            id = "f3_wide_provider", title = "Wide widget",
+            tileType = TileType.WIDGET, appWidgetId = 1928,
+            widgetProvider = "example/.WideWidget", widgetMinSpanX = 5, widgetMinSpanY = 8,
+            widgetResizeMode = 3, pageId = "page_home_1",
+            gridX = 0, gridY = 3, customSpanX = 6, customSpanY = 8
+        )
+        db.tileDao().insertAll(listOf(eightColumnApp, wideProvider))
+
+        val backup = repo.exportBackupJson()
+        assertTrue(repo.restoreFromJson(backup))
+        val restored = db.tileDao().getAllTiles().associateBy { it.id }
+        // A narrow-window restore may reflow positions but must not lose the
+        // stored eight-column dimensions when the user returns to a tablet.
+        assertEquals(8, restored.getValue(eightColumnApp.id).customSpanX)
+        assertEquals(6, restored.getValue(wideProvider.id).customSpanX)
+        assertEquals(5, restored.getValue(wideProvider.id).widgetMinSpanX)
+        assertEquals(8, restored.getValue(wideProvider.id).widgetMinSpanY)
+        assertEquals(8, restored.getValue(wideProvider.id).customSpanY)
+        // Android widget IDs are device-specific and intentionally require rebind.
+        assertEquals(-1, restored.getValue(wideProvider.id).appWidgetId)
+    }
+
+    // F3 test-first contract: one target row changes; widget identity and neighbors survive.
+    @Test fun cornerResizePersistsOriginAndSpanWithoutDisplacingWidgetNeighbors() = runBlocking {
+        val target = TileEntity("f3_target", "Clock", tileType = TileType.WIDGET,
+            appWidgetId = 831, widgetProvider = "example/.Clock",
+            pageId = "page_home_1", gridX = 1, gridY = 2,
+            customSpanX = 2, customSpanY = 2)
+        val neighbor = TileEntity("f3_neighbor", "Neighbor", tileType = TileType.WIDGET,
+            appWidgetId = 832, widgetProvider = "example/.Other",
+            pageId = "page_home_1", gridX = 3, gridY = 2)
+        db.tileDao().insertAll(listOf(target, neighbor))
+
+        // TOP_START drag moves the origin while keeping right/bottom at (3,4).
+        assertTrue(repo.resizeTileToRect("f3_target", 0, 1, 3, 3))
+        val after = db.tileDao().getAllTiles().associateBy { it.id }
+        assertEquals(target.copy(gridX = 0, gridY = 1,
+            customSpanX = 3, customSpanY = 3), after["f3_target"])
+        assertEquals(neighbor, after["f3_neighbor"])
+        assertEquals(2, after.size)
+
+        // Expanding into the neighbor must fail closed, without moving either row.
+        val snapshot = db.tileDao().getAllTiles()
+        assertFalse(repo.resizeTileToRect("f3_target", 0, 1, 4, 3))
+        assertEquals(snapshot, db.tileDao().getAllTiles())
+    }
+
+
+    @Test fun oversizedWidgetProviderRejectsLegacyPresetResizeWithoutDataLoss() = runBlocking {
+        val tall = TileEntity(
+            id = "f3_tall_provider", title = "Tall widget", tileType = TileType.WIDGET,
+            appWidgetId = 1938, widgetProvider = "example/.Tall",
+            widgetMinSpanX = 5, widgetMinSpanY = 8, widgetResizeMode = 3,
+            size = TileSize.LARGE, pageId = "page_home_1",
+            gridX = 0, gridY = 1, customSpanX = 6, customSpanY = 8
+        )
+        db.tileDao().insertOrUpdate(tall)
+        // Legacy presets top out at 4x4; none may shrink this provider.
+        assertEquals(listOf(TileSize.LARGE), tall.allowedSizesForTile())
+        repo.stepTileSize(tall.id, true)
+        repo.stepTileSize(tall.id, false)
+        repo.setTileSize(tall.id, TileSize.SMALL)
+        repo.setTileSize(tall.id, TileSize.LARGE)
+        assertEquals(tall, db.tileDao().getAllTiles().single())
+    }
 }

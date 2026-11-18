@@ -48,6 +48,7 @@ import com.example.data.model.TileType
 import com.example.data.model.WidgetProviderItem
 import com.example.data.model.Wp10TileStyle
 import com.example.data.model.WallpaperSource
+import com.example.data.model.WidgetEditToolbarMode
 import com.example.ui.components.AppIconMemoryCache
 import com.example.ui.theme.DynamicAccentEngine
 import com.example.ui.widget.LumiaWidgetHostManager
@@ -530,6 +531,50 @@ class LauncherRepository(
         }
     }
 
+    /**
+     * F3 persistence boundary: caller resolves corner geometry, then this transaction
+     * validates the exact rectangle and writes only the selected tile.
+     * False means no write (invalid, occupied, unchanged or missing target).
+     */
+    suspend fun resizeTileToRect(
+        tileId: String, x: Int, y: Int, spanX: Int, spanY: Int, requestedColumns: Int = 0
+    ): Boolean = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            val tiles = tileDao.getAllTiles()
+            val target = tiles.firstOrNull { it.id == tileId } ?: return@withTransaction false
+            // An immovable provider remains non-resizable even if a UI drag is stale
+            // or a direct caller requests a position-only rectangle update.
+            if (target.hasBoundOrLinkedWidget() && (target.widgetResizeMode and 3) == 0) {
+                return@withTransaction false
+            }
+            val columns = when (requestedColumns) {
+                0 -> if (loadSettings().showMoreTiles) 6 else 4
+                4, 6, 8 -> requestedColumns
+                else -> return@withTransaction false
+            }
+            if (x < 0 || y < 0 || spanX < 1 || spanY < 1 ||
+                x.toLong() + spanX > columns || y.toLong() + spanY > 60L
+            ) return@withTransaction false
+            val allowed = target.constrainedResizeSpans(spanX, spanY, columns)
+            if (allowed.first != spanX || allowed.second != spanY) return@withTransaction false
+            if (x == target.gridX && y == target.gridY &&
+                spanX == target.effectiveSpanX(columns) &&
+                spanY == target.effectiveSpanY()
+            ) return@withTransaction false
+            val overlaps = tiles.any { other ->
+                other.id != tileId && other.pageId == target.pageId &&
+                    other.gridX.toLong() < x.toLong() + spanX &&
+                    other.gridX.toLong() + other.effectiveSpanX(columns) > x.toLong() &&
+                    other.gridY.toLong() < y.toLong() + spanY &&
+                    other.gridY.toLong() + other.effectiveSpanY() > y.toLong()
+            }
+            if (overlaps) return@withTransaction false
+            tileDao.update(target.copy(gridX = x, gridY = y,
+                customSpanX = spanX, customSpanY = spanY))
+            true
+        }
+    }
+
     suspend fun setTileSpans(tileId: String, requestedX: Int, requestedY: Int) = withContext(Dispatchers.IO) {
         val tiles = tileDao.getAllTiles()
         val target = tiles.find { it.id == tileId } ?: return@withContext
@@ -554,6 +599,15 @@ class LauncherRepository(
     ) {
         val totalCols = if (loadSettings().showMoreTiles) 6 else 4
         val newSpanX = newSize.effectiveSpanX(totalCols)
+        val newSpanY = newSize.effectiveSpanY()
+        // Legacy size presets cannot override provider minimums or fixed axes.
+        // A widget with a custom 6x8 span must never silently shrink to 4x4.
+        if (target.hasBoundOrLinkedWidget()) {
+            if ((target.widgetResizeMode and 3) == 0 ||
+                target.constrainedResizeSpans(newSpanX, newSpanY, totalCols) !=
+                    (newSpanX to newSpanY)
+            ) return
+        }
         val clampedX = target.gridX.coerceAtLeast(0).coerceAtMost((totalCols - newSpanX).coerceAtLeast(0))
         val clampedY = target.gridY.coerceAtLeast(0)
         val resizedTarget = target.copy(size = newSize, customSpanX = 0, customSpanY = 0,
@@ -1936,6 +1990,10 @@ class LauncherRepository(
             pageTransitionEffect = try { PageTransitionEffect.valueOf(transitionStr) } catch (_: Exception) { PageTransitionEffect.TURNSTILE_3D },
             doubleTapToGlance = readHomeBoolean("double_tap_to_glance", true),
             lockHomeLayout = readHomeBoolean("lock_home_layout", false),
+            showEditGridGuides = readHomeBoolean("show_edit_grid_guides", false),
+            widgetEditToolbarMode = runCatching {
+                WidgetEditToolbarMode.valueOf(readHomeString("widget_edit_toolbar_mode", "ANCHORED"))
+            }.getOrDefault(WidgetEditToolbarMode.ANCHORED),
             autoArrangeTiles = readHomeBoolean("auto_arrange_tiles", false),
             fullWallpaperEnabled = readHomeBoolean("full_wallpaper_enabled", true),
             wallpaperSource = runCatching { WallpaperSource.valueOf(readHomeString("wallpaper_source", "")) }
@@ -1993,6 +2051,8 @@ class LauncherRepository(
             .putString("page_transition_effect", settings.pageTransitionEffect.name)
             .putBoolean("double_tap_to_glance", settings.doubleTapToGlance)
             .putBoolean("lock_home_layout", settings.lockHomeLayout)
+            .putBoolean("show_edit_grid_guides", settings.showEditGridGuides)
+            .putString("widget_edit_toolbar_mode", settings.widgetEditToolbarMode.name)
             .putBoolean("auto_arrange_tiles", settings.autoArrangeTiles)
             .putBoolean("full_wallpaper_enabled", settings.fullWallpaperEnabled)
             .putString("wallpaper_source", settings.wallpaperSource.name)
@@ -2053,6 +2113,8 @@ class LauncherRepository(
             put("pageTransitionEffect", settings.pageTransitionEffect.name)
             put("doubleTapToGlance", settings.doubleTapToGlance)
             put("lockHomeLayout", settings.lockHomeLayout)
+            put("showEditGridGuides", settings.showEditGridGuides)
+            put("widgetEditToolbarMode", settings.widgetEditToolbarMode.name)
             put("autoArrangeTiles", settings.autoArrangeTiles)
             put("fullWallpaperEnabled", settings.fullWallpaperEnabled)
             put("turnstileAnimationEnabled", settings.turnstileAnimationEnabled)
@@ -2214,6 +2276,10 @@ class LauncherRepository(
                     pageTransitionEffect = try { PageTransitionEffect.valueOf(s.optString("pageTransitionEffect", cur.pageTransitionEffect.name)) } catch (_: Exception) { cur.pageTransitionEffect },
                     doubleTapToGlance = s.optBoolean("doubleTapToGlance", cur.doubleTapToGlance),
                     lockHomeLayout = s.optBoolean("lockHomeLayout", s.optBoolean("lock_home_layout", cur.lockHomeLayout)),
+                    showEditGridGuides = s.optBoolean("showEditGridGuides", cur.showEditGridGuides),
+                    widgetEditToolbarMode = runCatching {
+                        WidgetEditToolbarMode.valueOf(s.optString("widgetEditToolbarMode", cur.widgetEditToolbarMode.name))
+                    }.getOrDefault(cur.widgetEditToolbarMode),
                     autoArrangeTiles = s.optBoolean("autoArrangeTiles", cur.autoArrangeTiles),
                     fullWallpaperEnabled = s.optBoolean("fullWallpaperEnabled", cur.fullWallpaperEnabled),
                     turnstileAnimationEnabled = s.optBoolean("turnstileAnimationEnabled", cur.turnstileAnimationEnabled),
@@ -2291,7 +2357,7 @@ class LauncherRepository(
                             launcherUserSerial = importedIdentity.second,
                             launcherIdentityState = importedIdentity.third,
                             size = parsedSize,
-                            customSpanX = obj.optInt("customSpanX", 0).coerceIn(0, 6),
+                            customSpanX = obj.optInt("customSpanX", 0).coerceIn(0, 8),
                             customSpanY = obj.optInt("customSpanY", 0).coerceIn(0, 8),
                             orderIndex = obj.optInt("orderIndex", i),
                             pageId = obj.optString("pageId", "page_home_1"),
@@ -2303,8 +2369,8 @@ class LauncherRepository(
                             isLiveEnabled = obj.optBoolean("isLiveEnabled", true),
                             appWidgetId = restoredWidgetId,
                             widgetProvider = parsedProvider,
-                            widgetMinSpanX = obj.optInt("widgetMinSpanX", 1).coerceIn(1, 4),
-                            widgetMinSpanY = obj.optInt("widgetMinSpanY", 1).coerceIn(1, 4),
+                            widgetMinSpanX = obj.optInt("widgetMinSpanX", 1).coerceIn(1, 8),
+                            widgetMinSpanY = obj.optInt("widgetMinSpanY", 1).coerceIn(1, 8),
                             widgetResizeMode = obj.optInt("widgetResizeMode", 3)
                         )
                     )
